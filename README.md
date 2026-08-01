@@ -64,9 +64,43 @@ xcrun simctl launch booted callsystems.on-call-wizard
 
 The app runs without Supabase for UI development (local auth/onboarding). Supabase is required for cloud sync, edge functions, and production auth.
 
+## Website companion (GitHub Pages)
+
+The `docs/` folder is a web companion that shares the same Supabase project as the iOS app.
+
+### 1. Configure the website
+
+```bash
+cp docs/assets/js/config.example.js docs/assets/js/config.js
+```
+
+Set `supabaseUrl` and `supabaseAnonKey` to the **same values** as `Config/Secrets.xcconfig`.
+
+### 2. Enable GitHub Pages
+
+In GitHub → **Settings → Pages**, set **Source** to **Deploy from branch**, branch **main**, folder **/docs**.
+
+The site will be available at:
+
+**https://erdtheturd.github.io/on-call/**
+
+### 3. Configure Supabase Auth redirects
+
+In your Supabase project dashboard → **Authentication → URL Configuration**, set:
+
+- **Site URL**: `https://erdtheturd.github.io/on-call`
+- **Redirect URLs**: `https://erdtheturd.github.io/on-call/callback.html`
+
+These match `supabase/config.toml` for local development.
+
+### 4. Universal Links (optional)
+
+Replace `TEAMID` in `docs/.well-known/apple-app-site-association` with your Apple Team ID, then rebuild the iOS app. The app also supports the custom URL scheme `oncallwizard://`.
+
 ## Project layout
 
 ```
+docs/                    GitHub Pages website (landing, auth, dashboard)
 on-call wizard/          SwiftUI iOS app
 supabase/
   migrations/            Database schema
@@ -74,6 +108,7 @@ supabase/
 Config/
   Secrets.example.xcconfig
   Secrets.xcconfig       Local secrets (gitignored)
+  OnCallWizard.entitlements
 scripts/bin/supabase     Bundled Supabase CLI (macOS arm64)
 ```
 
