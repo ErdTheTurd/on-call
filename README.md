@@ -66,15 +66,17 @@ The app runs without Supabase for UI development (local auth/onboarding). Supaba
 
 ## Website companion (GitHub Pages)
 
-The `docs/` folder is a web companion that shares the same Supabase project as the iOS app.
+The `docs/` folder is a **web version of the On Call iOS app** — same auth flow, branding, doctor/hospital tabs, calendar, shifts, points, and tokens. It shares Supabase when configured and falls back to local offline storage like the app.
 
-### 1. Configure the website
+Open `docs/index.html` locally or deploy via GitHub Pages.
+
+### 1. Configure the website (optional — works offline without this)
 
 ```bash
 cp docs/assets/js/config.example.js docs/assets/js/config.js
 ```
 
-Set `supabaseUrl` and `supabaseAnonKey` to the **same values** as `Config/Secrets.xcconfig`.
+Set `supabaseUrl` and `supabaseAnonKey` to the **same values** as `Config/Secrets.xcconfig`. Without config, the site uses local offline auth identical to the iOS app demo mode.
 
 ### 2. Enable GitHub Pages
 
