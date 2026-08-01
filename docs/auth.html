@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in — On Call</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <script src="assets/js/config.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="./">
+        <span class="brand-icon" aria-hidden="true">✦</span>
+        <span>On Call</span>
+      </a>
+      <nav class="nav">
+        <a href="./">Home</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="auth-shell">
+    <div class="auth-card card">
+      <p class="eyebrow" style="margin-bottom: 8px;">Account</p>
+      <h1 style="margin: 0 0 8px; font-size: 1.6rem;">Sign in to On Call</h1>
+      <p class="muted" style="margin-bottom: 20px;">Use the same credentials as the iPhone app.</p>
+
+      <div id="config-warning" class="error hidden"></div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab active" id="tab-signin" type="button">Sign in</button>
+        <button class="tab" id="tab-signup" type="button">Create account</button>
+      </div>
+
+      <form id="auth-form">
+        <div id="role-group" class="field hidden">
+          <label>I am a</label>
+          <div class="role-pills">
+            <button type="button" class="role-pill active" data-role="doctor">Doctor</button>
+            <button type="button" class="role-pill" data-role="hospital">Hospital</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="email" required />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+        </div>
+
+        <p id="form-error" class="error hidden"></p>
+        <button class="btn btn-primary" type="submit" style="width: 100%; margin-top: 8px;">Continue</button>
+      </form>
+
+      <p class="muted" style="margin-top: 16px; text-align: center;">
+        Prefer mobile?
+        <a href="#" id="open-app-link">Open the iPhone app</a>
+      </p>
+    </div>
+  </main>
+
+  <script type="module">
+    import {
+      getSupabase,
+      isConfigured,
+      upsertProfile,
+      appDeepLink
+    } from "./assets/js/supabase-client.js";
+
+    const tabSignIn = document.getElementById("tab-signin");
+    const tabSignUp = document.getElementById("tab-signup");
+    const roleGroup = document.getElementById("role-group");
+    const form = document.getElementById("auth-form");
+    const formError = document.getElementById("form-error");
+    const configWarning = document.getElementById("config-warning");
+    const openAppLink = document.getElementById("open-app-link");
+
+    let mode = "signin";
+    let selectedRole = "doctor";
+
+    openAppLink.href = appDeepLink("auth");
+
+    if (!isConfigured()) {
+      configWarning.textContent = "Supabase is not configured yet. Copy docs/assets/js/config.example.js to config.js and add your project URL + anon key.";
+      configWarning.classList.remove("hidden");
+    }
+
+    tabSignIn.addEventListener("click", () => {
+      mode = "signin";
+      tabSignIn.classList.add("active");
+      tabSignUp.classList.remove("active");
+      roleGroup.classList.add("hidden");
+    });
+
+    tabSignUp.addEventListener("click", () => {
+      mode = "signup";
+      tabSignUp.classList.add("active");
+      tabSignIn.classList.remove("active");
+      roleGroup.classList.remove("hidden");
+    });
+
+    document.querySelectorAll(".role-pill").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".role-pill").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedRole = btn.dataset.role;
+      });
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      formError.classList.add("hidden");
+
+      if (!isConfigured()) {
+        formError.textContent = "Configure Supabase in docs/assets/js/config.js first.";
+        formError.classList.remove("hidden");
+        return;
+      }
+
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      const supabase = getSupabase();
+
+      try {
+        if (mode === "signup") {
+          const { data, error } = await supabase.auth.signUp({ email, password });
+          if (error) throw error;
+          if (data.user) {
+            await upsertProfile(data.user.id, email, selectedRole);
+          }
+        } else {
+          const { error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+        }
+
+        window.location.href = "dashboard.html";
+      } catch (err) {
+        formError.textContent = err.message || "Authentication failed.";
+        formError.classList.remove("hidden");
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["TEAMID.callsystems.on-call-wizard"],
+        "components": [
+          { "/": "/on-call/dashboard.html", "comment": "Web dashboard" },
+          { "/": "/on-call/auth.html", "comment": "Auth screen" },
+          { "/": "/on-call/shift/*", "comment": "Shift detail deep link" }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signing in… — On Call</title>
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <script src="assets/js/config.js"></script>
+</head>
+<body>
+  <main class="auth-shell">
+    <div class="card auth-card">
+      <p id="message" class="muted">Completing sign-in…</p>
+    </div>
+  </main>
+  <script type="module">
+    import { getSupabase, isConfigured } from "./assets/js/supabase-client.js";
+
+    const message = document.getElementById("message");
+
+    async function finishAuth() {
+      if (!isConfigured()) {
+        message.textContent = "Supabase is not configured.";
+        return;
+      }
+
+      const supabase = getSupabase();
+      const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+      if (error) {
+        message.textContent = error.message;
+        return;
+      }
+      window.location.replace("dashboard.html");
+    }
+
+    finishAuth();
+  </script>
+</body>
+</html>
