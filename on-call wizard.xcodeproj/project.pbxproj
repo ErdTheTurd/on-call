@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		16BC69B42FEB677500C31198 /* on-call wizard.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "on-call wizard.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		16BC69C22FEB678000C31198 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -32,9 +33,18 @@
 		16BC69AB2FEB677500C31198 = {
 			isa = PBXGroup;
 			children = (
+				16BC69C32FEB678000C31198 /* Config */,
 				16BC69B62FEB677500C31198 /* on-call wizard */,
 				16BC69B52FEB677500C31198 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		16BC69C32FEB678000C31198 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				16BC69C22FEB678000C31198 /* Secrets.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 		16BC69B52FEB677500C31198 /* Products */ = {
@@ -127,6 +137,7 @@
 /* Begin XCBuildConfiguration section */
 		16BC69BD2FEB677600C31198 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 16BC69C22FEB678000C31198 /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -190,6 +201,7 @@
 		};
 		16BC69BE2FEB677600C31198 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 16BC69C22FEB678000C31198 /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -246,6 +258,7 @@
 		};
 		16BC69C02FEB677600C31198 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 16BC69C22FEB678000C31198 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -253,6 +266,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/AppInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "On Call";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -277,6 +292,7 @@
 		};
 		16BC69C12FEB677600C31198 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 16BC69C22FEB678000C31198 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -284,6 +300,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/AppInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "On Call";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

@@ -1,0 +1,10 @@
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Local secrets (never commit)
+Config/Secrets.xcconfig
+
+# Dev artifacts
+.dev-screenshot.png
