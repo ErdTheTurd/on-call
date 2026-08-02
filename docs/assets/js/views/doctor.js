@@ -442,7 +442,13 @@ export function bindDoctor(root, state, update) {
     btn.addEventListener("click", () => update({ tab: btn.dataset.navTab, sheet: false }));
   });
   root.querySelectorAll("[data-close-sheet]").forEach((el) => {
-    el.addEventListener("click", () => update({ sheet: false, daySheet: null, tradeSheet: null }));
+    el.addEventListener("click", (e) => {
+      if (el.classList.contains("sheet-backdrop") && e.target !== el) return;
+      update({ sheet: false, daySheet: null, tradeSheet: null });
+    });
+  });
+  root.querySelectorAll("[data-sheet-panel]").forEach((panel) => {
+    panel.addEventListener("click", (e) => e.stopPropagation());
   });
   root.querySelector("[data-sign-out]")?.addEventListener("click", () => { signOut(); update({ route: "auth" }); });
   root.querySelectorAll("[data-open-sheet]").forEach((btn) => {

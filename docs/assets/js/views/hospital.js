@@ -658,7 +658,13 @@ export function bindHospital(root, state, update) {
     }));
   });
   root.querySelectorAll("[data-close-sheet]").forEach((el) => {
-    el.addEventListener("click", () => update({ sheet: false, daySheet: null, rateEditSpecialty: null }));
+    el.addEventListener("click", (e) => {
+      if (el.classList.contains("sheet-backdrop") && e.target !== el) return;
+      update({ sheet: false, daySheet: null, rateEditSpecialty: null });
+    });
+  });
+  root.querySelectorAll("[data-sheet-panel]").forEach((panel) => {
+    panel.addEventListener("click", (e) => e.stopPropagation());
   });
   root.querySelector("[data-sign-out]")?.addEventListener("click", () => { signOut(); update({ route: "auth" }); });
 

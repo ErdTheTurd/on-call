@@ -134,7 +134,7 @@ export function emptyState(title, subtitle, iconName = "moon") {
 export function sheet(title, body, onClose) {
   return `
     <div class="sheet-backdrop" data-close-sheet>
-      <div class="sheet-panel" role="dialog" aria-modal="true">
+      <div class="sheet-panel" role="dialog" aria-modal="true" data-sheet-panel>
         <div class="sheet-header">
           <h2>${escapeHtml(title)}</h2>
           <button class="btn-ghost" type="button" data-close-sheet>Done</button>
