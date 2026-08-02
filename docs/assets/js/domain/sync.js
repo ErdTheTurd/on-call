@@ -1,0 +1,389 @@
+import { getSupabase, isConfigured } from "../supabase-client.js";
+import { normalizeShift } from "../shift-math.js";
+import { defaultPolicy } from "./policy.js";
+
+function toDateOnly(iso) {
+  const d = new Date(iso);
+  return d.toISOString().slice(0, 10);
+}
+
+function mapShiftRow(row) {
+  return normalizeShift({
+    id: row.id,
+    hospital_id: row.hospital_id,
+    hospital_name: row.hospital_name,
+    specialty: row.specialty,
+    date: row.date,
+    rate_floor: row.rate_floor,
+    rate_unit: row.rate_unit,
+    duration_hours: row.duration_hours,
+    escalation: row.escalation
+  });
+}
+
+function mapAssignmentRow(row, shift) {
+  return {
+    id: row.id,
+    shiftID: row.shift_id,
+    shift: shift || { id: row.shift_id },
+    doctorID: row.doctor_id,
+    doctorName: row.doctor_name || "",
+    status: row.status,
+    assignedAt: row.assigned_at
+  };
+}
+
+function mapTokenRow(row) {
+  return {
+    id: row.id,
+    doctorID: row.doctor_id,
+    doctorName: row.doctor_name || "",
+    credential: row.credential || "MD",
+    hospitalID: row.hospital_id,
+    hospitalName: row.hospital_name || "",
+    date: row.shift_date,
+    specialty: row.specialty,
+    status: row.status,
+    requestedAt: row.requested_at,
+    approvedAt: row.approved_at || null,
+    shiftRate: row.shift_rate ?? null
+  };
+}
+
+export async function upsertDoctorProfile(profile) {
+  if (!isConfigured()) return profile;
+  const supabase = getSupabase();
+  const profileId = profile.userID || profile.id;
+  const row = {
+    profile_id: profileId,
+    first_name: profile.firstName,
+    last_name: profile.lastName,
+    credential: profile.credential,
+    npi: profile.npi,
+    specialties: profile.specialties || [],
+    verification_status: profile.verificationStatus || "pending",
+    dea_number: profile.deaNumber || "",
+    license_number: profile.licenseNumber || "",
+    license_state: profile.licenseState || "",
+    email: profile.email,
+    verification_flags: profile.verificationFlags || [],
+    npi_registry_name: profile.npiRegistryName || null,
+    npi_taxonomy: profile.npiTaxonomy || null
+  };
+  const { error } = await supabase.from("doctor_profiles").upsert(row);
+  if (error) throw error;
+  return { ...profile, id: profile.id || profileId, userID: profileId };
+}
+
+export async function upsertHospitalProfile(profile) {
+  if (!isConfigured()) return profile;
+  const supabase = getSupabase();
+  const row = {
+    id: profile.id,
+    profile_id: profile.userID,
+    name: profile.name,
+    npi: profile.npi,
+    email: profile.email,
+    verification_status: profile.verificationStatus || "pending",
+    verification_flags: profile.verificationFlags || [],
+    npi_registry_name: profile.npiRegistryName || null
+  };
+  const { data, error } = await supabase.from("hospital_profiles").upsert(row).select().single();
+  if (error) throw error;
+  if (profile.schedulingPolicy) {
+    await upsertPolicy(data.id, profile.schedulingPolicy);
+  }
+  return { ...profile, id: data.id };
+}
+
+export async function fetchAllShifts(hospitalID) {
+  if (!isConfigured()) return [];
+  const supabase = getSupabase();
+  let q = supabase.from("shifts").select("*").gte("date", new Date().toISOString()).order("date").limit(500);
+  if (hospitalID) q = q.eq("hospital_id", hospitalID);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data || []).map(mapShiftRow);
+}
+
+export async function upsertShift(shift) {
+  if (!isConfigured()) return shift;
+  const supabase = getSupabase();
+  const row = {
+    id: shift.id,
+    hospital_id: shift.hospitalID,
+    hospital_name: shift.hospital,
+    specialty: shift.specialty,
+    date: shift.start,
+    rate_floor: shift.rateFloor,
+    rate_unit: shift.rateUnit === "per hour" ? "per_hour" : "per_day",
+    duration_hours: shift.durationHours ?? 24,
+    escalation: shift.escalationMode ? { type: shift.escalationMode.type, rate: shift.escalationMode.rate } : {}
+  };
+  const { error } = await supabase.from("shifts").upsert(row);
+  if (error) throw error;
+  return shift;
+}
+
+export async function fetchAssignments(doctorID) {
+  if (!isConfigured()) return [];
+  const supabase = getSupabase();
+  let q = supabase.from("assignments").select("*, shifts(*)").order("assigned_at", { ascending: false });
+  if (doctorID) q = q.eq("doctor_id", doctorID);
+  const { data, error } = await q.limit(200);
+  if (error) throw error;
+  return (data || []).map((row) => mapAssignmentRow(row, row.shifts ? mapShiftRow(row.shifts) : null));
+}
+
+export async function createAssignment(shiftId, doctorId, meta = {}) {
+  if (!isConfigured()) return null;
+  const supabase = getSupabase();
+
+  if (meta.hospitalID && meta.shiftDate) {
+    try {
+      const { data, error } = await supabase.functions.invoke("accept-shift", {
+        body: {
+          shift_id: shiftId,
+          doctor_id: doctorId,
+          hospital_id: meta.hospitalID,
+          shift_date: toDateOnly(meta.shiftDate)
+        }
+      });
+      if (!error && data?.id) {
+        return mapAssignmentRow(data, meta.shift);
+      }
+    } catch {
+      /* fall through to direct insert */
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("assignments")
+    .insert({ shift_id: shiftId, doctor_id: doctorId, status: "scheduled" })
+    .select()
+    .single();
+  if (error) throw error;
+  return mapAssignmentRow(data, meta.shift);
+}
+
+export async function fetchTokenRequests(hospitalID, doctorID) {
+  if (!isConfigured()) return [];
+  const supabase = getSupabase();
+  let q = supabase.from("token_requests").select("*").order("requested_at", { ascending: false });
+  if (hospitalID) q = q.eq("hospital_id", hospitalID);
+  if (doctorID) q = q.eq("doctor_id", doctorID);
+  const { data, error } = await q.limit(200);
+  if (error) throw error;
+  return (data || []).map(mapTokenRow);
+}
+
+export async function submitTokenRequest(req) {
+  if (!isConfigured()) return req;
+  const supabase = getSupabase();
+  const row = {
+    id: req.id,
+    doctor_id: req.doctorID,
+    hospital_id: req.hospitalID,
+    shift_date: toDateOnly(req.date),
+    specialty: req.specialty,
+    status: req.status || "pending",
+    requested_at: req.requestedAt || new Date().toISOString()
+  };
+  const { data, error } = await supabase.from("token_requests").upsert(row).select().single();
+  if (error) throw error;
+  return mapTokenRow(data);
+}
+
+export async function updateTokenStatus(id, status) {
+  if (!isConfigured()) return;
+  const supabase = getSupabase();
+  const patch = { status };
+  if (status === "approved" || status === "auto_approved") {
+    patch.approved_at = new Date().toISOString();
+  }
+  const { error } = await supabase.from("token_requests").update(patch).eq("id", id);
+  if (error) throw error;
+}
+
+export async function fetchRoster(hospitalId) {
+  if (!isConfigured()) return [];
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("hospital_doctors")
+    .select("auto_approve, doctor_profiles(*)")
+    .eq("hospital_id", hospitalId);
+  if (error) throw error;
+  return (data || []).map((row) => {
+    const d = row.doctor_profiles;
+    if (!d) return null;
+    return {
+      id: d.profile_id,
+      name: `${d.first_name} ${d.last_name}`,
+      credential: d.credential,
+      specialty: (d.specialties && d.specialties[0]) || "Internal Medicine",
+      npi: d.npi,
+      isAutoApproved: row.auto_approve,
+      verificationStatus: d.verification_status
+    };
+  }).filter(Boolean);
+}
+
+export async function upsertRosterLink(hospitalId, doctorId, autoApprove) {
+  if (!isConfigured()) return;
+  const supabase = getSupabase();
+  const { error } = await supabase.from("hospital_doctors").upsert({
+    hospital_id: hospitalId,
+    doctor_id: doctorId,
+    auto_approve: autoApprove
+  });
+  if (error) throw error;
+}
+
+export async function fetchPolicy(hospitalId) {
+  if (!isConfigured()) return defaultPolicy();
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("scheduling_policies")
+    .select("policy")
+    .eq("hospital_id", hospitalId)
+    .maybeSingle();
+  if (error) throw error;
+  return { ...defaultPolicy(), ...(data?.policy || {}) };
+}
+
+export async function upsertPolicy(hospitalId, policy) {
+  if (!isConfigured()) return policy;
+  const supabase = getSupabase();
+  const { error } = await supabase.from("scheduling_policies").upsert({
+    hospital_id: hospitalId,
+    policy
+  });
+  if (error) throw error;
+  return policy;
+}
+
+export async function fetchUnavailable(hospitalId) {
+  if (!isConfigured()) return [];
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("unavailable_days")
+    .select("date")
+    .eq("hospital_id", hospitalId);
+  if (error) throw error;
+  return (data || []).map((r) => r.date);
+}
+
+export async function setUnavailable(hospitalId, date, blocked) {
+  if (!isConfigured()) return;
+  const supabase = getSupabase();
+  const dateStr = toDateOnly(date);
+  if (blocked) {
+    const { error } = await supabase.from("unavailable_days").upsert({
+      hospital_id: hospitalId,
+      date: dateStr
+    });
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("unavailable_days").delete()
+      .eq("hospital_id", hospitalId).eq("date", dateStr);
+    if (error) throw error;
+  }
+}
+
+export async function requestTrade(shiftId, fromDoctorId, toDoctorId) {
+  if (!isConfigured()) return null;
+  const supabase = getSupabase();
+  const { data, error } = await supabase.functions.invoke("request-trade", {
+    body: { shift_id: shiftId, from_doctor_id: fromDoctorId, to_doctor_id: toDoctorId }
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function respondTrade(tradeId, accept) {
+  if (!isConfigured()) return null;
+  const supabase = getSupabase();
+  const { data, error } = await supabase.functions.invoke("respond-trade", {
+    body: { trade_id: tradeId, accept }
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function cancelAssignment(shiftId, doctorId) {
+  if (!isConfigured()) return { penalty: 0 };
+  const supabase = getSupabase();
+  const { data, error } = await supabase.functions.invoke("cancel-shift", {
+    body: { shift_id: shiftId, doctor_id: doctorId }
+  });
+  if (error) throw error;
+  return data || { penalty: 0 };
+}
+
+/**
+ * Pull remote data into localStorage via callbacks supplied by store.
+ * @param {object} hooks - { readLocal, writeLocal, emit }
+ */
+export async function syncEverything(hooks) {
+  if (!isConfigured()) return { ok: false, reason: "not_configured" };
+
+  const doctor = hooks.readLocal("doctorProfile");
+  const hospital = hooks.readLocal("hospitalProfile");
+  const hospitalId = hospital?.id;
+
+  try {
+    const [shifts, assignments, tokens, roster, policy, unavailable] = await Promise.all([
+      fetchAllShifts(hospitalId),
+      fetchAssignments(doctor?.id),
+      fetchTokenRequests(hospitalId, doctor?.id),
+      hospitalId ? fetchRoster(hospitalId) : Promise.resolve(null),
+      hospitalId ? fetchPolicy(hospitalId) : Promise.resolve(null),
+      hospitalId ? fetchUnavailable(hospitalId) : Promise.resolve(null)
+    ]);
+
+    if (shifts.length) {
+      const local = hooks.readLocal("shifts") || [];
+      const merged = [...local.filter((s) => !shifts.some((r) => r.id === s.id)), ...shifts];
+      hooks.writeLocal("shifts", merged);
+    }
+
+    if (assignments.length) {
+      hooks.writeLocal("assignments", assignments);
+    }
+
+    if (tokens.length) {
+      const tok = hooks.readLocal("tokens") || {};
+      hooks.writeLocal("tokens", { ...tok, requestedDays: tokens });
+    }
+
+    if (roster) {
+      hooks.writeLocal("roster", roster);
+    }
+
+    if (policy && hospitalId) {
+      const policies = hooks.readLocal("policies") || {};
+      policies[hospitalId] = policy;
+      hooks.writeLocal("policies", policies);
+    }
+
+    if (unavailable && hospitalId) {
+      const unavail = hooks.readLocal("unavailable") || {};
+      unavail[hospitalId] = unavailable;
+      hooks.writeLocal("unavailable", unavail);
+    }
+
+    hooks.emit?.();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+}
+
+export async function syncAfterMutation(fn) {
+  if (!isConfigured()) return;
+  try {
+    await fn();
+  } catch {
+    /* offline — local state already updated */
+  }
+}

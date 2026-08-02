@@ -66,38 +66,39 @@ The app runs without Supabase for UI development (local auth/onboarding). Supaba
 
 ## Website companion (GitHub Pages)
 
-The `docs/` folder is a **web version of the On Call iOS app** — same auth flow, branding, doctor/hospital tabs, calendar, shifts, points, and tokens. It shares Supabase when configured and falls back to local offline storage like the app.
+The `docs/` folder is a **full web mirror of the On Call iOS app** — auth, onboarding, doctor/hospital tabs, calendar, tokens, trades, cancel/penalties, alter rates, roster, policy, analytics, and billing. Both surfaces share Supabase when configured (same project URL + anon key). Without Supabase they each use matching localStorage / UserDefaults keys offline.
 
 Open `docs/index.html` locally or deploy via GitHub Pages.
 
-### 1. Configure the website (optional — works offline without this)
+### Connect iOS + website (required for shared data)
 
-```bash
-cp docs/assets/js/config.example.js docs/assets/js/config.js
-```
+1. Create a Supabase project at https://supabase.com
+2. In the SQL editor, run migrations in order:
+   - `supabase/migrations/001_initial_schema.sql`
+   - `supabase/migrations/002_full_sync_schema.sql`
+3. Deploy edge functions:
+   ```bash
+   ./scripts/bin/supabase link --project-ref YOUR_PROJECT_REF
+   ./scripts/bin/supabase functions deploy
+   ```
+4. Paste the **same** Project URL + anon key into:
+   - `Config/Secrets.xcconfig` (iOS — copy from `Secrets.example.xcconfig`)
+   - `docs/assets/js/config.js` (website — copy from `config.example.js`)
+5. Auth → URL Configuration:
+   - Site URL: `https://erdtheturd.github.io/on-call`
+   - Redirect: `https://erdtheturd.github.io/on-call/callback.html`
 
-Set `supabaseUrl` and `supabaseAnonKey` to the **same values** as `Config/Secrets.xcconfig`. Without config, the site uses local offline auth identical to the iOS app demo mode.
+Once both are configured, doctors/hospitals signing in on either surface see the same shifts, tokens, and assignments.
 
-### 2. Enable GitHub Pages
+### Enable GitHub Pages
 
 In GitHub → **Settings → Pages**, set **Source** to **Deploy from branch**, branch **main**, folder **/docs**.
 
-The site will be available at:
+Site URL: **https://erdtheturd.github.io/on-call/**
 
-**https://erdtheturd.github.io/on-call/**
+### Universal Links (optional)
 
-### 3. Configure Supabase Auth redirects
-
-In your Supabase project dashboard → **Authentication → URL Configuration**, set:
-
-- **Site URL**: `https://erdtheturd.github.io/on-call`
-- **Redirect URLs**: `https://erdtheturd.github.io/on-call/callback.html`
-
-These match `supabase/config.toml` for local development.
-
-### 4. Universal Links (optional)
-
-Replace `TEAMID` in `docs/.well-known/apple-app-site-association` with your Apple Team ID, then rebuild the iOS app. The app also supports the custom URL scheme `oncallwizard://`.
+Replace `TEAMID` in `docs/.well-known/apple-app-site-association` with your Apple Team ID, then rebuild the iOS app. Custom scheme: `oncallwizard://`.
 
 ## Project layout
 

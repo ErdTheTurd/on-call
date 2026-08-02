@@ -148,6 +148,13 @@ struct HospitalOnboardingView: View {
             hospitalName: profile.name,
             policy: profile.schedulingPolicy
         )
+        Task {
+            await SupabaseProfileSync.upsertHospital(profile)
+            // Push seeded shifts so the website sees them
+            for shift in Services.hospital.shifts.filter({ $0.hospitalID == profile.id }).prefix(200) {
+                try? await Repositories.shifts.upsert(shift)
+            }
+        }
         onComplete(profile)
     }
 }

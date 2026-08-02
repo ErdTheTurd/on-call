@@ -1,7 +1,7 @@
 import { isConfigured, getSupabase } from "./supabase-client.js";
 import {
   authState, beginSession, registerAccount, signInLocal,
-  signInRemote, signUpRemote, appStore, syncShiftsFromSupabase
+  signInRemote, signUpRemote, appStore, syncEverything
 } from "./store.js";
 import { renderAuthView, bindAuth } from "./views/auth.js";
 import {
@@ -54,7 +54,7 @@ async function boot() {
         });
       }
     } catch { /* local */ }
-    await syncShiftsFromSupabase(appStore.hospitalProfile?.id);
+    await syncEverything();
   }
 
   const auth = authState();
@@ -211,10 +211,17 @@ function handleOnboardingNext() {
   }
 
   if (state.onb.step >= steps - 1) {
-    if (role === "Doctor") finishDoctorOnboarding(state.onb);
-    else finishHospitalOnboarding(state.onb);
-    state.route = role === "Hospital" ? "hospital" : "doctor";
-    update({ onb: { ...state.onb, error: null } });
+    update({ loading: true });
+    (async () => {
+      try {
+        if (role === "Doctor") await finishDoctorOnboarding(state.onb);
+        else await finishHospitalOnboarding(state.onb);
+        state.route = role === "Hospital" ? "hospital" : "doctor";
+        update({ onb: { ...state.onb, error: null }, loading: false });
+      } catch (err) {
+        update({ onb: { ...state.onb, error: err.message || "Could not save profile." }, loading: false });
+      }
+    })();
     return;
   }
 
