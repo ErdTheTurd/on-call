@@ -2,7 +2,7 @@ import { uuid, startOfDay, sameDay, SPECIALTIES } from "./brand.js";
 import { normalizeShift, isPastShift, currentRate } from "./shift-math.js";
 import { getSupabase, isConfigured, upsertProfile } from "./supabase-client.js";
 import { defaultPolicy, previewPenalty, normalizeCancellationScale, bracketLabel } from "./domain/policy.js";
-import { algorithmRate, computeRate, rateBreakdown } from "./domain/pricing.js";
+import { algorithmRate, computeRate, rateBreakdown, groupPricingComponents } from "./domain/pricing.js";
 import * as sync from "./domain/sync.js";
 
 export const KEYS = {
@@ -375,6 +375,27 @@ export function pricingObservables(specialty, date, hospitalID) {
     const adjShifts = specialtyShifts.filter((s) => sameDay(s.start, adj) && !isPastShift(s));
     if (adjShifts.some((s) => !isShiftFilled(s.id))) adjacentUnfilled++;
   }
+
+  const pendingTradeCount = (appStore.trades.incoming || []).length
+    + assignments.filter((a) => a.status === "traded_pending" && a.shift?.hospitalID === hospitalID).length;
+  const recentCancelCount = appStore.penaltyLedger.filter((p) =>
+    p.hospitalID === hospitalID && p.type === "cancel"
+    && (Date.now() - new Date(p.createdAt).getTime()) < 30 * 86400000
+  ).length;
+
+  // Rough avg fill hours from assignment lag when available.
+  let avgFillHours = null;
+  const filledWithAssign = specialtyShifts
+    .map((s) => {
+      const a = assignments.find((x) => x.shiftID === s.id && x.assignedAt);
+      if (!a) return null;
+      return (new Date(a.assignedAt) - new Date(s.start)) / 3600000;
+    })
+    .filter((h) => h != null && h >= 0);
+  if (filledWithAssign.length) {
+    avgFillHours = filledWithAssign.reduce((s, h) => s + h, 0) / filledWithAssign.length;
+  }
+
   return {
     openShiftCount: openCount,
     availableDoctorCount: specialtyDoctors.length,
@@ -385,6 +406,9 @@ export function pricingObservables(specialty, date, hospitalID) {
     pendingTokenRequests: pendingTokens,
     autoApprovedDoctorCount: autoApproved,
     adjacentUnfilledDays: adjacentUnfilled,
+    avgFillHours,
+    pendingTradeCount,
+    recentCancelCount,
     sampleSize: pastShifts.length + specialtyShifts.length
   };
 }
@@ -476,6 +500,68 @@ export async function resetProposedRate(hospitalID, specialty, date) {
   appStore.saveProposedRates(entries);
   const { algorithmRate: algo } = getProposedRate(hospitalID, specialty, date);
   await setProposedRate(hospitalID, specialty, date, algo);
+}
+
+/** Save Alter Shifts editor state onto the day's shift (mirrors iOS saveShift). */
+export async function saveAlterShift({
+  hospitalID,
+  hospitalName,
+  specialty,
+  date,
+  rateFloor,
+  useAlgorithm,
+  useFlatRate,
+  flatRate
+}) {
+  const day = startOfDay(date);
+  const policy = getPolicy(hospitalID);
+  const isHourly = policy.granularity === "hour";
+  let shifts = [...appStore.shifts];
+  let existing = shifts.find((s) =>
+    s.hospitalID === hospitalID && s.specialty === specialty && sameDay(s.start, day)
+  );
+
+  const shift = {
+    id: existing?.id || uuid(),
+    hospitalID,
+    hospital: hospitalName || "Hospital",
+    specialty,
+    start: day.toISOString(),
+    durationHours: isHourly ? 12 : 24,
+    rateFloor: Number(rateFloor),
+    rateUnit: isHourly ? "per hour" : "per day",
+    escalationMode: useFlatRate
+      ? { type: "flat", rate: Number(flatRate) }
+      : { type: "automatic" },
+    usesAlgorithmPricing: !!useAlgorithm
+  };
+
+  if (existing) {
+    shifts = shifts.map((s) => (s.id === existing.id ? { ...s, ...shift, id: existing.id } : s));
+  } else {
+    shifts.push(shift);
+  }
+  appStore.saveShifts(shifts);
+
+  // Keep proposed-rate store in sync when algorithm or manual floor changes.
+  if (useAlgorithm || !useFlatRate) {
+    let entries = appStore.proposedRates.filter((e) =>
+      !(e.hospitalID === hospitalID && e.specialty === specialty && sameDay(e.date, day))
+    );
+    if (!useAlgorithm) {
+      entries.push({ hospitalID, specialty, date: day.toISOString(), rate: Number(rateFloor) });
+    }
+    appStore.saveProposedRates(entries);
+  }
+
+  await afterMutation(() => sync.upsertShift(shift));
+  return shift;
+}
+
+export function findShiftForDay(hospitalID, specialty, date) {
+  return appStore.shifts.find((s) =>
+    s.hospitalID === hospitalID && s.specialty === specialty && sameDay(s.start, date)
+  ) || null;
 }
 
 export function openShifts(profile) {
@@ -1026,4 +1112,4 @@ export async function syncShiftsFromSupabase(hospitalID) {
   await syncEverything();
 }
 
-export { algorithmRate, computeRate, rateBreakdown, previewPenalty, defaultPolicy, bracketLabel };
+export { algorithmRate, computeRate, rateBreakdown, groupPricingComponents, previewPenalty, defaultPolicy, bracketLabel };

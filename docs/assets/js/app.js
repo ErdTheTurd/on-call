@@ -37,6 +37,7 @@ function update(patch) {
   const uiKeys = [
     "tab", "sheet", "daySheet", "tradeSheet", "calendarMonth", "selectedDate",
     "alterDate", "alterSpecialty", "alterUseAlgo", "alterOverride",
+    "alterCalendarMonth", "alterRateFloor", "alterUseFlat", "alterFlatRate", "alterSaved",
     "adminFilter", "adminSearch", "policyTab", "doctorFilter", "doctorAutoOnly",
     "doctorDetailId", "rateEditSpecialty"
   ];

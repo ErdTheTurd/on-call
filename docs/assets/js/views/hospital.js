@@ -5,12 +5,13 @@ import {
 import { renderCalendar, hospitalDayData, addMonths } from "../calendar.js";
 import { hospitalDaySummary, hospitalAnalytics, billingSummary } from "../domain/insights.js";
 import { bracketLabel } from "../domain/policy.js";
+import { groupPricingComponents } from "../domain/pricing.js";
 import {
   appStore, ensureDemoShifts, openShiftCount, fillRatePercent, signOut,
   autoApprovedCount, tokenRequestsForHospital, approveToken, denyToken,
   toggleUnavailable, getPolicy, savePolicy, defaultPolicy,
   getProposedRate, setProposedRate, resetProposedRate, toggleRosterAutoApprove,
-  seedMockDoctors, getRateBreakdown
+  seedMockDoctors, getRateBreakdown, saveAlterShift, findShiftForDay
 } from "../store.js";
 
 export function renderHospitalApp(state) {
@@ -137,67 +138,126 @@ function renderDayInsight(summary, profile, date) {
 function renderAlterShifts(state, profile) {
   if (!profile) return emptyState("No hospital", "Complete onboarding first.");
 
-  const editDate = state.alterDate ? new Date(state.alterDate) : startOfDay(new Date());
+  const month = state.alterCalendarMonth
+    ? new Date(state.alterCalendarMonth)
+    : (state.calendarMonth ? new Date(state.calendarMonth) : new Date());
+  const selected = state.alterDate
+    ? startOfDay(state.alterDate)
+    : startOfDay(new Date(Date.now() + 86400000));
   const specialty = state.alterSpecialty || SPECIALTIES[0];
-  const proposed = getProposedRate(profile.id, specialty, editDate);
-  const unit = getPolicy(profile.id).granularity === "hour" ? "/hr" : "/day";
-  const breakdown = getRateBreakdown(specialty, editDate, profile.id);
-  const useAlgo = state.alterUseAlgo !== false;
+  const days = hospitalDayData(month, profile.id);
+  const policy = getPolicy(profile.id);
+  const isHourly = policy.granularity === "hour";
+  const unit = isHourly ? "/hr" : "/day";
+  const baseRate = Number(policy.specialtyBaseRates?.[specialty] || 0);
+  const minRate = Math.max(isHourly ? 80 : 800, baseRate);
+
+  const existing = findShiftForDay(profile.id, specialty, selected);
+  const useAlgorithm = state.alterUseAlgo != null
+    ? !!state.alterUseAlgo
+    : (existing?.usesAlgorithmPricing !== false);
+  const useFlat = state.alterUseFlat != null
+    ? !!state.alterUseFlat
+    : existing?.escalationMode?.type === "flat";
+
+  const breakdown = getRateBreakdown(specialty, selected, profile.id);
+  const algoFloor = Math.max(breakdown.floor, baseRate);
+  let rateFloor = state.alterRateFloor != null
+    ? Number(state.alterRateFloor)
+    : (useAlgorithm ? algoFloor : Math.max(existing?.rateFloor || algoFloor, minRate));
+  if (useAlgorithm) rateFloor = algoFloor;
+
+  const flatRate = state.alterFlatRate != null
+    ? Number(state.alterFlatRate)
+    : (existing?.escalationMode?.rate || Math.max(rateFloor, isHourly ? 200 : 2000));
+
+  const grouped = groupPricingComponents(breakdown.components || []);
+  const savedFlash = !!state.alterSaved;
 
   return `
     ${navBar("Alter Shifts")}
     <main class="main-scroll stack">
       <div class="content-grid two-col">
-        <div class="stack">
-          <section class="card stack">
-            ${sectionHeader("Date & Specialty")}
-            <div class="form-field">
-              <label>Date</label>
-              <input type="date" data-alter-date value="${editDate.toISOString().slice(0, 10)}" />
-            </div>
-            <div class="form-field">
-              <label>Specialty</label>
-              <select data-alter-specialty>
-                ${SPECIALTIES.map((sp) => `<option value="${escapeHtml(sp)}" ${sp === specialty ? "selected" : ""}>${escapeHtml(sp)}</option>`).join("")}
-              </select>
-            </div>
-            <label class="toggle-row">
-              <span>Use algorithm pricing</span>
-              <input type="checkbox" data-alter-algo ${useAlgo ? "checked" : ""} />
-            </label>
-          </section>
-          <section class="card stack">
-            ${sectionHeader("Rate Editor")}
-            <div style="display:flex;justify-content:space-between;align-items:baseline">
-              <span class="tertiary">Algorithm rate</span>
-              <span style="font-weight:700;color:var(--accent)">$${Math.round(proposed.algorithmRate)}${unit}</span>
-            </div>
-            <div class="subtitle">Confidence ${Math.round((breakdown.confidence || 0) * 100)}%${breakdown.holidayName ? ` · ${escapeHtml(breakdown.holidayName)}` : ""}</div>
-            <div class="form-field">
-              <label>Proposed rate ${proposed.isCustom ? "(custom)" : ""}</label>
-              <input type="number" step="25" data-alter-rate value="${Math.round(useAlgo && !proposed.isCustom ? proposed.algorithmRate : proposed.rate)}" ${useAlgo && !state.alterOverride ? "" : ""} />
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button type="button" class="btn-primary" style="flex:1;min-width:140px" data-save-rate>Save Rate</button>
-              <button type="button" class="btn-bordered" data-reset-rate>Reset to algorithm</button>
-            </div>
-          </section>
-          <section class="card stack">
-            ${sectionHeader("Algorithm factors")}
-            <div class="factor-list">
-              ${(breakdown.components || []).slice(0, 12).map((c) => `
-                <div class="factor-row">
-                  <span>${escapeHtml(c.label)}</span>
-                  <span style="font-weight:600;color:${c.mult >= 1 ? "var(--success)" : "var(--warning)"}">×${c.mult.toFixed(2)}</span>
-                </div>`).join("")}
-            </div>
-          </section>
-        </div>
         <section class="card stack">
-          ${sectionHeader("Upcoming shifts")}
-          ${appStore.shifts.filter((s) => s.hospitalID === profile.id).slice(0, 15).map((s) =>
-            `<div>${shiftRow(s)}</div>`
-          ).join('<div class="divider"></div>') || `<p class="subtitle">No upcoming shifts.</p>`}
+          ${sectionHeader("Pick a Day", "calendar")}
+          <p class="subtitle">Each day has an on-call shift. Select a day below to view or customize it.</p>
+          ${renderCalendar({ month, days, selectedDate: selected, mode: "hospital" })}
+        </section>
+
+        <section class="card stack alter-editor">
+          ${sectionHeader(selected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }), "dashboard")}
+          <div class="form-field">
+            <label>Specialty</label>
+            <select data-alter-specialty>
+              ${SPECIALTIES.map((sp) => `<option value="${escapeHtml(sp)}" ${sp === specialty ? "selected" : ""}>${escapeHtml(sp)}</option>`).join("")}
+            </select>
+          </div>
+
+          <label class="toggle-row">
+            <span>✨ Use On Call pricing algorithm</span>
+            <input type="checkbox" data-alter-algo ${useAlgorithm ? "checked" : ""} />
+          </label>
+
+          <div class="divider"></div>
+
+          <div class="alter-rate-row">
+            <span class="subtitle">${useAlgorithm ? "Algorithm rate floor" : "Manual rate floor"}</span>
+            <strong class="alter-rate-value">$${Math.round(rateFloor)}${unit}</strong>
+          </div>
+
+          ${useAlgorithm ? `
+            <p class="tertiary" style="font-size:12px;margin:0">
+              ${breakdown.variableCount || breakdown.components?.length || 0} pricing variables · ${Math.round((breakdown.confidence || 0) * 100)}% confidence
+            </p>
+            ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px;margin:0">Floor capped at base rate: $${Math.round(baseRate)}${unit}</p>` : ""}
+            <button type="button" class="btn-ghost" style="justify-self:start;padding-left:0" data-recalc-rate>↻ Recalculate</button>
+
+            <div class="algo-breakdown">
+              <div class="algo-breakdown-title">Algorithm breakdown</div>
+              ${grouped.map(([category, items]) => `
+                <div class="algo-cat">${escapeHtml(category)}</div>
+                ${items.map((item) => `
+                  <div class="factor-row">
+                    <span>${escapeHtml(item.label)}</span>
+                    <span class="${item.multiplier >= 1 ? "factor-up" : "factor-down"}">${escapeHtml(item.displayValue)}</span>
+                  </div>`).join("")}
+              `).join("")}
+            </div>
+          ` : `
+            <div class="form-field">
+              <label>Manual rate floor</label>
+              <div class="stepper-row">
+                <button type="button" class="icon-btn" data-step-floor="-1">−</button>
+                <input type="number" data-alter-floor value="${Math.round(rateFloor)}" step="${isHourly ? 5 : 50}" min="${minRate}" max="${isHourly ? 400 : 5000}" />
+                <button type="button" class="icon-btn" data-step-floor="1">+</button>
+              </div>
+              ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px">Minimum: $${Math.round(minRate)}${unit} (specialty base rate)</p>` : ""}
+            </div>
+          `}
+
+          <div class="divider"></div>
+
+          <label class="toggle-row">
+            <span>Override with flat rate</span>
+            <input type="checkbox" data-alter-flat ${useFlat ? "checked" : ""} />
+          </label>
+          ${useFlat ? `
+            <div class="alter-rate-row">
+              <span class="subtitle">Flat rate</span>
+              <strong class="alter-rate-value">$${Math.round(flatRate)}${unit}</strong>
+            </div>
+            <div class="form-field">
+              <div class="stepper-row">
+                <button type="button" class="icon-btn" data-step-flat="-1">−</button>
+                <input type="number" data-alter-flat-rate value="${Math.round(flatRate)}" step="${isHourly ? 5 : 50}" min="${Math.round(rateFloor)}" max="${isHourly ? 600 : 8000}" />
+                <button type="button" class="icon-btn" data-step-flat="1">+</button>
+              </div>
+            </div>
+          ` : ""}
+
+          <button type="button" class="btn-primary" data-save-alter-shift>
+            ${savedFlash ? "✓ Saved!" : "Save Shift for This Day"}
+          </button>
         </section>
       </div>
     </main>`;
@@ -604,15 +664,36 @@ export function bindHospital(root, state, update) {
 
   root.querySelectorAll("[data-cal-nav]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const m = state.calendarMonth ? new Date(state.calendarMonth) : new Date();
-      update({ calendarMonth: addMonths(m, Number(btn.dataset.calNav)).toISOString() });
+      const m = (state.tab === "alter" && state.alterCalendarMonth)
+        ? new Date(state.alterCalendarMonth)
+        : (state.calendarMonth ? new Date(state.calendarMonth) : new Date());
+      const next = addMonths(m, Number(btn.dataset.calNav)).toISOString();
+      if ((state.tab || "dashboard") === "alter") {
+        update({ alterCalendarMonth: next, calendarMonth: next });
+      } else {
+        update({ calendarMonth: next });
+      }
     });
   });
   root.querySelectorAll("[data-cal-date]").forEach((btn) => {
-    btn.addEventListener("click", () => update({
-      selectedDate: btn.dataset.calDate,
-      daySheet: btn.dataset.calDate
-    }));
+    btn.addEventListener("click", () => {
+      if ((state.tab || "dashboard") === "alter") {
+        update({
+          alterDate: btn.dataset.calDate,
+          selectedDate: btn.dataset.calDate,
+          alterRateFloor: null,
+          alterUseAlgo: null,
+          alterUseFlat: null,
+          alterFlatRate: null,
+          alterSaved: false
+        });
+      } else {
+        update({
+          selectedDate: btn.dataset.calDate,
+          daySheet: btn.dataset.calDate
+        });
+      }
+    });
   });
   root.querySelectorAll("[data-open-day]").forEach((btn) => {
     btn.addEventListener("click", () => update({ daySheet: btn.dataset.openDay }));
@@ -662,29 +743,75 @@ export function bindHospital(root, state, update) {
     btn.addEventListener("click", () => update({ policyTab: btn.dataset.policyTab, sheet: "policy" }));
   });
 
-  root.querySelector("[data-alter-date]")?.addEventListener("change", (e) => {
-    update({ alterDate: e.target.value, alterSpecialty: state.alterSpecialty });
-  });
   root.querySelector("[data-alter-specialty]")?.addEventListener("change", (e) => {
-    update({ alterSpecialty: e.target.value, alterDate: state.alterDate });
+    update({
+      alterSpecialty: e.target.value,
+      alterRateFloor: null,
+      alterUseAlgo: null,
+      alterUseFlat: null,
+      alterFlatRate: null,
+      alterSaved: false
+    });
   });
   root.querySelector("[data-alter-algo]")?.addEventListener("change", (e) => {
-    update({ alterUseAlgo: e.target.checked });
+    update({ alterUseAlgo: e.target.checked, alterRateFloor: null, alterSaved: false });
   });
-  root.querySelector("[data-save-rate]")?.addEventListener("click", async () => {
-    if (!profile) return;
-    const date = state.alterDate || new Date().toISOString().slice(0, 10);
-    const specialty = state.alterSpecialty || SPECIALTIES[0];
-    const rate = Number(root.querySelector("[data-alter-rate]")?.value);
-    await setProposedRate(profile.id, specialty, date, rate);
-    alert("Rate saved.");
+  root.querySelector("[data-alter-flat]")?.addEventListener("change", (e) => {
+    update({ alterUseFlat: e.target.checked, alterSaved: false });
   });
-  root.querySelector("[data-reset-rate]")?.addEventListener("click", async () => {
+  root.querySelector("[data-recalc-rate]")?.addEventListener("click", () => {
+    update({ alterRateFloor: null, alterSaved: false });
+  });
+  root.querySelector("[data-alter-floor]")?.addEventListener("change", (e) => {
+    update({ alterRateFloor: Number(e.target.value), alterSaved: false });
+  });
+  root.querySelector("[data-alter-flat-rate]")?.addEventListener("change", (e) => {
+    update({ alterFlatRate: Number(e.target.value), alterSaved: false });
+  });
+  root.querySelectorAll("[data-step-floor]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const policy = getPolicy(profile.id);
+      const isHourly = policy.granularity === "hour";
+      const step = isHourly ? 5 : 50;
+      const input = root.querySelector("[data-alter-floor]");
+      const next = Number(input?.value || 0) + Number(btn.dataset.stepFloor) * step;
+      update({ alterRateFloor: next, alterSaved: false });
+    });
+  });
+  root.querySelectorAll("[data-step-flat]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const policy = getPolicy(profile.id);
+      const isHourly = policy.granularity === "hour";
+      const step = isHourly ? 5 : 50;
+      const input = root.querySelector("[data-alter-flat-rate]");
+      const next = Number(input?.value || 0) + Number(btn.dataset.stepFlat) * step;
+      update({ alterFlatRate: next, alterSaved: false });
+    });
+  });
+  root.querySelector("[data-save-alter-shift]")?.addEventListener("click", async () => {
     if (!profile) return;
-    const date = state.alterDate || new Date().toISOString().slice(0, 10);
     const specialty = state.alterSpecialty || SPECIALTIES[0];
-    await resetProposedRate(profile.id, specialty, date);
-    update({ alterDate: date, alterSpecialty: specialty });
+    const date = state.alterDate || new Date(Date.now() + 86400000).toISOString();
+    const useAlgorithm = state.alterUseAlgo != null ? !!state.alterUseAlgo : true;
+    const useFlat = !!state.alterUseFlat;
+    const breakdown = getRateBreakdown(specialty, date, profile.id);
+    const baseRate = Number(getPolicy(profile.id).specialtyBaseRates?.[specialty] || 0);
+    const rateFloor = useAlgorithm
+      ? Math.max(breakdown.floor, baseRate)
+      : Number(root.querySelector("[data-alter-floor]")?.value || state.alterRateFloor || breakdown.floor);
+    const flatRate = Number(root.querySelector("[data-alter-flat-rate]")?.value || state.alterFlatRate || rateFloor);
+    await saveAlterShift({
+      hospitalID: profile.id,
+      hospitalName: profile.name,
+      specialty,
+      date,
+      rateFloor,
+      useAlgorithm,
+      useFlatRate: useFlat,
+      flatRate
+    });
+    update({ alterSaved: true, alterRateFloor: rateFloor, alterFlatRate: flatRate });
+    setTimeout(() => update({ alterSaved: false }), 1500);
   });
 
   root.querySelectorAll("[data-edit-rate-specialty]").forEach((btn) => {
