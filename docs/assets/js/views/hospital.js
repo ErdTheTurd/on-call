@@ -14,6 +14,56 @@ import {
   seedMockDoctors, getRateBreakdown, saveAlterShift, findShiftForDay
 } from "../store.js";
 
+function alterDraftKey(date, specialty) {
+  const day = startOfDay(date || new Date(Date.now() + 86400000)).toISOString();
+  return `${day}::${specialty || SPECIALTIES[0]}`;
+}
+
+function resolveAlterUseAlgo(state, existing) {
+  if (state.alterUseAlgo != null) return !!state.alterUseAlgo;
+  // null/undefined on the shift means "default to algorithm"
+  return existing?.usesAlgorithmPricing !== false;
+}
+
+function resolveAlterUseFlat(state, existing) {
+  if (state.alterUseFlat != null) return !!state.alterUseFlat;
+  return existing?.escalationMode?.type === "flat";
+}
+
+/** Snapshot current editor values so switching specialty/day doesn't clobber them. */
+function captureAlterDraft(state, profile) {
+  const specialty = state.alterSpecialty || SPECIALTIES[0];
+  const date = state.alterDate || new Date(Date.now() + 86400000).toISOString();
+  const existing = profile ? findShiftForDay(profile.id, specialty, date) : null;
+  return {
+    useAlgo: resolveAlterUseAlgo(state, existing),
+    rateFloor: state.alterRateFloor,
+    useFlat: resolveAlterUseFlat(state, existing),
+    flatRate: state.alterFlatRate
+  };
+}
+
+function hydrateAlterEditor(drafts, profile, date, specialty) {
+  const draft = drafts?.[alterDraftKey(date, specialty)];
+  if (draft) {
+    return {
+      alterUseAlgo: draft.useAlgo,
+      alterRateFloor: draft.rateFloor,
+      alterUseFlat: draft.useFlat,
+      alterFlatRate: draft.flatRate
+    };
+  }
+  const existing = profile ? findShiftForDay(profile.id, specialty, date) : null;
+  return {
+    alterUseAlgo: existing ? existing.usesAlgorithmPricing !== false : true,
+    alterRateFloor: null,
+    alterUseFlat: existing?.escalationMode?.type === "flat",
+    alterFlatRate: existing?.escalationMode?.type === "flat"
+      ? Number(existing.escalationMode.rate)
+      : null
+  };
+}
+
 export function renderHospitalApp(state) {
   const profile = appStore.hospitalProfile;
   const tab = state.tab || "dashboard";
@@ -153,12 +203,8 @@ function renderAlterShifts(state, profile) {
   const minRate = Math.max(isHourly ? 80 : 800, baseRate);
 
   const existing = findShiftForDay(profile.id, specialty, selected);
-  const useAlgorithm = state.alterUseAlgo != null
-    ? !!state.alterUseAlgo
-    : (existing?.usesAlgorithmPricing !== false);
-  const useFlat = state.alterUseFlat != null
-    ? !!state.alterUseFlat
-    : existing?.escalationMode?.type === "flat";
+  const useAlgorithm = resolveAlterUseAlgo(state, existing);
+  const useFlat = resolveAlterUseFlat(state, existing);
 
   const breakdown = getRateBreakdown(specialty, selected, profile.id);
   const algoFloor = Math.max(breakdown.floor, baseRate);
@@ -219,7 +265,7 @@ function renderAlterShifts(state, profile) {
                 ${items.map((item) => `
                   <div class="factor-row">
                     <span>${escapeHtml(item.label)}</span>
-                    <span class="${item.multiplier >= 1 ? "factor-up" : "factor-down"}">${escapeHtml(item.displayValue)}</span>
+                    <span class="${item.multiplier > 1 ? "factor-up" : item.multiplier < 1 ? "factor-down" : "factor-neutral"}">${escapeHtml(item.displayValue)}</span>
                   </div>`).join("")}
               `).join("")}
             </div>
@@ -684,13 +730,16 @@ export function bindHospital(root, state, update) {
   root.querySelectorAll("[data-cal-date]").forEach((btn) => {
     btn.addEventListener("click", () => {
       if ((state.tab || "dashboard") === "alter") {
+        const prevDate = state.alterDate || new Date(Date.now() + 86400000).toISOString();
+        const specialty = state.alterSpecialty || SPECIALTIES[0];
+        const drafts = { ...(state.alterDrafts || {}) };
+        drafts[alterDraftKey(prevDate, specialty)] = captureAlterDraft(state, profile);
+        const nextDate = btn.dataset.calDate;
         update({
-          alterDate: btn.dataset.calDate,
-          selectedDate: btn.dataset.calDate,
-          alterRateFloor: null,
-          alterUseAlgo: null,
-          alterUseFlat: null,
-          alterFlatRate: null,
+          alterDate: nextDate,
+          selectedDate: nextDate,
+          alterDrafts: drafts,
+          ...hydrateAlterEditor(drafts, profile, nextDate, specialty),
           alterSaved: false
         });
       } else {
@@ -750,12 +799,15 @@ export function bindHospital(root, state, update) {
   });
 
   root.querySelector("[data-alter-specialty]")?.addEventListener("change", (e) => {
+    const date = state.alterDate || new Date(Date.now() + 86400000).toISOString();
+    const prevSpecialty = state.alterSpecialty || SPECIALTIES[0];
+    const nextSpecialty = e.target.value;
+    const drafts = { ...(state.alterDrafts || {}) };
+    drafts[alterDraftKey(date, prevSpecialty)] = captureAlterDraft(state, profile);
     update({
-      alterSpecialty: e.target.value,
-      alterRateFloor: null,
-      alterUseAlgo: null,
-      alterUseFlat: null,
-      alterFlatRate: null,
+      alterSpecialty: nextSpecialty,
+      alterDrafts: drafts,
+      ...hydrateAlterEditor(drafts, profile, date, nextSpecialty),
       alterSaved: false
     });
   });
@@ -798,8 +850,9 @@ export function bindHospital(root, state, update) {
     if (!profile) return;
     const specialty = state.alterSpecialty || SPECIALTIES[0];
     const date = state.alterDate || new Date(Date.now() + 86400000).toISOString();
-    const useAlgorithm = state.alterUseAlgo != null ? !!state.alterUseAlgo : true;
-    const useFlat = !!state.alterUseFlat;
+    const existing = findShiftForDay(profile.id, specialty, date);
+    const useAlgorithm = resolveAlterUseAlgo(state, existing);
+    const useFlat = resolveAlterUseFlat(state, existing);
     const breakdown = getRateBreakdown(specialty, date, profile.id);
     const baseRate = Number(getPolicy(profile.id).specialtyBaseRates?.[specialty] || 0);
     const rateFloor = useAlgorithm
@@ -816,7 +869,21 @@ export function bindHospital(root, state, update) {
       useFlatRate: useFlat,
       flatRate
     });
-    update({ alterSaved: true, alterRateFloor: rateFloor, alterFlatRate: flatRate });
+    const drafts = { ...(state.alterDrafts || {}) };
+    drafts[alterDraftKey(date, specialty)] = {
+      useAlgo: useAlgorithm,
+      rateFloor,
+      useFlat,
+      flatRate
+    };
+    update({
+      alterSaved: true,
+      alterRateFloor: rateFloor,
+      alterFlatRate: flatRate,
+      alterUseAlgo: useAlgorithm,
+      alterUseFlat: useFlat,
+      alterDrafts: drafts
+    });
     setTimeout(() => update({ alterSaved: false }), 1500);
   });
 
