@@ -1,6 +1,6 @@
 -- =============================================================================
 -- ON CALL — paste this entire file into Supabase → SQL Editor → Run
--- Project: yrnndfpvovuvjlzgivgu
+-- Project: xapkoawwyfhyzusnzhzk
 -- =============================================================================
 
 -- On-Call Wizard Supabase schema
