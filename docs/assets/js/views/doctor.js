@@ -46,32 +46,38 @@ function renderDoctorHome(state, profile) {
     ${navBar(profile ? `Dr. ${profile.lastName}` : "On‑Call")}
     <main class="main-scroll stack">
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
-      ${pointsCard(appStore.points)}
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        ${tokenBadge(appStore.tokens)}
-        <button type="button" class="btn-ghost" data-open-sheet="dashboard" style="font-size:12px">Dashboard ›</button>
+      <div class="content-grid two-col">
+        <div class="stack">
+          ${pointsCard(appStore.points)}
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            ${tokenBadge(appStore.tokens)}
+            <button type="button" class="btn-ghost" data-open-sheet="dashboard">Dashboard ›</button>
+          </div>
+          ${renderCalendar({ month, days, selectedDate: selected, mode: "doctor" })}
+          ${selected ? `
+            <section class="card">
+              <div class="subtitle" style="font-weight:600;margin-bottom:10px">${selected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
+              ${dayShifts.length ? dayShifts.map((s, i) => `${shiftRow(s)}${i < dayShifts.length - 1 ? '<div class="divider"></div>' : ""}`).join("") : `<div class="subtitle">${icon("moon")} No open shifts</div>`}
+              ${dayShifts.length ? `<button type="button" class="btn-primary" style="margin-top:12px;width:100%" data-open-day="${selected.toISOString()}">Apply for this day</button>` : ""}
+            </section>` : ""}
+        </div>
+        <div class="stack">
+          <section class="card stack">
+            ${sectionHeader("Recommended", "sparkles")}
+            ${rec.length ? rec.map((s, i) => `${shiftRow(s)}${i < rec.length - 1 ? '<div class="divider"></div>' : ""}`).join("") : `<p class="subtitle">No open shifts right now.</p>`}
+          </section>
+          ${tokenReqs.length ? `
+            <section class="card stack">
+              ${sectionHeader("Requested Days")}
+              ${tokenReqs.map((r) => `
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px">
+                  <span>${new Date(r.date).toLocaleDateString()} · ${escapeHtml(r.specialty)}</span>
+                  <span class="verify-badge ${escapeHtml(r.status)}">${escapeHtml(r.status.replace("_", " "))}</span>
+                </div>`).join("")}
+            </section>` : ""}
+          ${credentialStatusCard(profile)}
+        </div>
       </div>
-      ${renderCalendar({ month, days, selectedDate: selected, mode: "doctor" })}
-      ${selected ? `
-        <section class="card">
-          <div class="subtitle" style="font-weight:600;margin-bottom:10px">${selected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
-          ${dayShifts.length ? dayShifts.map((s, i) => `${shiftRow(s)}${i < dayShifts.length - 1 ? '<div class="divider"></div>' : ""}`).join("") : `<div class="subtitle">${icon("moon")} No open shifts</div>`}
-          ${dayShifts.length ? `<button type="button" class="btn-primary" style="margin-top:12px;width:100%" data-open-day="${selected.toISOString()}">Apply for this day</button>` : ""}
-        </section>` : ""}
-      <section class="card stack">
-        ${sectionHeader("Recommended", "sparkles")}
-        ${rec.length ? rec.map((s, i) => `${shiftRow(s)}${i < rec.length - 1 ? '<div class="divider"></div>' : ""}`).join("") : `<p class="subtitle">No open shifts right now.</p>`}
-      </section>
-      ${tokenReqs.length ? `
-        <section class="card stack">
-          ${sectionHeader("Requested Days")}
-          ${tokenReqs.map((r) => `
-            <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">
-              <span>${new Date(r.date).toLocaleDateString()} · ${escapeHtml(r.specialty)}</span>
-              <span class="verify-badge ${escapeHtml(r.status)}">${escapeHtml(r.status.replace("_", " "))}</span>
-            </div>`).join("")}
-        </section>` : ""}
-      ${credentialStatusCard(profile)}
     </main>`;
 }
 
@@ -85,16 +91,18 @@ function renderMyShifts(state, profile) {
       ${trades.length ? `
         <section class="card stack">
           ${sectionHeader("Incoming Trades", "shifts")}
-          ${trades.map((t) => `
-            <div class="trade-card">
-              <div class="subtitle">Shift trade from colleague</div>
-              <div class="trade-actions">
-                <button type="button" class="approve" data-respond-trade="${t.id}" data-accept="1">Accept</button>
-                <button type="button" class="deny" data-respond-trade="${t.id}" data-accept="0">Decline</button>
-              </div>
-            </div>`).join("")}
+          <div class="roster-grid">
+            ${trades.map((t) => `
+              <div class="trade-card">
+                <div class="subtitle">Shift trade from colleague</div>
+                <div class="trade-actions">
+                  <button type="button" class="approve" data-respond-trade="${t.id}" data-accept="1">Accept</button>
+                  <button type="button" class="deny" data-respond-trade="${t.id}" data-accept="0">Decline</button>
+                </div>
+              </div>`).join("")}
+          </div>
         </section>` : ""}
-      ${active.length ? active.map((a) => {
+      ${active.length ? `<div class="roster-grid">${active.map((a) => {
         const cancelPrev = penaltyPreview("cancel", a);
         const tradePrev = penaltyPreview("trade", a);
         return `
@@ -112,7 +120,7 @@ function renderMyShifts(state, profile) {
           </div>
           ${!cancelPrev.allowed ? `<p class="subtitle" style="font-size:11px">${escapeHtml(cancelPrev.blockedReason)}</p>` : ""}
         </section>`;
-      }).join("") : emptyState("No assigned shifts", "Accept shifts from the home calendar or recommended list.")}
+      }).join("")}</div>` : emptyState("No assigned shifts", "Accept shifts from the home calendar or recommended list.")}
     </main>`;
 }
 
@@ -122,42 +130,46 @@ function renderCredentials(profile) {
     ${navBar("Credentials")}
     <main class="main-scroll stack">
       ${profile ? `
-        <section class="card stack">
-          ${sectionHeader("Identity")}
-          <div style="display:grid;gap:10px;font-size:0.95rem">
-            <div><span class="tertiary">Name</span><div>${escapeHtml(profile.firstName)} ${escapeHtml(profile.lastName)}, ${escapeHtml(profile.credential)}</div></div>
-            <div class="divider"></div>
-            <div><span class="tertiary">NPI</span><div>${escapeHtml(profile.npi)}</div></div>
-            <div class="divider"></div>
-            <div><span class="tertiary">License</span><div>${escapeHtml(profile.licenseNumber)} · ${escapeHtml(profile.licenseState)}</div></div>
-            <div class="divider"></div>
-            <div><span class="tertiary">Specialties</span><div>${(profile.specialties || []).map(escapeHtml).join(", ")}</div></div>
+        <div class="content-grid two-col">
+          <div class="stack">
+            <section class="card stack">
+              ${sectionHeader("Identity")}
+              <div style="display:grid;gap:12px;font-size:1rem">
+                <div><span class="tertiary">Name</span><div>${escapeHtml(profile.firstName)} ${escapeHtml(profile.lastName)}, ${escapeHtml(profile.credential)}</div></div>
+                <div class="divider"></div>
+                <div><span class="tertiary">NPI</span><div>${escapeHtml(profile.npi)}</div></div>
+                <div class="divider"></div>
+                <div><span class="tertiary">License</span><div>${escapeHtml(profile.licenseNumber)} · ${escapeHtml(profile.licenseState)}</div></div>
+                <div class="divider"></div>
+                <div><span class="tertiary">Specialties</span><div>${(profile.specialties || []).map(escapeHtml).join(", ")}</div></div>
+              </div>
+            </section>
+            <section class="card stack">
+              ${sectionHeader("Verification", "credentials")}
+              ${verificationBadge(profile.verificationStatus)}
+              <p class="subtitle">Upload documents from the iOS app for full verification.</p>
+            </section>
           </div>
-        </section>
-        <section class="card stack">
-          ${sectionHeader("Verification", "credentials")}
-          ${verificationBadge(profile.verificationStatus)}
-          <p class="subtitle">Upload documents from the iOS app for full verification.</p>
-        </section>
-        <section class="card stack">
-          ${sectionHeader("Preferences")}
-          <label class="toggle-row">
-            <span>Only my specialties</span>
-            <input type="checkbox" data-pref="showOnlyMySpecialties" ${prefs.showOnlyMySpecialties ? "checked" : ""} />
-          </label>
-          <label class="toggle-row">
-            <span>Notify new shifts</span>
-            <input type="checkbox" data-pref="notifyNewShifts" ${prefs.notifyNewShifts ? "checked" : ""} />
-          </label>
-          <label class="toggle-row">
-            <span>Notify trade requests</span>
-            <input type="checkbox" data-pref="notifyTradeRequests" ${prefs.notifyTradeRequests ? "checked" : ""} />
-          </label>
-          <label class="toggle-row">
-            <span>Notify approvals</span>
-            <input type="checkbox" data-pref="notifyApprovals" ${prefs.notifyApprovals ? "checked" : ""} />
-          </label>
-        </section>` : emptyState("No profile", "Complete onboarding to view credentials.")}
+          <section class="card stack">
+            ${sectionHeader("Preferences")}
+            <label class="toggle-row">
+              <span>Only my specialties</span>
+              <input type="checkbox" data-pref="showOnlyMySpecialties" ${prefs.showOnlyMySpecialties ? "checked" : ""} />
+            </label>
+            <label class="toggle-row">
+              <span>Notify new shifts</span>
+              <input type="checkbox" data-pref="notifyNewShifts" ${prefs.notifyNewShifts ? "checked" : ""} />
+            </label>
+            <label class="toggle-row">
+              <span>Notify trade requests</span>
+              <input type="checkbox" data-pref="notifyTradeRequests" ${prefs.notifyTradeRequests ? "checked" : ""} />
+            </label>
+            <label class="toggle-row">
+              <span>Notify approvals</span>
+              <input type="checkbox" data-pref="notifyApprovals" ${prefs.notifyApprovals ? "checked" : ""} />
+            </label>
+          </section>
+        </div>` : emptyState("No profile", "Complete onboarding to view credentials.")}
     </main>`;
 }
 
