@@ -1,5 +1,5 @@
 import { escapeHtml, SPECIALTIES, CREDENTIALS } from "../brand.js";
-import { appStore } from "../store.js";
+import { appStore, finishDoctorProfile, finishHospitalProfile, defaultPolicy } from "../store.js";
 
 const DOCTOR_STEPS = [
   { icon: "👤", title: "Who are you?", subtitle: "Enter your name and credential type." },
@@ -97,7 +97,11 @@ function hospitalStepBody(state) {
           <div class="form-field"><label>Granularity</label>
             <select data-field="granularity"><option value="day">Per day</option><option value="hour">Per hour</option></select>
           </div>
-          <p class="subtitle">Default scheduling policy will apply to newly generated shifts.</p>
+          <label class="toggle-row">
+            <span>Require administrator approval for shifts</span>
+            <input type="checkbox" data-field="adminApprove" ${state.adminApprove ? "checked" : ""} />
+          </label>
+          <p class="subtitle">Default scheduling policy applies to newly generated shifts.</p>
         </div>`;
   }
 }
@@ -105,7 +109,8 @@ function hospitalStepBody(state) {
 export function readOnboardingFields(root) {
   const data = {};
   root.querySelectorAll("[data-field]").forEach((el) => {
-    data[el.dataset.field] = el.value;
+    if (el.type === "checkbox") data[el.dataset.field] = el.checked;
+    else data[el.dataset.field] = el.value;
   });
   return data;
 }
@@ -119,9 +124,9 @@ export function bindOnboarding(root, handlers) {
   });
 }
 
-export function finishDoctorOnboarding(state) {
+export async function finishDoctorOnboarding(state) {
   const profile = {
-    id: crypto.randomUUID(),
+    id: appStore.session?.userID || crypto.randomUUID(),
     userID: appStore.session?.userID,
     firstName: state.firstName.trim(),
     lastName: state.lastName.trim(),
@@ -129,25 +134,29 @@ export function finishDoctorOnboarding(state) {
     npi: state.npi,
     deaNumber: "",
     licenseNumber: state.licenseNumber,
-    licenseState: state.licenseState.toUpperCase(),
+    licenseState: (state.licenseState || "").toUpperCase(),
     specialties: state.specialties || [],
-    email: state.email,
-    verificationStatus: "pending",
+    email: state.email || appStore.session?.email,
+    verificationStatus: state.verified ? "pending" : "unverified",
     verificationFlags: []
   };
-  appStore.saveDoctorProfile(profile);
+  await finishDoctorProfile(profile);
 }
 
-export function finishHospitalOnboarding(state) {
+export async function finishHospitalOnboarding(state) {
+  const policy = defaultPolicy();
+  policy.granularity = state.granularity || "day";
+  policy.administratorApproveShifts = !!state.adminApprove;
+
   const profile = {
     id: crypto.randomUUID(),
     userID: appStore.session?.userID,
     name: state.name.trim(),
     npi: state.npi,
-    email: state.email,
+    email: state.email || appStore.session?.email,
     verificationStatus: "pending",
     verificationFlags: [],
-    schedulingPolicy: { granularity: state.granularity || "day" }
+    schedulingPolicy: policy
   };
-  appStore.saveHospitalProfile(profile);
+  await finishHospitalProfile(profile);
 }

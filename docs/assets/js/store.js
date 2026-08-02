@@ -1,18 +1,27 @@
 import { uuid, startOfDay, sameDay, SPECIALTIES } from "./brand.js";
 import { normalizeShift, isPastShift, currentRate } from "./shift-math.js";
 import { getSupabase, isConfigured, upsertProfile } from "./supabase-client.js";
+import { defaultPolicy, previewPenalty, normalizeCancellationScale } from "./domain/policy.js";
+import { algorithmRate, computeRate } from "./domain/pricing.js";
+import * as sync from "./domain/sync.js";
 
-const KEYS = {
+export const KEYS = {
   accounts: "accounts_v2",
   session: "oncall_session",
+  savedRole: "saved_role",
   doctorProfile: "doctor_profile_v2",
-  hospitalProfile: "hospital_profile_v1",
+  hospitalProfile: "hospital_profile_v2",
   hospitalShifts: "hospital_shifts_v1",
   assignments: "assigned_shifts_v1",
-  tokens: "token_store_v1",
-  points: "points_store_v1",
+  tokens: "doctor_tokens_v2",
+  points: "doctor_points_v1",
+  roster: "doctor_roster_v1",
+  policies: "hospital_scheduling_policy_v1",
+  unavailable: "unavailable_days_v1",
+  proposedRates: "proposed_rates_v1",
+  penaltyLedger: "penalty_ledger_v1",
   doctorPrefs: "doctor_prefs_v1",
-  savedRole: "saved_role"
+  trades: "shift_trade_service_v1"
 };
 
 function read(key, fallback) {
@@ -28,6 +37,86 @@ function write(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function migrateLegacyKeys() {
+  const legacyTokens = read("token_store_v1", null);
+  if (legacyTokens && !localStorage.getItem(KEYS.tokens)) {
+    write(KEYS.tokens, {
+      tokensRemaining: legacyTokens.tokensRemaining ?? 3,
+      dailyLimit: legacyTokens.dailyLimit ?? 3,
+      lastResetDate: new Date().toISOString(),
+      requestedDays: legacyTokens.requests || []
+    });
+  }
+  const legacyHospital = read("hospital_profile_v1", null);
+  if (legacyHospital && !localStorage.getItem(KEYS.hospitalProfile)) {
+    write(KEYS.hospitalProfile, legacyHospital);
+  }
+  const legacyPoints = read("points_store_v1", null);
+  if (legacyPoints && !localStorage.getItem(KEYS.points)) {
+    write(KEYS.points, legacyPoints);
+  }
+}
+
+migrateLegacyKeys();
+
+function defaultTokens() {
+  return {
+    tokensRemaining: 3,
+    dailyLimit: 3,
+    lastResetDate: startOfDay(new Date()).toISOString(),
+    requestedDays: []
+  };
+}
+
+function defaultPoints() {
+  return {
+    totalPoints: 0,
+    currentStreak: 0,
+    lastShiftDate: null,
+    level: { name: "Resident Level", minPoints: 0, icon: "🩺" },
+    nextLevel: { name: "Attending Level", minPoints: 500 },
+    recentEvents: []
+  };
+}
+
+function defaultPrefs() {
+  return {
+    showOnlyMySpecialties: true,
+    hiddenHospitalIDs: [],
+    hiddenSpecialties: [],
+    notifyNewShifts: true,
+    notifyTradeRequests: true,
+    notifyApprovals: true
+  };
+}
+
+function refreshTokenDailyReset(tokens) {
+  const today = startOfDay(new Date()).toISOString();
+  if (tokens.lastResetDate && sameDay(tokens.lastResetDate, today)) return tokens;
+  return { ...tokens, tokensRemaining: tokens.dailyLimit, lastResetDate: today };
+}
+
+function levelForPoints(total) {
+  const levels = [
+    { name: "Resident Level", minPoints: 0, icon: "🩺" },
+    { name: "Attending Level", minPoints: 500, icon: "⭐" },
+    { name: "Fellow Level", minPoints: 1500, icon: "🏅" },
+    { name: "Hospitalist Level", minPoints: 3000, icon: "🏥" },
+    { name: "Chief Level", minPoints: 6000, icon: "👑" },
+    { name: "Department Head Level", minPoints: 12000, icon: "🌟" }
+  ];
+  let current = levels[0];
+  let next = levels[1] || null;
+  for (let i = levels.length - 1; i >= 0; i--) {
+    if (total >= levels[i].minPoints) {
+      current = levels[i];
+      next = levels[i + 1] || null;
+      break;
+    }
+  }
+  return { level: current, nextLevel: next };
+}
+
 export const appStore = {
   listeners: new Set(),
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
@@ -35,7 +124,11 @@ export const appStore = {
 
   get session() { return read(KEYS.session, null); },
   setSession(session) { write(KEYS.session, session); this.emit(); },
-  clearSession() { localStorage.removeItem(KEYS.session); localStorage.removeItem(KEYS.savedRole); this.emit(); },
+  clearSession() {
+    localStorage.removeItem(KEYS.session);
+    localStorage.removeItem(KEYS.savedRole);
+    this.emit();
+  },
 
   get savedRole() { return localStorage.getItem(KEYS.savedRole); },
   setSavedRole(role) { localStorage.setItem(KEYS.savedRole, role); this.emit(); },
@@ -49,45 +142,89 @@ export const appStore = {
   get hospitalProfile() { return read(KEYS.hospitalProfile, null); },
   saveHospitalProfile(p) { write(KEYS.hospitalProfile, p); this.emit(); },
 
-  get shifts() {
-    return read(KEYS.hospitalShifts, []).map(normalizeShift);
-  },
-  saveShifts(shifts) {
-    write(KEYS.hospitalShifts, shifts);
-    this.emit();
-  },
+  get shifts() { return read(KEYS.hospitalShifts, []).map(normalizeShift); },
+  saveShifts(shifts) { write(KEYS.hospitalShifts, shifts); this.emit(); },
 
-  get assignments() { return read(KEYS.assignments, []); },
-  saveAssignments(list) { write(KEYS.assignments, list); this.emit(); },
+  get assignments() {
+    const raw = read(KEYS.assignments, { shifts: [] });
+    return Array.isArray(raw) ? raw : (raw.shifts || []);
+  },
+  saveAssignments(list) { write(KEYS.assignments, { shifts: list }); this.emit(); },
 
   get tokens() {
-    return read(KEYS.tokens, { dailyLimit: 3, tokensRemaining: 3, requests: [] });
+    const t = refreshTokenDailyReset(read(KEYS.tokens, defaultTokens()));
+    write(KEYS.tokens, t);
+    return t;
   },
   saveTokens(state) { write(KEYS.tokens, state); this.emit(); },
 
   get points() {
-    return read(KEYS.points, {
-      totalPoints: 0,
-      currentStreak: 0,
-      level: { name: "Intern", minPoints: 0, icon: "🩺" },
-      nextLevel: { name: "Resident", minPoints: 100 },
-      recentEvents: []
-    });
+    const p = read(KEYS.points, defaultPoints());
+    const { level, nextLevel } = levelForPoints(p.totalPoints);
+    return { ...p, level, nextLevel };
   },
   savePoints(state) { write(KEYS.points, state); this.emit(); },
 
-  get doctorPrefs() {
-    return read(KEYS.doctorPrefs, {
-      showOnlyMySpecialties: true,
-      hiddenHospitalIDs: [],
-      hiddenSpecialties: [],
-      notifyNewShifts: true,
-      notifyTradeRequests: true,
-      notifyApprovals: true
-    });
-  },
-  saveDoctorPrefs(prefs) { write(KEYS.doctorPrefs, prefs); this.emit(); }
+  get roster() { return read(KEYS.roster, []); },
+  saveRoster(list) { write(KEYS.roster, list); this.emit(); },
+
+  get policies() { return read(KEYS.policies, {}); },
+  savePolicies(map) { write(KEYS.policies, map); this.emit(); },
+
+  get unavailable() { return read(KEYS.unavailable, {}); },
+  saveUnavailable(map) { write(KEYS.unavailable, map); this.emit(); },
+
+  get proposedRates() { return read(KEYS.proposedRates, []); },
+  saveProposedRates(list) { write(KEYS.proposedRates, list); this.emit(); },
+
+  get penaltyLedger() { return read(KEYS.penaltyLedger, []); },
+  savePenaltyLedger(list) { write(KEYS.penaltyLedger, list); this.emit(); },
+
+  get doctorPrefs() { return read(KEYS.doctorPrefs, defaultPrefs()); },
+  saveDoctorPrefs(prefs) { write(KEYS.doctorPrefs, prefs); this.emit(); },
+
+  get trades() { return read(KEYS.trades, { incoming: [], outgoing: [] }); },
+  saveTrades(t) { write(KEYS.trades, t); this.emit(); }
 };
+
+const syncHooks = {
+  readLocal(key) {
+    switch (key) {
+      case "doctorProfile": return appStore.doctorProfile;
+      case "hospitalProfile": return appStore.hospitalProfile;
+      case "shifts": return appStore.shifts;
+      case "assignments": return appStore.assignments;
+      case "tokens": return appStore.tokens;
+      case "roster": return appStore.roster;
+      case "policies": return appStore.policies;
+      case "unavailable": return appStore.unavailable;
+      default: return null;
+    }
+  },
+  writeLocal(key, value) {
+    switch (key) {
+      case "shifts": appStore.saveShifts(value); break;
+      case "assignments": appStore.saveAssignments(value); break;
+      case "tokens": appStore.saveTokens(value); break;
+      case "roster": appStore.saveRoster(value); break;
+      case "policies": appStore.savePolicies(value); break;
+      case "unavailable": appStore.saveUnavailable(value); break;
+      default: break;
+    }
+  },
+  emit: () => appStore.emit()
+};
+
+export async function syncEverything() {
+  return sync.syncEverything(syncHooks);
+}
+
+async function afterMutation(fn) {
+  if (!isConfigured()) return;
+  try { await fn(); } catch { /* offline */ }
+}
+
+// ── Auth ─────────────────────────────────────────────────────────────
 
 export function accountExists(email) {
   return appStore.accounts.some((a) => a.email === email.toLowerCase());
@@ -98,8 +235,7 @@ export function registerAccount(email, password, role) {
   const existing = appStore.accounts.find((a) => a.email === normalized);
   if (existing) return existing.id;
   const account = { id: uuid(), email: normalized, passwordHash: password, role };
-  const all = [...appStore.accounts, account];
-  appStore.saveAccounts(all);
+  appStore.saveAccounts([...appStore.accounts, account]);
   return account.id;
 }
 
@@ -142,16 +278,122 @@ export function authState() {
   return { kind: "authenticated", role };
 }
 
-const DEMO_HOSPITAL_ID = "00000000-0000-4000-8000-000000000001";
+export function signOut() {
+  appStore.clearSession();
+  if (isConfigured()) {
+    try { getSupabase().auth.signOut(); } catch { /* ignore */ }
+  }
+}
+
+// ── Onboarding finish ────────────────────────────────────────────────
+
+export async function finishDoctorProfile(profile) {
+  const p = { ...profile, id: profile.id || appStore.session?.userID || uuid() };
+  if (appStore.session?.userID) p.userID = appStore.session.userID;
+  appStore.saveDoctorProfile(p);
+  registerDoctorOnRoster(p);
+  await afterMutation(() => sync.upsertDoctorProfile(p));
+  await syncEverything();
+  return p;
+}
+
+export async function finishHospitalProfile(profile) {
+  const policy = profile.schedulingPolicy || defaultPolicy();
+  policy.cancellationPenaltyScale = normalizeCancellationScale(policy.cancellationPenaltyScale);
+  const p = {
+    ...profile,
+    id: profile.id || uuid(),
+    schedulingPolicy: policy
+  };
+  if (appStore.session?.userID) p.userID = appStore.session.userID;
+  appStore.saveHospitalProfile(p);
+  const policies = { ...appStore.policies, [p.id]: policy };
+  appStore.savePolicies(policies);
+  await afterMutation(() => sync.upsertHospitalProfile(p));
+  ensureDemoShifts(p.id, p.name);
+  seedMockDoctors();
+  await syncEverything();
+  return p;
+}
+
+// ── Policy ───────────────────────────────────────────────────────────
+
+export function getPolicy(hospitalID) {
+  const policies = appStore.policies;
+  if (policies[hospitalID]) return { ...defaultPolicy(), ...policies[hospitalID] };
+  const hp = appStore.hospitalProfile;
+  if (hp?.id === hospitalID && hp.schedulingPolicy) {
+    return { ...defaultPolicy(), ...hp.schedulingPolicy };
+  }
+  return defaultPolicy();
+}
+
+export async function savePolicy(hospitalID, policy) {
+  const normalized = { ...policy };
+  normalized.cancellationPenaltyScale = normalizeCancellationScale(normalized.cancellationPenaltyScale);
+  const policies = { ...appStore.policies, [hospitalID]: normalized };
+  appStore.savePolicies(policies);
+  const hp = appStore.hospitalProfile;
+  if (hp?.id === hospitalID) {
+    appStore.saveHospitalProfile({ ...hp, schedulingPolicy: normalized });
+  }
+  await afterMutation(() => sync.upsertPolicy(hospitalID, normalized));
+}
+
+// ── Demo / shifts ────────────────────────────────────────────────────
+
+export const DEMO_HOSPITAL_ID = "00000000-0000-4000-8000-000000000001";
 
 export function demoHospital() {
   return { id: DEMO_HOSPITAL_ID, name: "Demo Medical Center" };
 }
 
+export function pricingObservables(specialty, date, hospitalID) {
+  const day = startOfDay(date);
+  const roster = appStore.roster;
+  const assignments = appStore.assignments;
+  const tokens = appStore.tokens.requestedDays || [];
+  const hospitalShifts = appStore.shifts.filter((s) => s.hospitalID === hospitalID);
+  const specialtyShifts = hospitalShifts.filter((s) => s.specialty === specialty);
+  const openCount = specialtyShifts.filter((s) => !isPastShift(s) && !isShiftFilled(s.id)).length;
+  const specialtyDoctors = roster.filter((d) => d.specialty === specialty && d.verificationStatus === "verified");
+  const hospitalWideOpen = hospitalShifts.filter((s) => !isPastShift(s) && !isShiftFilled(s.id)).length;
+  const hospitalRoster = roster.filter((d) => d.verificationStatus === "verified").length;
+  const pastShifts = specialtyShifts.filter(isPastShift);
+  const recentFillRate = pastShifts.length
+    ? pastShifts.filter((s) => isShiftFilled(s.id)).length / pastShifts.length
+    : null;
+  const daysUntil = (day - startOfDay(new Date())) / 86400000;
+  const pendingTokens = tokens.filter((t) =>
+    t.hospitalID === hospitalID && sameDay(t.date, day) && t.specialty === specialty && t.status === "pending"
+  ).length;
+  const autoApproved = specialtyDoctors.filter((d) => d.isAutoApproved).length;
+  let adjacentUnfilled = 0;
+  for (const offset of [-2, -1, 1, 2]) {
+    const adj = new Date(day);
+    adj.setDate(adj.getDate() + offset);
+    const adjShifts = specialtyShifts.filter((s) => sameDay(s.start, adj) && !isPastShift(s));
+    if (adjShifts.some((s) => !isShiftFilled(s.id))) adjacentUnfilled++;
+  }
+  return {
+    openShiftCount: openCount,
+    availableDoctorCount: specialtyDoctors.length,
+    hospitalWideOpenShifts: hospitalWideOpen,
+    hospitalWideRosterSize: hospitalRoster,
+    recentFillRate,
+    daysUntilShift: daysUntil,
+    pendingTokenRequests: pendingTokens,
+    autoApprovedDoctorCount: autoApproved,
+    adjacentUnfilledDays: adjacentUnfilled,
+    sampleSize: pastShifts.length + specialtyShifts.length
+  };
+}
+
 export function ensureDemoShifts(hospitalID, hospitalName) {
   const hid = hospitalID || DEMO_HOSPITAL_ID;
   const hname = hospitalName || "Demo Medical Center";
-  let shifts = appStore.shifts;
+  const policy = getPolicy(hid);
+  let shifts = [...appStore.shifts];
   const existing = shifts.filter((s) => s.hospitalID === hid && !isPastShift(s));
   if (existing.length >= 30) return;
 
@@ -160,19 +402,20 @@ export function ensureDemoShifts(hospitalID, hospitalName) {
     const date = new Date(start);
     date.setDate(date.getDate() + offset);
     for (const specialty of SPECIALTIES) {
-      const exists = shifts.some(
-        (s) => s.hospitalID === hid && s.specialty === specialty && sameDay(s.start, date)
-      );
-      if (exists) continue;
+      if (shifts.some((s) => s.hospitalID === hid && s.specialty === specialty && sameDay(s.start, date))) {
+        continue;
+      }
+      const proposed = getProposedRate(hid, specialty, date);
+      const rateFloor = proposed.rate;
       shifts.push({
         id: uuid(),
         hospitalID: hid,
         hospital: hname,
         specialty,
         start: date.toISOString(),
-        durationHours: 24,
-        rateFloor: 800 + Math.floor(Math.random() * 400),
-        rateUnit: "per day",
+        durationHours: policy.granularity === "hour" ? 8 : 24,
+        rateFloor,
+        rateUnit: policy.granularity === "hour" ? "per hour" : "per day",
         escalationMode: { type: "automatic" },
         usesAlgorithmPricing: true
       });
@@ -181,10 +424,65 @@ export function ensureDemoShifts(hospitalID, hospitalName) {
   appStore.saveShifts(shifts);
 }
 
+export function getProposedRate(hospitalID, specialty, date) {
+  const day = startOfDay(date);
+  const entries = appStore.proposedRates;
+  const custom = entries.find((e) =>
+    e.hospitalID === hospitalID && e.specialty === specialty && sameDay(e.date, day)
+  );
+  const obs = pricingObservables(specialty, day, hospitalID);
+  const granularity = getPolicy(hospitalID).granularity;
+  const algo = algorithmRate(specialty, day.toISOString(), hospitalID, obs, granularity);
+  return { rate: custom?.rate ?? algo, algorithmRate: algo, isCustom: !!custom };
+}
+
+export async function setProposedRate(hospitalID, specialty, date, rate) {
+  const day = startOfDay(date).toISOString();
+  let entries = appStore.proposedRates.filter((e) =>
+    !(e.hospitalID === hospitalID && e.specialty === specialty && sameDay(e.date, day))
+  );
+  entries.push({ hospitalID, specialty, date: day, rate });
+  appStore.saveProposedRates(entries);
+
+  let shifts = appStore.shifts.map((s) => {
+    if (s.hospitalID === hospitalID && s.specialty === specialty && sameDay(s.start, day)) {
+      return { ...s, rateFloor: rate };
+    }
+    return s;
+  });
+  appStore.saveShifts(shifts);
+
+  await afterMutation(async () => {
+    if (isConfigured()) {
+      const supabase = getSupabase();
+      await supabase.from("proposed_rates").upsert({
+        hospital_id: hospitalID,
+        specialty,
+        date: day.slice(0, 10),
+        rate
+      });
+    }
+    for (const s of shifts.filter((x) => x.hospitalID === hospitalID && x.specialty === specialty && sameDay(x.start, day))) {
+      await sync.upsertShift(s);
+    }
+  });
+}
+
+export async function resetProposedRate(hospitalID, specialty, date) {
+  const day = startOfDay(date).toISOString();
+  const entries = appStore.proposedRates.filter((e) =>
+    !(e.hospitalID === hospitalID && e.specialty === specialty && sameDay(e.date, day))
+  );
+  appStore.saveProposedRates(entries);
+  const { algorithmRate: algo } = getProposedRate(hospitalID, specialty, date);
+  await setProposedRate(hospitalID, specialty, date, algo);
+}
+
 export function openShifts(profile) {
   const prefs = appStore.doctorPrefs;
   return appStore.shifts
     .filter((s) => !isPastShift(s) && !isShiftFilled(s.id))
+    .filter((s) => !isDayUnavailable(s.start, s.hospitalID))
     .filter((s) => {
       if (prefs.hiddenHospitalIDs.includes(s.hospitalID)) return false;
       if (prefs.hiddenSpecialties.includes(s.specialty)) return false;
@@ -202,75 +500,18 @@ export function isShiftFilled(shiftID) {
 }
 
 export function activeAssignments() {
-  return appStore.assignments.filter((a) => a.status === "scheduled" || a.status === "traded_pending");
+  return appStore.assignments.filter((a) =>
+    a.status === "scheduled" || a.status === "traded_pending"
+  );
 }
 
 export function pendingTradeCount() {
-  return appStore.assignments.filter((a) => a.status === "traded_pending").length;
+  const trades = appStore.trades;
+  return (trades.incoming?.length || 0) + appStore.assignments.filter((a) => a.status === "traded_pending").length;
 }
 
-export function acceptShift(shift, doctor) {
-  if (isShiftFilled(shift.id)) return;
-  const list = [...appStore.assignments, {
-    id: uuid(),
-    shiftID: shift.id,
-    shift,
-    doctorID: doctor.id,
-    doctorName: `${doctor.firstName} ${doctor.lastName}`,
-    status: "scheduled",
-    assignedAt: new Date().toISOString()
-  }];
-  appStore.saveAssignments(list);
-  awardPoints(25, "Accepted shift");
-}
-
-export function awardPoints(amount, label) {
-  const pts = appStore.points;
-  pts.totalPoints += amount;
-  pts.recentEvents = [{ event: { label, points: amount, icon: "★" } }, ...pts.recentEvents].slice(0, 10);
-  if (pts.totalPoints >= 100) {
-    pts.level = { name: "Resident", minPoints: 100, icon: "⭐" };
-    pts.nextLevel = { name: "Attending", minPoints: 500 };
-  }
-  appStore.savePoints(pts);
-}
-
-export function openShiftCount(hospitalID) {
-  return appStore.shifts.filter(
-    (s) => s.hospitalID === hospitalID && !isPastShift(s) && !isShiftFilled(s.id)
-  ).length;
-}
-
-export function fillRatePercent(hospitalID) {
-  const future = appStore.shifts.filter((s) => s.hospitalID === hospitalID && !isPastShift(s));
-  if (!future.length) return 0;
-  const filled = future.filter((s) => isShiftFilled(s.id)).length;
-  return Math.round((filled / future.length) * 100);
-}
-
-export async function syncShiftsFromSupabase(hospitalID) {
-  if (!isConfigured()) return;
-  try {
-    const supabase = getSupabase();
-    let query = supabase.from("shifts").select("*").gte("date", new Date().toISOString()).order("date");
-    if (hospitalID) query = query.eq("hospital_id", hospitalID);
-    const { data, error } = await query.limit(200);
-    if (error || !data?.length) return;
-    const mapped = data.map((row) => normalizeShift({
-      id: row.id,
-      hospital_id: row.hospital_id,
-      hospital_name: row.hospital_name,
-      specialty: row.specialty,
-      date: row.date,
-      rate_floor: row.rate_floor,
-      rate_unit: row.rate_unit,
-      duration_hours: row.duration_hours
-    }));
-    const local = appStore.shifts.filter((s) => !mapped.some((m) => m.id === s.id));
-    appStore.saveShifts([...local, ...mapped]);
-  } catch {
-    /* offline */
-  }
+export function incomingTrades() {
+  return appStore.trades.incoming || [];
 }
 
 export function recommendedShifts(limit = 3) {
@@ -283,27 +524,400 @@ export function shiftsForDate(date, profile) {
   return openShifts(profile).filter((s) => sameDay(s.start, date));
 }
 
-export function requestToken(date, hospitalID, hospitalName, specialty, doctorID) {
-  const tokens = appStore.tokens;
-  if (tokens.tokensRemaining <= 0) return { ok: false, error: "No tokens remaining today." };
-  tokens.tokensRemaining -= 1;
-  tokens.requests.push({
-    id: uuid(),
-    date: startOfDay(date).toISOString(),
-    hospitalID,
-    hospitalName,
-    specialty,
-    doctorID,
-    status: "pending",
-    requestedAt: new Date().toISOString()
-  });
-  appStore.saveTokens(tokens);
-  return { ok: true };
+export function openShiftCount(hospitalID) {
+  return appStore.shifts.filter(
+    (s) => s.hospitalID === hospitalID && !isPastShift(s) && !isShiftFilled(s.id)
+  ).length;
 }
 
-export function signOut() {
-  appStore.clearSession();
-  if (isConfigured()) {
-    try { getSupabase().auth.signOut(); } catch { /* ignore */ }
+export function fillRatePercent(hospitalID) {
+  const future = appStore.shifts.filter((s) => s.hospitalID === hospitalID && !isPastShift(s));
+  if (!future.length) return 0;
+  return Math.round(future.filter((s) => isShiftFilled(s.id)).length / future.length * 100);
+}
+
+export function autoApprovedCount() {
+  return appStore.roster.filter((d) => d.isAutoApproved).length;
+}
+
+// ── Unavailable days ─────────────────────────────────────────────────
+
+export function isDayUnavailable(date, hospitalID) {
+  const map = appStore.unavailable;
+  const dates = map[hospitalID] || [];
+  return dates.some((d) => sameDay(d, date));
+}
+
+export async function toggleUnavailable(hospitalID, date) {
+  const map = { ...appStore.unavailable };
+  const dates = [...(map[hospitalID] || [])];
+  const dayISO = startOfDay(date).toISOString();
+  const idx = dates.findIndex((d) => sameDay(d, dayISO));
+  let blocked;
+  if (idx >= 0) {
+    dates.splice(idx, 1);
+    blocked = false;
+  } else {
+    dates.push(dayISO);
+    blocked = true;
+  }
+  map[hospitalID] = dates;
+  appStore.saveUnavailable(map);
+  await afterMutation(() => sync.setUnavailable(hospitalID, date, blocked));
+}
+
+// ── Tokens ───────────────────────────────────────────────────────────
+
+export function tokenRequestsForHospital(hospitalID, date) {
+  return (appStore.tokens.requestedDays || []).filter((r) =>
+    r.hospitalID === hospitalID && (!date || sameDay(r.date, date))
+  );
+}
+
+export function canAcceptOnDay(date, hospitalID, doctorID) {
+  const req = (appStore.tokens.requestedDays || []).find((r) =>
+    r.doctorID === doctorID && r.hospitalID === hospitalID && sameDay(r.date, date)
+  );
+  if (!req) return getPolicy(hospitalID).administratorApproveShifts === false;
+  return req.status === "approved" || req.status === "auto_approved";
+}
+
+export async function requestToken(date, hospitalID, hospitalName, specialty, doctor) {
+  const tokens = { ...appStore.tokens };
+  if (tokens.tokensRemaining <= 0) return { ok: false, error: "No tokens remaining today." };
+
+  const day = startOfDay(date);
+  if ((tokens.requestedDays || []).some((r) =>
+    r.doctorID === doctor.id && sameDay(r.date, day)
+  )) {
+    return { ok: false, error: "You already requested this day." };
+  }
+
+  const policy = getPolicy(hospitalID);
+  let status = "pending";
+  let approvedAt = null;
+  const roster = appStore.roster;
+  const autoApproved = roster.find((d) => d.id === doctor.id)?.isAutoApproved;
+
+  if (!policy.administratorApproveShifts && doctor.verificationStatus === "verified") {
+    status = "auto_approved";
+    approvedAt = new Date().toISOString();
+  } else if (autoApproved) {
+    status = "auto_approved";
+    approvedAt = new Date().toISOString();
+  }
+
+  const { rate } = getProposedRate(hospitalID, specialty, day);
+  const req = {
+    id: uuid(),
+    doctorID: doctor.id,
+    doctorName: `${doctor.firstName} ${doctor.lastName}`,
+    credential: doctor.credential,
+    hospitalID,
+    hospitalName,
+    date: day.toISOString(),
+    specialty,
+    status,
+    requestedAt: new Date().toISOString(),
+    approvedAt,
+    shiftRate: rate
+  };
+
+  if (status !== "auto_approved") tokens.tokensRemaining -= 1;
+  tokens.requestedDays = [...(tokens.requestedDays || []), req];
+  appStore.saveTokens(tokens);
+
+  await afterMutation(() => sync.submitTokenRequest(req));
+  return { ok: true, request: req };
+}
+
+export async function approveToken(id) {
+  const tokens = { ...appStore.tokens };
+  const idx = (tokens.requestedDays || []).findIndex((r) => r.id === id);
+  if (idx < 0) return;
+  tokens.requestedDays[idx].status = "approved";
+  tokens.requestedDays[idx].approvedAt = new Date().toISOString();
+  appStore.saveTokens(tokens);
+  await afterMutation(() => sync.updateTokenStatus(id, "approved"));
+}
+
+export async function denyToken(id) {
+  const tokens = { ...appStore.tokens };
+  const idx = (tokens.requestedDays || []).findIndex((r) => r.id === id);
+  if (idx < 0) return;
+  if (tokens.requestedDays[idx].status === "pending") {
+    tokens.tokensRemaining = Math.min(tokens.tokensRemaining + 1, tokens.dailyLimit);
+  }
+  tokens.requestedDays[idx].status = "denied";
+  appStore.saveTokens(tokens);
+  await afterMutation(() => sync.updateTokenStatus(id, "denied"));
+}
+
+// ── Assignments ──────────────────────────────────────────────────────
+
+export function awardPoints(amount, label, icon = "★") {
+  const pts = { ...appStore.points };
+  pts.totalPoints += amount;
+  pts.recentEvents = [{ event: { label, points: amount, icon } }, ...(pts.recentEvents || [])].slice(0, 20);
+  const { level, nextLevel } = levelForPoints(pts.totalPoints);
+  pts.level = level;
+  pts.nextLevel = nextLevel;
+  appStore.savePoints(pts);
+}
+
+export async function acceptShift(shift, doctor) {
+  if (isShiftFilled(shift.id)) return { ok: false, error: "Shift already filled." };
+  if (!canAcceptOnDay(shift.start, shift.hospitalID, doctor.id) &&
+      getPolicy(shift.hospitalID).administratorApproveShifts) {
+    return { ok: false, error: "Token not approved for this day." };
+  }
+
+  const assignment = {
+    id: uuid(),
+    shiftID: shift.id,
+    shift,
+    doctorID: doctor.id,
+    doctorName: `${doctor.firstName} ${doctor.lastName}`,
+    status: "scheduled",
+    assignedAt: new Date().toISOString()
+  };
+
+  appStore.saveAssignments([...appStore.assignments, assignment]);
+  awardPoints(50, "Shift Accepted");
+
+  await afterMutation(async () => {
+    await sync.createAssignment(shift.id, doctor.id, {
+      hospitalID: shift.hospitalID,
+      shiftDate: shift.start,
+      shift
+    });
+    await sync.upsertShift(shift);
+  });
+
+  return { ok: true, assignment };
+}
+
+export async function cancelShift(assignment) {
+  const policy = getPolicy(assignment.shift.hospitalID);
+  const preview = previewPenalty(
+    "cancel",
+    policy,
+    assignment.shift.start,
+    currentRate(assignment.shift)
+  );
+  if (!preview.allowed) return { ok: false, error: preview.blockedReason };
+
+  let penalty = preview.penaltyAmount;
+  await afterMutation(async () => {
+    const res = await sync.cancelAssignment(assignment.shiftID, assignment.doctorID);
+    if (res?.penalty != null) penalty = res.penalty;
+  });
+
+  const list = appStore.assignments.map((a) =>
+    a.id === assignment.id ? { ...a, status: "canceled" } : a
+  );
+  appStore.saveAssignments(list);
+
+  recordPenalty({
+    doctorID: assignment.doctorID,
+    hospitalID: assignment.shift.hospitalID,
+    shiftID: assignment.shiftID,
+    type: "cancel",
+    amount: penalty
+  });
+
+  return { ok: true, penalty };
+}
+
+export async function requestTrade(assignment, toDoctor) {
+  const policy = getPolicy(assignment.shift.hospitalID);
+  const preview = previewPenalty("trade", policy, assignment.shift.start);
+  if (!preview.allowed) return { ok: false, error: preview.blockedReason };
+
+  const list = appStore.assignments.map((a) =>
+    a.id === assignment.id ? { ...a, status: "traded_pending" } : a
+  );
+  appStore.saveAssignments(list);
+
+  const trade = {
+    id: uuid(),
+    shiftID: assignment.shiftID,
+    fromDoctorID: assignment.doctorID,
+    toDoctorID: toDoctor.id,
+    toDoctorName: toDoctor.name,
+    state: "pending",
+    createdAt: new Date().toISOString()
+  };
+
+  const trades = appStore.trades;
+  trades.outgoing = [...(trades.outgoing || []), trade];
+  appStore.saveTrades(trades);
+
+  await afterMutation(() =>
+    sync.requestTrade(assignment.shiftID, assignment.doctorID, toDoctor.id)
+  );
+
+  return { ok: true, trade, preview };
+}
+
+export async function respondTrade(trade, accept) {
+  const policy = getPolicy(
+    appStore.assignments.find((a) => a.shiftID === trade.shiftID)?.shift?.hospitalID
+  );
+  let penalty = 0;
+  if (accept) {
+    const shift = appStore.assignments.find((a) => a.shiftID === trade.shiftID)?.shift;
+    if (shift) {
+      penalty = previewPenalty("trade", policy, shift.start).penaltyAmount;
+    }
+  }
+
+  await afterMutation(() => sync.respondTrade(trade.id, accept));
+
+  let list = appStore.assignments;
+  if (accept) {
+    list = list.map((a) =>
+      a.shiftID === trade.shiftID
+        ? { ...a, doctorID: trade.toDoctorID, doctorName: trade.toDoctorName || a.doctorName, status: "scheduled" }
+        : a
+    );
+    if (penalty > 0) {
+      recordPenalty({
+        doctorID: trade.fromDoctorID,
+        hospitalID: list.find((a) => a.shiftID === trade.shiftID)?.shift?.hospitalID,
+        shiftID: trade.shiftID,
+        type: "trade",
+        amount: penalty
+      });
+    }
+  } else {
+    list = list.map((a) =>
+      a.shiftID === trade.shiftID && a.status === "traded_pending"
+        ? { ...a, status: "scheduled" }
+        : a
+    );
+  }
+  appStore.saveAssignments(list);
+
+  const trades = appStore.trades;
+  trades.incoming = (trades.incoming || []).filter((t) => t.id !== trade.id);
+  appStore.saveTrades(trades);
+
+  return { ok: true, penalty };
+}
+
+function recordPenalty(entry) {
+  const ledger = [...appStore.penaltyLedger, {
+    id: uuid(),
+    ...entry,
+    createdAt: new Date().toISOString()
+  }];
+  appStore.savePenaltyLedger(ledger);
+}
+
+export function penaltyPreview(action, assignment) {
+  const policy = getPolicy(assignment.shift.hospitalID);
+  return previewPenalty(action, policy, assignment.shift.start, currentRate(assignment.shift));
+}
+
+export function earningsSummary() {
+  const active = activeAssignments();
+  const projected = active.reduce((sum, a) => sum + currentRate(a.shift), 0);
+  const history = appStore.assignments.filter((a) => a.status === "canceled" || isPastShift(a.shift));
+  return { projected, completedCount: history.length, activeCount: active.length };
+}
+
+// ── Roster ─────────────────────────────────────────────────────────
+
+export function registerDoctorOnRoster(profile) {
+  const summary = {
+    id: profile.id,
+    name: `${profile.firstName} ${profile.lastName}`,
+    credential: profile.credential,
+    specialty: profile.specialties?.[0] || "Internal Medicine",
+    npi: profile.npi,
+    isAutoApproved: false,
+    verificationStatus: profile.verificationStatus
+  };
+  const roster = [...appStore.roster];
+  const idx = roster.findIndex((d) => d.id === profile.id);
+  if (idx >= 0) roster[idx] = summary;
+  else roster.push(summary);
+  appStore.saveRoster(roster);
+}
+
+export async function toggleRosterAutoApprove(doctorId) {
+  const roster = appStore.roster.map((d) =>
+    d.id === doctorId ? { ...d, isAutoApproved: !d.isAutoApproved } : d
+  );
+  appStore.saveRoster(roster);
+  const doc = roster.find((d) => d.id === doctorId);
+  if (doc?.isAutoApproved) autoApprovePendingTokens(doctorId);
+  const hospitalId = appStore.hospitalProfile?.id;
+  if (hospitalId) {
+    await afterMutation(() => sync.upsertRosterLink(hospitalId, doctorId, doc?.isAutoApproved));
   }
 }
+
+function autoApprovePendingTokens(doctorId) {
+  const tokens = { ...appStore.tokens };
+  let changed = false;
+  tokens.requestedDays = (tokens.requestedDays || []).map((r) => {
+    if (r.doctorID === doctorId && r.status === "pending") {
+      changed = true;
+      tokens.tokensRemaining = Math.min(tokens.tokensRemaining + 1, tokens.dailyLimit);
+      return { ...r, status: "auto_approved", approvedAt: new Date().toISOString() };
+    }
+    return r;
+  });
+  if (changed) appStore.saveTokens(tokens);
+}
+
+export function eligibleTradePartners(specialty, excludingDoctorId) {
+  return appStore.roster.filter((d) =>
+    d.id !== excludingDoctorId &&
+    d.specialty === specialty &&
+    d.verificationStatus === "verified"
+  );
+}
+
+const MOCK_DOCTOR_IDS = [
+  "E1000001-0000-0000-0000-000000000000",
+  "E2000001-0000-0000-0000-000000000000",
+  "E3000001-0000-0000-0000-000000000000",
+  "E4000001-0000-0000-0000-000000000000",
+  "E5000001-0000-0000-0000-000000000000",
+  "E6000001-0000-0000-0000-000000000000",
+  "E7000001-0000-0000-0000-000000000000"
+];
+
+export function seedMockDoctors() {
+  if (MOCK_DOCTOR_IDS.every((id) => appStore.roster.some((d) => d.id === id))) return;
+  const mocks = [
+    { id: MOCK_DOCTOR_IDS[0], name: "Dr. James Carter", credential: "MD", specialty: "Cardiology", npi: "1932756480", isAutoApproved: true, verificationStatus: "verified" },
+    { id: MOCK_DOCTOR_IDS[1], name: "Dr. Lisa Chen", credential: "MD", specialty: "Cardiology", npi: "1073648291", isAutoApproved: true, verificationStatus: "verified" },
+    { id: MOCK_DOCTOR_IDS[2], name: "Dr. Maria Santos", credential: "MD", specialty: "Emergency Medicine", npi: "1548372916", isAutoApproved: true, verificationStatus: "verified" },
+    { id: MOCK_DOCTOR_IDS[3], name: "Dr. David Park", credential: "DO", specialty: "Orthopedics", npi: "1629384750", isAutoApproved: true, verificationStatus: "verified" },
+    { id: MOCK_DOCTOR_IDS[4], name: "Dr. Sarah Kim", credential: "MD", specialty: "Surgery", npi: "1807263549", isAutoApproved: true, verificationStatus: "verified" },
+    { id: MOCK_DOCTOR_IDS[5], name: "Dr. Robert Nguyen", credential: "MD", specialty: "Internal Medicine", npi: "1394827163", isAutoApproved: true, verificationStatus: "verified" },
+    { id: MOCK_DOCTOR_IDS[6], name: "Dr. Emily Walsh", credential: "MD", specialty: "Emergency Medicine", npi: "1265839407", isAutoApproved: true, verificationStatus: "verified" }
+  ];
+  const roster = [...appStore.roster];
+  for (const m of mocks) {
+    if (!roster.some((d) => d.id === m.id)) roster.push(m);
+  }
+  appStore.saveRoster(roster);
+}
+
+// ── Preferences ──────────────────────────────────────────────────────
+
+export function savePreferences(prefs) {
+  appStore.saveDoctorPrefs({ ...appStore.doctorPrefs, ...prefs });
+}
+
+/** @deprecated use syncEverything */
+export async function syncShiftsFromSupabase(hospitalID) {
+  await syncEverything();
+}
+
+export { algorithmRate, computeRate, previewPenalty, defaultPolicy };
