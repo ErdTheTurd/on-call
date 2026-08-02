@@ -1,7 +1,7 @@
 import { isConfigured, getSupabase } from "./supabase-client.js";
 import {
   authState, beginSession, registerAccount, signInLocal,
-  signInRemote, signUpRemote, appStore, syncEverything
+  signInRemote, signUpRemote, appStore, syncEverything, startPeriodicSync
 } from "./store.js";
 import { renderAuthView, bindAuth } from "./views/auth.js";
 import {
@@ -10,6 +10,7 @@ import {
 } from "./views/onboarding.js";
 import { renderDoctorApp, bindDoctor } from "./views/doctor.js";
 import { renderHospitalApp, bindHospital } from "./views/hospital.js";
+import { lookupNPI, verifyDoctorCredentials, validateInstitutionalEmail } from "./domain/verification.js";
 
 const state = {
   route: "boot",
@@ -31,13 +32,25 @@ function merge(path, patch) {
 function update(patch) {
   if (patch.route) state.route = patch.route;
   if (patch.ui) merge("ui", patch.ui);
-  if ("tab" in patch || "sheet" in patch || "daySheet" in patch || "calendarMonth" in patch || "selectedDate" in patch) {
-    merge("ui", patch);
+  if (patch.onb) merge("onb", patch.onb);
+
+  const uiKeys = [
+    "tab", "sheet", "daySheet", "tradeSheet", "calendarMonth", "selectedDate",
+    "alterDate", "alterSpecialty", "alterUseAlgo", "alterOverride",
+    "adminFilter", "adminSearch", "policyTab", "doctorFilter", "doctorAutoOnly",
+    "doctorDetailId", "rateEditSpecialty"
+  ];
+  if (uiKeys.some((k) => k in patch)) {
+    const uiPatch = {};
+    for (const k of uiKeys) {
+      if (k in patch) uiPatch[k] = patch[k];
+    }
+    merge("ui", uiPatch);
   }
+
   if ("authMode" in patch || "role" in patch || "email" in patch || "error" in patch || "loading" in patch) {
     Object.assign(state, patch);
   }
-  if (patch.onb) merge("onb", patch.onb);
   render();
 }
 
@@ -68,6 +81,7 @@ async function boot() {
   }
   render();
   appStore.subscribe(() => render());
+  startPeriodicSync(20000);
 }
 
 function render() {
@@ -89,7 +103,7 @@ function render() {
     bindOnboarding(root, {
       onBack: () => update({ onb: { ...state.onb, step: Math.max(0, state.onb.step - 1) } }),
       onNext: handleOnboardingNext,
-      onVerify: () => update({ onb: { ...state.onb, verified: true } }),
+      onVerify: handleNpiVerify,
       onToggleSpecialty: (sp) => {
         const set = new Set(state.onb.specialties || []);
         set.has(sp) ? set.delete(sp) : set.add(sp);
@@ -98,6 +112,7 @@ function render() {
     });
     root.querySelectorAll("[data-field]").forEach((el) => {
       el.addEventListener("change", () => Object.assign(state.onb, readOnboardingFields(root)));
+      el.addEventListener("input", () => Object.assign(state.onb, readOnboardingFields(root)));
     });
     return;
   }
@@ -179,6 +194,59 @@ async function handleAuthSubmit({ email, password, confirm }) {
     update({ loading: false });
   } catch (err) {
     update({ error: err.message || "Authentication failed.", loading: false });
+  }
+}
+
+async function handleNpiVerify() {
+  const root = document.getElementById("app");
+  Object.assign(state.onb, readOnboardingFields(root));
+  const role = state.onb.role;
+  const npi = state.onb.npi;
+
+  update({ onb: { ...state.onb, loading: true, error: null } });
+  try {
+    if (role === "Doctor") {
+      const emailCheck = validateInstitutionalEmail(state.onb.email || appStore.session?.email);
+      // Allow demo personal emails with a soft flag — still verify NPI.
+      const record = await lookupNPI(npi, "NPI-1");
+      const result = verifyDoctorCredentials({
+        firstName: state.onb.firstName,
+        lastName: state.onb.lastName,
+        credential: state.onb.credential,
+        npiRecord: record,
+        email: state.onb.email || appStore.session?.email
+      });
+      // Soften email domain for demo accounts so onboarding isn't blocked.
+      if (!emailCheck.ok) {
+        result.flags = [...(result.flags || []).filter((f) => !f.includes("institutional")), "Using non-institutional email — queued for review."];
+        if (result.finalStatus === "flagged" && result.nameMatches !== false) result.finalStatus = "pending";
+      }
+      update({
+        onb: {
+          ...state.onb,
+          verified: true,
+          verificationStatus: result.finalStatus,
+          verificationFlags: result.flags,
+          npiRecord: record,
+          loading: false,
+          error: null
+        }
+      });
+    } else {
+      const record = await lookupNPI(npi, "NPI-2");
+      if (record.organizationName && !state.onb.name) state.onb.name = record.organizationName;
+      update({
+        onb: {
+          ...state.onb,
+          verified: true,
+          name: state.onb.name || record.organizationName || state.onb.name,
+          loading: false,
+          error: null
+        }
+      });
+    }
+  } catch (err) {
+    update({ onb: { ...state.onb, loading: false, error: err.message || "Verification failed." } });
   }
 }
 

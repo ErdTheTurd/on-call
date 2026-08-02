@@ -261,18 +261,53 @@ export function computeRate(specialty, dateISO, options = {}) {
   let rawFloor = base * meshMultiplier;
   rawFloor = confidence * rawFloor + (1.0 - confidence) * priorFloor;
 
+  const floor = quantize(rawFloor, granularity);
+  const LABEL = {
+    specialty: "Specialty demand",
+    dow: "Day of week",
+    season: "Seasonality",
+    holiday: "Holiday premium",
+    quarter: "Quarter",
+    monthPos: "Month position",
+    weekendAdj: "Weekend adj.",
+    duration: "Duration",
+    scarcity: "Scarcity",
+    fillHist: "Fill history",
+    leadTime: "Lead time",
+    hospLoad: "Hospital load",
+    tokens: "Token demand",
+    rosterDepth: "Roster depth",
+    autoPipe: "Auto-approve pipeline",
+    adjGap: "Adjacent gaps",
+    sxw: "Specialty × weekend",
+    hxs: "Holiday × scarcity",
+    lxs: "Lead × scarcity"
+  };
+
   return {
-    floor: quantize(rawFloor, granularity),
-    peakRate: granularity === "day" ? quantize(rawFloor, granularity) * 2.0 : quantize(rawFloor, granularity) * 2.2,
+    floor,
+    peakRate: granularity === "day" ? floor * 2.0 : floor * 2.2,
     confidence,
     priorFloor,
     holidayName: holiday?.name ?? null,
     granularity,
-    hospitalID
+    hospitalID,
+    components: priced.map((c) => ({
+      id: c.id,
+      label: LABEL[c.id] || c.id,
+      mult: c.mult,
+      weight: c.weight
+    })),
+    base
   };
 }
 
 /** Primary export for alter-shifts UI. */
 export function algorithmRate(specialty, dateISO, hospitalID, observables, granularity = "day") {
   return computeRate(specialty, dateISO, { hospitalID, observables, granularity }).floor;
+}
+
+/** Full breakdown for Alter Shifts factor panel. */
+export function rateBreakdown(specialty, dateISO, hospitalID, observables, granularity = "day") {
+  return computeRate(specialty, dateISO, { hospitalID, observables, granularity });
 }

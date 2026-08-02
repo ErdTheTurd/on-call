@@ -1,8 +1,8 @@
 import { uuid, startOfDay, sameDay, SPECIALTIES } from "./brand.js";
 import { normalizeShift, isPastShift, currentRate } from "./shift-math.js";
 import { getSupabase, isConfigured, upsertProfile } from "./supabase-client.js";
-import { defaultPolicy, previewPenalty, normalizeCancellationScale } from "./domain/policy.js";
-import { algorithmRate, computeRate } from "./domain/pricing.js";
+import { defaultPolicy, previewPenalty, normalizeCancellationScale, bracketLabel } from "./domain/policy.js";
+import { algorithmRate, computeRate, rateBreakdown } from "./domain/pricing.js";
 import * as sync from "./domain/sync.js";
 
 export const KEYS = {
@@ -578,11 +578,17 @@ export function canAcceptOnDay(date, hospitalID, doctorID) {
   const req = (appStore.tokens.requestedDays || []).find((r) =>
     r.doctorID === doctorID && r.hospitalID === hospitalID && sameDay(r.date, date)
   );
-  if (!req) return getPolicy(hospitalID).administratorApproveShifts === false;
+  if (!req) return false;
   return req.status === "approved" || req.status === "auto_approved";
 }
 
-export async function requestToken(date, hospitalID, hospitalName, specialty, doctor) {
+export function requestStatusForDay(date, doctorID) {
+  return (appStore.tokens.requestedDays || []).find((r) =>
+    r.doctorID === doctorID && sameDay(r.date, date)
+  ) || null;
+}
+
+export async function requestToken(date, hospitalID, hospitalName, specialty, doctor, shiftRate = null) {
   const tokens = { ...appStore.tokens };
   if (tokens.tokensRemaining <= 0) return { ok: false, error: "No tokens remaining today." };
 
@@ -620,12 +626,15 @@ export async function requestToken(date, hospitalID, hospitalName, specialty, do
     status,
     requestedAt: new Date().toISOString(),
     approvedAt,
-    shiftRate: rate
+    shiftRate: shiftRate ?? rate
   };
 
   if (status !== "auto_approved") tokens.tokensRemaining -= 1;
   tokens.requestedDays = [...(tokens.requestedDays || []), req];
   appStore.saveTokens(tokens);
+
+  // Mirror iOS: applying awards acceptance points when the request succeeds.
+  awardPointsEvent("shiftAccepted");
 
   await afterMutation(() => sync.submitTokenRequest(req));
   return { ok: true, request: req };
@@ -653,12 +662,74 @@ export async function denyToken(id) {
   await afterMutation(() => sync.updateTokenStatus(id, "denied"));
 }
 
+export async function cancelTokenRequest(id) {
+  const tokens = { ...appStore.tokens };
+  const idx = (tokens.requestedDays || []).findIndex((r) => r.id === id);
+  if (idx < 0) return { ok: false, error: "Request not found." };
+  const req = tokens.requestedDays[idx];
+  if (req.status !== "pending") return { ok: false, error: "Only pending requests can be canceled." };
+  tokens.requestedDays.splice(idx, 1);
+  tokens.tokensRemaining = Math.min(tokens.tokensRemaining + 1, tokens.dailyLimit);
+  appStore.saveTokens(tokens);
+  await afterMutation(() => sync.updateTokenStatus(id, "canceled").catch(() => {}));
+  return { ok: true };
+}
+
 // ── Assignments ──────────────────────────────────────────────────────
+
+const POINTS_EVENTS = {
+  shiftAccepted: { points: 50, label: "Shift Accepted", icon: "✓" },
+  shiftCompleted: { points: 200, label: "Shift Completed", icon: "★" },
+  fastResponse: { points: 75, label: "Lightning Response", icon: "⚡" }
+};
+
+function streakBonusPoints(days) {
+  if (days >= 30) return 1500;
+  if (days >= 14) return 600;
+  if (days >= 7) return 250;
+  if (days >= 3) return 100;
+  return 0;
+}
+
+export function awardPointsEvent(kind, extra = {}) {
+  const def = POINTS_EVENTS[kind];
+  if (!def) return awardPoints(extra.points || 0, extra.label || kind, extra.icon || "★");
+  awardPoints(def.points, def.label, def.icon);
+
+  if (kind === "shiftCompleted") {
+    const pts = { ...appStore.points };
+    const cal = new Date();
+    const last = pts.lastShiftDate ? new Date(pts.lastShiftDate) : null;
+    const yesterday = new Date(cal);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (last && sameDay(last, yesterday)) {
+      pts.currentStreak = (pts.currentStreak || 0) + 1;
+      const bonus = streakBonusPoints(pts.currentStreak);
+      if (bonus > 0) {
+        pts.totalPoints += bonus;
+        pts.recentEvents = [{
+          event: { label: `${pts.currentStreak}-Day Streak!`, points: bonus, icon: "🔥" },
+          date: new Date().toISOString()
+        }, ...(pts.recentEvents || [])].slice(0, 20);
+      }
+    } else if (!last || !sameDay(last, cal)) {
+      pts.currentStreak = 1;
+    }
+    pts.lastShiftDate = cal.toISOString();
+    const { level, nextLevel } = levelForPoints(pts.totalPoints);
+    pts.level = level;
+    pts.nextLevel = nextLevel;
+    appStore.savePoints(pts);
+  }
+}
 
 export function awardPoints(amount, label, icon = "★") {
   const pts = { ...appStore.points };
   pts.totalPoints += amount;
-  pts.recentEvents = [{ event: { label, points: amount, icon } }, ...(pts.recentEvents || [])].slice(0, 20);
+  pts.recentEvents = [{
+    event: { label, points: amount, icon },
+    date: new Date().toISOString()
+  }, ...(pts.recentEvents || [])].slice(0, 20);
   const { level, nextLevel } = levelForPoints(pts.totalPoints);
   pts.level = level;
   pts.nextLevel = nextLevel;
@@ -667,9 +738,8 @@ export function awardPoints(amount, label, icon = "★") {
 
 export async function acceptShift(shift, doctor) {
   if (isShiftFilled(shift.id)) return { ok: false, error: "Shift already filled." };
-  if (!canAcceptOnDay(shift.start, shift.hospitalID, doctor.id) &&
-      getPolicy(shift.hospitalID).administratorApproveShifts) {
-    return { ok: false, error: "Token not approved for this day." };
+  if (!canAcceptOnDay(shift.start, shift.hospitalID, doctor.id)) {
+    return { ok: false, error: "Request and get approval for this day before accepting." };
   }
 
   const assignment = {
@@ -683,7 +753,13 @@ export async function acceptShift(shift, doctor) {
   };
 
   appStore.saveAssignments([...appStore.assignments, assignment]);
-  awardPoints(50, "Shift Accepted");
+
+  // Fast-response bonus if accepting within 2h of a fresh request window.
+  const posted = new Date(shift.start);
+  // Use assigned timing relative to "now" vs shift creation isn't stored; skip unless shift has createdAt.
+  if (shift.createdAt && (Date.now() - new Date(shift.createdAt).getTime()) < 2 * 3600000) {
+    awardPointsEvent("fastResponse");
+  }
 
   await afterMutation(async () => {
     await sync.createAssignment(shift.id, doctor.id, {
@@ -823,8 +899,38 @@ export function penaltyPreview(action, assignment) {
 export function earningsSummary() {
   const active = activeAssignments();
   const projected = active.reduce((sum, a) => sum + currentRate(a.shift), 0);
-  const history = appStore.assignments.filter((a) => a.status === "canceled" || isPastShift(a.shift));
-  return { projected, completedCount: history.length, activeCount: active.length };
+  const completed = appStore.assignments.filter((a) =>
+    a.status === "scheduled" && isPastShift(a.shift)
+  );
+  const earned = completed.reduce((sum, a) => sum + currentRate(a.shift), 0);
+  const history = appStore.assignments.filter((a) =>
+    a.status === "canceled" || a.status === "traded_complete" || isPastShift(a.shift)
+  );
+  return {
+    projected,
+    earned: Math.round(earned),
+    avgPerShift: completed.length ? Math.round(earned / completed.length) : 0,
+    completedCount: completed.length,
+    activeCount: active.length,
+    history,
+    completed
+  };
+}
+
+export function getRateBreakdown(specialty, date, hospitalID) {
+  const day = startOfDay(date);
+  const obs = pricingObservables(specialty, day, hospitalID);
+  const granularity = getPolicy(hospitalID).granularity;
+  return rateBreakdown(specialty, day.toISOString(), hospitalID, obs, granularity);
+}
+
+export function startPeriodicSync(intervalMs = 20000) {
+  if (typeof window === "undefined") return () => {};
+  if (window.__oncallSyncTimer) clearInterval(window.__oncallSyncTimer);
+  window.__oncallSyncTimer = setInterval(() => {
+    if (isConfigured() && appStore.session) syncEverything().catch(() => {});
+  }, intervalMs);
+  return () => clearInterval(window.__oncallSyncTimer);
 }
 
 // ── Roster ─────────────────────────────────────────────────────────
@@ -920,4 +1026,4 @@ export async function syncShiftsFromSupabase(hospitalID) {
   await syncEverything();
 }
 
-export { algorithmRate, computeRate, previewPenalty, defaultPolicy };
+export { algorithmRate, computeRate, rateBreakdown, previewPenalty, defaultPolicy, bracketLabel };
