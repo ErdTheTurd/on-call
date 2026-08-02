@@ -52,13 +52,22 @@ function doctorStepBody(state) {
     case 1:
       return `
         <div class="form-stack">
-          <div class="form-field"><label>NPI (10 digits)</label><input data-field="npi" maxlength="10" value="${escapeHtml(state.npi || "")}" /></div>
+          <div class="form-field"><label>NPI (10 digits)</label><input data-field="npi" maxlength="10" inputmode="numeric" value="${escapeHtml(state.npi || "")}" /></div>
+          <div class="form-field"><label>DEA #</label><input data-field="deaNumber" value="${escapeHtml(state.deaNumber || "")}" placeholder="Optional" /></div>
           <div class="form-field"><label>License #</label><input data-field="licenseNumber" value="${escapeHtml(state.licenseNumber || "")}" /></div>
           <div class="form-field"><label>License state</label><input data-field="licenseState" maxlength="2" value="${escapeHtml(state.licenseState || "")}" /></div>
           <div class="form-field"><label>Email</label><input data-field="email" type="email" value="${escapeHtml(state.email || appStore.session?.email || "")}" /></div>
-          <button type="button" class="btn-secondary" data-verify-npi ${state.verified ? "disabled" : ""}>
-            ${state.verified ? "✓ Credentials verified" : "Verify with NPI Registry"}
+          <button type="button" class="btn-secondary" data-verify-npi ${state.verified || state.loading ? "disabled" : ""}>
+            ${state.loading ? `<span class="spinner"></span>` : (state.verified ? "✓ Credentials verified" : "Verify with NPI Registry")}
           </button>
+          ${state.verified && state.verificationFlags?.length ? `
+            <div class="subtitle" style="font-size:12px">${state.verificationFlags.map(escapeHtml).join("<br>")}</div>` : ""}
+          ${state.npiRecord && !state.npiRecord.offline ? `
+            <div class="card" style="padding:12px">
+              <div class="subtitle">Registry match</div>
+              <div>${escapeHtml(state.npiRecord.firstName)} ${escapeHtml(state.npiRecord.lastName)} · ${escapeHtml(state.npiRecord.credential || "")}</div>
+              <div class="tertiary" style="font-size:12px">${escapeHtml(state.npiRecord.taxonomyDescription || "")}</div>
+            </div>` : ""}
         </div>`;
     case 2:
       return `
@@ -82,8 +91,11 @@ function hospitalStepBody(state) {
       return `
         <div class="form-stack">
           <div class="form-field"><label>Hospital name</label><input data-field="name" value="${escapeHtml(state.name || "")}" /></div>
-          <div class="form-field"><label>NPI</label><input data-field="npi" maxlength="10" value="${escapeHtml(state.npi || "")}" /></div>
+          <div class="form-field"><label>NPI</label><input data-field="npi" maxlength="10" inputmode="numeric" value="${escapeHtml(state.npi || "")}" /></div>
           <div class="form-field"><label>Email</label><input data-field="email" type="email" value="${escapeHtml(state.email || appStore.session?.email || "")}" /></div>
+          <button type="button" class="btn-secondary" data-verify-npi ${state.verified || state.loading ? "disabled" : ""}>
+            ${state.loading ? `<span class="spinner"></span>` : (state.verified ? "✓ Facility NPI verified" : "Verify facility NPI")}
+          </button>
         </div>`;
     case 1:
       return `
@@ -95,7 +107,10 @@ function hospitalStepBody(state) {
       return `
         <div class="form-stack">
           <div class="form-field"><label>Granularity</label>
-            <select data-field="granularity"><option value="day">Per day</option><option value="hour">Per hour</option></select>
+            <select data-field="granularity">
+              <option value="day" ${state.granularity === "day" ? "selected" : ""}>Per day</option>
+              <option value="hour" ${state.granularity === "hour" ? "selected" : ""}>Per hour</option>
+            </select>
           </div>
           <label class="toggle-row">
             <span>Require administrator approval for shifts</span>
@@ -132,13 +147,14 @@ export async function finishDoctorOnboarding(state) {
     lastName: state.lastName.trim(),
     credential: state.credential,
     npi: state.npi,
-    deaNumber: "",
+    deaNumber: state.deaNumber || "",
     licenseNumber: state.licenseNumber,
     licenseState: (state.licenseState || "").toUpperCase(),
     specialties: state.specialties || [],
     email: state.email || appStore.session?.email,
-    verificationStatus: state.verified ? "pending" : "unverified",
-    verificationFlags: []
+    verificationStatus: state.verificationStatus || (state.verified ? "pending" : "unverified"),
+    verificationFlags: state.verificationFlags || [],
+    documents: []
   };
   await finishDoctorProfile(profile);
 }
@@ -154,9 +170,11 @@ export async function finishHospitalOnboarding(state) {
     name: state.name.trim(),
     npi: state.npi,
     email: state.email || appStore.session?.email,
-    verificationStatus: "pending",
+    verificationStatus: state.verified ? "pending" : "pending",
     verificationFlags: [],
-    schedulingPolicy: policy
+    schedulingPolicy: policy,
+    priorityPosting: false,
+    autoPay: false
   };
   await finishHospitalProfile(profile);
 }

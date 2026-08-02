@@ -187,16 +187,39 @@ export async function submitTokenRequest(req) {
     shift_date: toDateOnly(req.date),
     specialty: req.specialty,
     status: req.status || "pending",
-    requested_at: req.requestedAt || new Date().toISOString()
+    requested_at: req.requestedAt || new Date().toISOString(),
+    doctor_name: req.doctorName || null,
+    credential: req.credential || null,
+    hospital_name: req.hospitalName || null,
+    shift_rate: req.shiftRate ?? null,
+    approved_at: req.approvedAt || null
   };
   const { data, error } = await supabase.from("token_requests").upsert(row).select().single();
-  if (error) throw error;
+  if (error) {
+    // Fall back to core columns if extended columns aren't migrated yet.
+    const { data: d2, error: e2 } = await supabase.from("token_requests").upsert({
+      id: row.id,
+      doctor_id: row.doctor_id,
+      hospital_id: row.hospital_id,
+      shift_date: row.shift_date,
+      specialty: row.specialty,
+      status: row.status,
+      requested_at: row.requested_at
+    }).select().single();
+    if (e2) throw e2;
+    return mapTokenRow(d2);
+  }
   return mapTokenRow(data);
 }
 
 export async function updateTokenStatus(id, status) {
   if (!isConfigured()) return;
   const supabase = getSupabase();
+  if (status === "canceled") {
+    const { error } = await supabase.from("token_requests").delete().eq("id", id);
+    if (error) throw error;
+    return;
+  }
   const patch = { status };
   if (status === "approved" || status === "auto_approved") {
     patch.approved_at = new Date().toISOString();

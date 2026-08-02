@@ -4,11 +4,13 @@ import {
   credentialStatusCard, sectionHeader, emptyState, sheet, verificationBadge, icon
 } from "../components.js";
 import { renderCalendar, doctorDayData, addMonths } from "../calendar.js";
+import { holidayOn, holidayPremiumMultiplier } from "../domain/pricing.js";
+import { currentRate } from "../shift-math.js";
 import {
-  appStore, openShifts, recommendedShifts, shiftsForDate, activeAssignments,
-  pendingTradeCount, acceptShift, requestToken, ensureDemoShifts, signOut, demoHospital,
+  appStore, recommendedShifts, shiftsForDate, activeAssignments,
+  pendingTradeCount, acceptShift, requestToken, cancelTokenRequest, ensureDemoShifts, signOut, demoHospital,
   cancelShift, requestTrade, respondTrade, penaltyPreview, eligibleTradePartners,
-  incomingTrades, earningsSummary, savePreferences, tokenRequestsForHospital
+  incomingTrades, earningsSummary, savePreferences, requestStatusForDay, canAcceptOnDay
 } from "../store.js";
 
 export function renderDoctorApp(state) {
@@ -58,7 +60,9 @@ function renderDoctorHome(state, profile) {
             <section class="card">
               <div class="subtitle" style="font-weight:600;margin-bottom:10px">${selected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
               ${dayShifts.length ? dayShifts.map((s, i) => `${shiftRow(s)}${i < dayShifts.length - 1 ? '<div class="divider"></div>' : ""}`).join("") : `<div class="subtitle">${icon("moon")} No open shifts</div>`}
-              ${dayShifts.length ? `<button type="button" class="btn-primary" style="margin-top:12px;width:100%" data-open-day="${selected.toISOString()}">Apply for this day</button>` : ""}
+              <button type="button" class="btn-primary" style="margin-top:12px;width:100%" data-open-day="${selected.toISOString()}">
+                ${dayShifts.length ? "Apply for this day" : "Request this day"}
+              </button>
             </section>` : ""}
         </div>
         <div class="stack">
@@ -72,13 +76,23 @@ function renderDoctorHome(state, profile) {
               ${tokenReqs.map((r) => `
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px">
                   <span>${new Date(r.date).toLocaleDateString()} · ${escapeHtml(r.specialty)}</span>
-                  <span class="verify-badge ${escapeHtml(r.status)}">${escapeHtml(r.status.replace("_", " "))}</span>
+                  <span class="verify-badge ${escapeHtml(r.status)}">${escapeHtml(statusLabel(r.status))}</span>
                 </div>`).join("")}
+              <button type="button" class="btn-ghost" data-open-sheet="requested" style="justify-self:start;padding-left:0">View all ›</button>
             </section>` : ""}
           ${credentialStatusCard(profile)}
         </div>
       </div>
     </main>`;
+}
+
+function statusLabel(status) {
+  return ({
+    pending: "Pending",
+    approved: "Admin Approved",
+    denied: "Denied",
+    auto_approved: "Auto-Approved"
+  })[status] || status;
 }
 
 function renderMyShifts(state, profile) {
@@ -120,12 +134,19 @@ function renderMyShifts(state, profile) {
           </div>
           ${!cancelPrev.allowed ? `<p class="subtitle" style="font-size:11px">${escapeHtml(cancelPrev.blockedReason)}</p>` : ""}
         </section>`;
-      }).join("")}</div>` : emptyState("No assigned shifts", "Accept shifts from the home calendar or recommended list.")}
+      }).join("")}</div>` : emptyState("No assigned shifts", "Request a day with a token, get approval, then accept the shift.")}
     </main>`;
 }
 
 function renderCredentials(profile) {
   const prefs = appStore.doctorPrefs;
+  const hospitals = [...new Set(appStore.shifts.map((s) => ({ id: s.hospitalID, name: s.hospital })))];
+  const uniqueHospitals = [];
+  const seen = new Set();
+  for (const h of hospitals) {
+    if (!seen.has(h.id)) { seen.add(h.id); uniqueHospitals.push(h); }
+  }
+
   return `
     ${navBar("Credentials")}
     <main class="main-scroll stack">
@@ -138,6 +159,7 @@ function renderCredentials(profile) {
                 <div><span class="tertiary">Name</span><div>${escapeHtml(profile.firstName)} ${escapeHtml(profile.lastName)}, ${escapeHtml(profile.credential)}</div></div>
                 <div class="divider"></div>
                 <div><span class="tertiary">NPI</span><div>${escapeHtml(profile.npi)}</div></div>
+                ${profile.deaNumber ? `<div class="divider"></div><div><span class="tertiary">DEA</span><div>${escapeHtml(profile.deaNumber)}</div></div>` : ""}
                 <div class="divider"></div>
                 <div><span class="tertiary">License</span><div>${escapeHtml(profile.licenseNumber)} · ${escapeHtml(profile.licenseState)}</div></div>
                 <div class="divider"></div>
@@ -147,7 +169,10 @@ function renderCredentials(profile) {
             <section class="card stack">
               ${sectionHeader("Verification", "credentials")}
               ${verificationBadge(profile.verificationStatus)}
-              <p class="subtitle">Upload documents from the iOS app for full verification.</p>
+              <p class="subtitle">Document uploads sync from the iOS app. Web upload support uses the same credential records.</p>
+              ${(profile.documents || []).length ? profile.documents.map((d) => `
+                <div class="list-row"><strong>${escapeHtml(d.type || "Document")}</strong><span class="muted">${escapeHtml(d.status || "uploaded")}</span></div>
+              `).join("") : `<div class="empty-inline">No documents uploaded yet.</div>`}
             </section>
           </div>
           <section class="card stack">
@@ -168,6 +193,20 @@ function renderCredentials(profile) {
               <span>Notify approvals</span>
               <input type="checkbox" data-pref="notifyApprovals" ${prefs.notifyApprovals ? "checked" : ""} />
             </label>
+            <div class="divider"></div>
+            <div class="subtitle" style="font-weight:600">Hidden specialties</div>
+            <div class="chip-grid">
+              ${SPECIALTIES.map((sp) => `
+                <button type="button" class="chip ${(prefs.hiddenSpecialties || []).includes(sp) ? "active" : ""}" data-hide-specialty="${escapeHtml(sp)}">${escapeHtml(sp)}</button>
+              `).join("")}
+            </div>
+            ${uniqueHospitals.length ? `
+              <div class="subtitle" style="font-weight:600;margin-top:8px">Hidden hospitals</div>
+              <div class="chip-grid">
+                ${uniqueHospitals.map((h) => `
+                  <button type="button" class="chip ${(prefs.hiddenHospitalIDs || []).includes(h.id) ? "active" : ""}" data-hide-hospital="${escapeHtml(h.id)}">${escapeHtml(h.name)}</button>
+                `).join("")}
+              </div>` : ""}
           </section>
         </div>` : emptyState("No profile", "Complete onboarding to view credentials.")}
     </main>`;
@@ -176,12 +215,13 @@ function renderCredentials(profile) {
 function renderDoctorMenuSheet(sheetKind) {
   const profile = appStore.doctorProfile;
   const earnings = earningsSummary();
-  const history = appStore.assignments.filter((a) => a.status === "canceled" || a.status === "scheduled");
   const requested = appStore.tokens.requestedDays || [];
 
-  if (sheetKind === "preferences") {
-    return renderPreferencesSheet();
-  }
+  if (sheetKind === "preferences") return renderPreferencesSheet();
+  if (sheetKind === "requested") return renderRequestedSheet(requested);
+  if (sheetKind === "earnings") return renderEarningsSheet(earnings);
+  if (sheetKind === "history") return renderHistorySheet(earnings.history || []);
+  if (sheetKind === "points") return renderPointsSheet();
 
   const body = `
     <div class="menu-profile">
@@ -201,33 +241,21 @@ function renderDoctorMenuSheet(sheetKind) {
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px">
             <span class="tertiary">${earnings.activeCount} active shifts</span>
-            <span class="tertiary">${earnings.completedCount} in history</span>
+            <span class="tertiary">${earnings.completedCount} completed</span>
           </div>
         </div>
+        <button class="menu-item" type="button" data-open-sheet="earnings">${icon("dollar")}<span>Earnings detail</span></button>
       </section>
       <section><div class="section-label">Rewards</div>
-        <button class="menu-item" type="button">${icon("sparkles")}<span>Points · ${appStore.points.totalPoints} pts</span></button>
+        <button class="menu-item" type="button" data-open-sheet="points">${icon("sparkles")}<span>Points · ${appStore.points.totalPoints} pts</span></button>
       </section>
       <section><div class="section-label">Schedule</div>
         <button class="menu-item" type="button" data-nav-tab="shifts">${icon("calendar")}<span>My Shifts</span></button>
+        <button class="menu-item" type="button" data-open-sheet="requested">${icon("clock")}<span>Requested Days (${requested.length})</span></button>
+        <button class="menu-item" type="button" data-open-sheet="history">${icon("shifts")}<span>History</span></button>
         <button class="menu-item" type="button" data-open-sheet="preferences">${icon("credentials")}<span>Preferences</span></button>
+        <button class="menu-item" type="button" data-nav-tab="credentials">${icon("stethoscope")}<span>My Info</span></button>
       </section>
-      ${requested.length ? `
-        <section><div class="section-label">Requested Days (${requested.length})</div>
-          ${requested.slice(0, 6).map((r) => `
-            <div class="menu-item" style="cursor:default">
-              <span>${new Date(r.date).toLocaleDateString()} · ${escapeHtml(r.hospitalName || "Hospital")}</span>
-              <span class="verify-badge ${r.status}" style="margin-left:auto;font-size:11px">${r.status}</span>
-            </div>`).join("")}
-        </section>` : ""}
-      ${history.length ? `
-        <section><div class="section-label">History</div>
-          ${history.slice(0, 5).map((a) => `
-            <div class="menu-item" style="cursor:default;font-size:13px">
-              <span>${formatShiftDate(a.shift.start)} · ${escapeHtml(a.shift.specialty)}</span>
-              <span class="tertiary">${a.status}</span>
-            </div>`).join("")}
-        </section>` : ""}
       <section><div class="section-label">Account</div>
         <button class="menu-item danger" type="button" data-sign-out>${icon("lock")}<span>Sign Out</span></button>
       </section>
@@ -257,27 +285,136 @@ function renderPreferencesSheet() {
   return sheet("Preferences", body);
 }
 
+function renderRequestedSheet(requested) {
+  const body = `
+    <main class="main-scroll stack" style="padding:16px">
+      ${requested.length ? requested.map((r) => `
+        <section class="card" style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+          <div>
+            <div style="font-weight:600">${new Date(r.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>
+            <div class="subtitle">${escapeHtml(r.hospitalName || "Hospital")} · ${escapeHtml(r.specialty)}</div>
+            <span class="verify-badge ${escapeHtml(r.status)}">${escapeHtml(statusLabel(r.status))}</span>
+          </div>
+          ${r.status === "pending" ? `<button type="button" class="btn-ghost" style="color:var(--danger)" data-cancel-request="${r.id}">Cancel</button>` : ""}
+        </section>`).join("") : emptyState("No requests", "Apply to a day from the home calendar to spend a token.")}
+    </main>`;
+  return sheet("Requested Days", body);
+}
+
+function renderEarningsSheet(earnings) {
+  const body = `
+    <main class="main-scroll stack" style="padding:16px">
+      <section class="card stat-row">
+        <div class="stat-badge"><div class="value">$${earnings.earned}</div><div class="label">Earned</div></div>
+        <div class="stat-badge"><div class="value">${earnings.completedCount}</div><div class="label">Shifts</div></div>
+        <div class="stat-badge"><div class="value">$${earnings.avgPerShift}</div><div class="label">Avg / shift</div></div>
+      </section>
+      <section class="card stack">
+        ${sectionHeader("Projected")}
+        <div style="font-size:1.6rem;font-weight:700;color:var(--success)">$${Math.round(earnings.projected).toLocaleString()}</div>
+        <p class="subtitle">${earnings.activeCount} active assignments</p>
+      </section>
+      ${earnings.completed?.length ? `
+        <section class="card stack">
+          ${sectionHeader("Recent completed")}
+          ${earnings.completed.slice(0, 8).map((a) => `
+            <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
+              <span>${formatShiftDate(a.shift.start)} · ${escapeHtml(a.shift.specialty)}</span>
+              <span style="color:var(--accent);font-weight:700">$${Math.round(currentRate(a.shift))}</span>
+            </div>`).join("")}
+        </section>` : ""}
+    </main>`;
+  return sheet("Earnings", body);
+}
+
+function renderHistorySheet(history) {
+  const body = `
+    <main class="main-scroll stack" style="padding:16px">
+      ${history.length ? history.slice(0, 20).map((a) => `
+        <section class="card" style="display:flex;justify-content:space-between;gap:12px">
+          <div>
+            <div style="font-weight:600">${formatShiftDate(a.shift.start)} · ${escapeHtml(a.shift.specialty)}</div>
+            <div class="subtitle">${escapeHtml(a.shift.hospital)}</div>
+          </div>
+          <span class="verify-badge ${a.status === "canceled" ? "flagged" : "verified"}">${escapeHtml(a.status)}</span>
+        </section>`).join("") : emptyState("No history", "Completed and canceled shifts appear here.")}
+    </main>`;
+  return sheet("Shift History", body);
+}
+
+function renderPointsSheet() {
+  const pts = appStore.points;
+  const body = `
+    <main class="main-scroll stack" style="padding:16px">
+      ${pointsCard(pts)}
+      <section class="card stack">
+        ${sectionHeader("All recent events")}
+        ${(pts.recentEvents || []).length ? pts.recentEvents.map(({ event }) => `
+          <div style="display:flex;align-items:center;gap:8px;font-size:14px">
+            <span style="width:20px;color:var(--accent)">${event.icon || "★"}</span>
+            <span style="flex:1">${escapeHtml(event.label)}</span>
+            <span style="color:var(--success);font-weight:700">+${event.points}</span>
+          </div>`).join("") : `<p class="subtitle">Earn points by requesting and completing shifts.</p>`}
+      </section>
+    </main>`;
+  return sheet("Points", body);
+}
+
 function renderDaySheet(dateISO, profile) {
   const date = new Date(dateISO);
   const shifts = shiftsForDate(date, profile);
   const demo = demoHospital();
+  const holiday = holidayOn(date.toISOString());
+  const premium = holidayPremiumMultiplier(date.toISOString());
+  const existing = profile ? requestStatusForDay(date, profile.id) : null;
+  const approved = profile && existing && canAcceptOnDay(date, existing.hospitalID || demo.id, profile.id);
+
   const body = `
     <main class="main-scroll stack" style="padding-bottom:24px">
       <section class="card" style="text-align:center">
         <div class="subtitle">${date.toLocaleDateString(undefined, { weekday: "long" })}</div>
         <div class="page-title" style="font-size:1.4rem">${date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</div>
+        ${holiday ? `<div class="holiday-pill">${escapeHtml(holiday.name)} — +${Math.round(holiday.premium * 100)}% premium</div>` : ""}
       </section>
-      <div style="display:flex;justify-content:space-between;align-items:center">${tokenBadge(appStore.tokens)}</div>
-      ${shifts.length ? shifts.map((s) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        ${tokenBadge(appStore.tokens)}
+        <span class="token-error tertiary" data-token-error></span>
+      </div>
+      ${existing ? `
+        <section class="card" style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:1.4rem;color:var(--success)">✓</span>
+          <div style="flex:1">
+            <div style="font-weight:600">Request submitted</div>
+            <div class="subtitle">${escapeHtml(statusLabel(existing.status))}</div>
+          </div>
+          ${existing.status === "pending" ? `<button type="button" class="btn-ghost" style="color:var(--danger)" data-cancel-request="${existing.id}">Cancel</button>` : ""}
+        </section>` : ""}
+      ${shifts.length ? shifts.map((s) => {
+        const adjusted = Math.round(currentRate(s) * premium);
+        const canAccept = approved && canAcceptOnDay(s.start, s.hospitalID, profile?.id);
+        return `
         <section class="card stack">
           ${shiftRow(s)}
-          <button type="button" class="btn-primary" data-accept-shift="${s.id}">Request / Accept</button>
-        </section>`).join("") : `
+          <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">
+            <div>
+              <div class="tertiary" style="font-size:12px">Est. earnings</div>
+              <div style="font-size:1.25rem;font-weight:700;color:var(--accent)">$${adjusted}</div>
+              ${premium > 1 ? `<div class="subtitle" style="font-size:11px;color:var(--warning)">Includes ${Math.round((premium - 1) * 100)}% holiday premium</div>` : ""}
+            </div>
+            ${existing
+              ? (canAccept
+                ? `<button type="button" class="btn-primary" style="width:auto;min-width:140px;padding:0 20px" data-accept-shift="${s.id}">Accept Shift</button>`
+                : `<span class="subtitle">Day ${statusLabel(existing.status).toLowerCase()}</span>`)
+              : `<button type="button" class="btn-primary" style="width:auto;min-width:120px;padding:0 20px" data-apply-shift="${s.id}" ${appStore.tokens.tokensRemaining === 0 ? "disabled" : ""}>Apply</button>`}
+          </div>
+        </section>`;
+      }).join("") : `
         <section class="card empty-state">${icon("moon")}<div>No open shifts on this day</div>
-          <button type="button" class="btn-primary" style="margin-top:12px" data-request-day>Request This Day (Token)</button>
+          <p class="subtitle">You can still request call — the hospital may post shifts later.</p>
+          ${!existing ? `<button type="button" class="btn-primary" style="margin-top:12px" data-request-day ${appStore.tokens.tokensRemaining === 0 ? "disabled" : ""}>Request This Day</button>` : ""}
         </section>`}
     </main>`;
-  return sheet(date.toLocaleDateString(undefined, { month: "short", day: "numeric" }), body);
+  return sheet("Available Shifts", body);
 }
 
 function renderTradeSheet(assignmentId) {
@@ -305,7 +442,13 @@ export function bindDoctor(root, state, update) {
     btn.addEventListener("click", () => update({ tab: btn.dataset.navTab, sheet: false }));
   });
   root.querySelectorAll("[data-close-sheet]").forEach((el) => {
-    el.addEventListener("click", () => update({ sheet: false, daySheet: null, tradeSheet: null }));
+    el.addEventListener("click", (e) => {
+      if (el.classList.contains("sheet-backdrop") && e.target !== el) return;
+      update({ sheet: false, daySheet: null, tradeSheet: null });
+    });
+  });
+  root.querySelectorAll("[data-sheet-panel]").forEach((panel) => {
+    panel.addEventListener("click", (e) => e.stopPropagation());
   });
   root.querySelector("[data-sign-out]")?.addEventListener("click", () => { signOut(); update({ route: "auth" }); });
   root.querySelectorAll("[data-open-sheet]").forEach((btn) => {
@@ -328,6 +471,46 @@ export function bindDoctor(root, state, update) {
       savePreferences({ [el.dataset.pref]: el.checked });
     });
   });
+  root.querySelectorAll("[data-hide-specialty]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const prefs = appStore.doctorPrefs;
+      const set = new Set(prefs.hiddenSpecialties || []);
+      const sp = btn.dataset.hideSpecialty;
+      set.has(sp) ? set.delete(sp) : set.add(sp);
+      savePreferences({ hiddenSpecialties: [...set] });
+    });
+  });
+  root.querySelectorAll("[data-hide-hospital]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const prefs = appStore.doctorPrefs;
+      const set = new Set(prefs.hiddenHospitalIDs || []);
+      const id = btn.dataset.hideHospital;
+      set.has(id) ? set.delete(id) : set.add(id);
+      savePreferences({ hiddenHospitalIDs: [...set] });
+    });
+  });
+  root.querySelectorAll("[data-apply-shift]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const shift = appStore.shifts.find((s) => s.id === btn.dataset.applyShift);
+      const profile = appStore.doctorProfile;
+      if (!shift || !profile) return;
+      const res = await requestToken(
+        shift.start,
+        shift.hospitalID,
+        shift.hospital,
+        shift.specialty,
+        profile,
+        currentRate(shift)
+      );
+      const errEl = root.querySelector("[data-token-error]");
+      if (!res.ok) {
+        if (errEl) errEl.textContent = res.error;
+        else alert(res.error);
+      } else {
+        update({ daySheet: state.daySheet });
+      }
+    });
+  });
   root.querySelectorAll("[data-accept-shift]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const shift = appStore.shifts.find((s) => s.id === btn.dataset.acceptShift);
@@ -335,7 +518,7 @@ export function bindDoctor(root, state, update) {
       if (shift && profile) {
         const res = await acceptShift(shift, profile);
         if (!res.ok) alert(res.error);
-        else update({ daySheet: null });
+        else update({ daySheet: null, tab: "shifts" });
       }
     });
   });
@@ -350,8 +533,18 @@ export function bindDoctor(root, state, update) {
       profile?.specialties?.[0] || "Internal Medicine",
       profile
     );
-    if (!res.ok) alert(res.error);
-    else update({ daySheet: null });
+    const errEl = root.querySelector("[data-token-error]");
+    if (!res.ok) {
+      if (errEl) errEl.textContent = res.error;
+      else alert(res.error);
+    } else update({ daySheet: state.daySheet });
+  });
+  root.querySelectorAll("[data-cancel-request]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const res = await cancelTokenRequest(btn.dataset.cancelRequest);
+      if (!res.ok) alert(res.error);
+      else update({ daySheet: state.daySheet, sheet: state.sheet });
+    });
   });
   root.querySelectorAll("[data-cancel-shift]").forEach((btn) => {
     btn.addEventListener("click", async () => {

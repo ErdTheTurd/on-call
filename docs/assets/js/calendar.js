@@ -61,13 +61,22 @@ export function renderCalendar({ month, days, selectedDate, mode, onSelect }) {
 
   days.forEach((day) => {
     const selected = selectedDate && sameDay(day.date, selectedDate);
-    let bg = "rgba(255,255,255,0.04)";
+    let bg = "rgba(79,142,247,0.06)";
     if (!day.isPast && day.shiftCount > 0) {
-      bg = mode === "hospital"
-        ? (day.shiftCount >= 3 ? "rgba(248,113,113,0.25)" : "rgba(251,191,36,0.22)")
-        : "rgba(79,142,247,0.22)";
+      if (mode === "hospital") {
+        // Coverage-style coloring with blue base for open demand
+        if (day.shiftCount >= 4) bg = "rgba(239,68,68,0.45)";
+        else if (day.shiftCount >= 2) bg = "rgba(234,179,8,0.40)";
+        else bg = "rgba(79,142,247,0.38)";
+      } else {
+        const hours = day.urgency != null ? day.urgency / 3600000 : 72;
+        if (hours < 12) bg = "rgba(239,68,68,0.55)";
+        else if (hours < 24) bg = "rgba(249,115,22,0.50)";
+        else if (hours < 48) bg = "rgba(234,179,8,0.42)";
+        else bg = "rgba(79,142,247,0.42)";
+      }
     }
-    if (day.isPast) bg = "rgba(255,255,255,0.02)";
+    if (day.isPast) bg = "rgba(255,255,255,0.03)";
     cells.push(`
       <button type="button" class="cal-day ${day.isPast ? "past" : ""} ${selected ? "selected" : ""}"
         data-cal-date="${day.date.toISOString()}"
@@ -87,9 +96,10 @@ export function renderCalendar({ month, days, selectedDate, mode, onSelect }) {
       <div class="cal-weekdays">${["S","M","T","W","T","F","S"].map((d) => `<span>${d}</span>`).join("")}</div>
       <div class="cal-grid">${cells.join("")}</div>
       <div class="cal-legend">
-        <span><span class="legend-swatch" style="background:${urgencyColor("low")}"></span>Open shifts</span>
+        <span><span class="legend-swatch" style="background:${urgencyColor("low")}"></span>Open / later</span>
+        <span><span class="legend-swatch" style="background:${urgencyColor("moderate")}"></span>Soon</span>
+        <span><span class="legend-swatch" style="background:${urgencyColor("high")}"></span>Urgent</span>
         <span><span class="legend-swatch" style="background:rgba(255,255,255,0.15)"></span>Past</span>
-        ${mode === "hospital" ? `<span class="tertiary">Long press for coverage · Tap for details</span>` : `<span class="tertiary">Tap a day to request call</span>`}
       </div>
     </section>`;
 }
