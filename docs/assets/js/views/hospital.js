@@ -8,7 +8,7 @@ import {
   autoApprovedCount, tokenRequestsForHospital, approveToken, denyToken,
   toggleUnavailable, isDayUnavailable, getPolicy, savePolicy, defaultPolicy,
   getProposedRate, setProposedRate, resetProposedRate, toggleRosterAutoApprove,
-  seedMockDoctors, toggleRosterAutoApprove
+  seedMockDoctors
 } from "../store.js";
 
 export function renderHospitalApp(state) {
