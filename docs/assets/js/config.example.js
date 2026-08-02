@@ -3,7 +3,7 @@
 window.ON_CALL_CONFIG = {
   supabaseUrl: "https://your-project.supabase.co",
   supabaseAnonKey: "your-anon-key",
-  websiteBaseUrl: "https://erdtheturd.github.io/on-call",
+  websiteBaseUrl: "https://erdtheturd.github.io/on-call/docs",
   appStoreUrl: "",
   appScheme: "oncallwizard",
   appBundleId: "callsystems.on-call-wizard"
