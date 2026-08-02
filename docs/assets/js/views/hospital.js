@@ -44,22 +44,34 @@ function renderHospitalDashboard(state, profile) {
     ${navBar(profile?.name || "Dashboard")}
     <main class="main-scroll stack">
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
-      ${profile ? renderCalendar({ month, days, selectedDate: selected, mode: "hospital" }) : ""}
-      <section class="card stat-row">
-        <button type="button" class="stat-badge" data-nav-tab="alter">
-          <div class="value">${profile ? openShiftCount(profile.id) : 0}</div>
-          <div class="label">Open\nShifts</div>
-        </button>
-        <button type="button" class="stat-badge" data-open-sheet="analytics">
-          <div class="value">${profile ? fillRatePercent(profile.id) : 0}%</div>
-          <div class="label">Fill Rate\n30 days</div>
-        </button>
-        <button type="button" class="stat-badge" data-nav-tab="doctors">
-          <div class="value">${autoApprovedCount()}</div>
-          <div class="label">Auto‑Approved\nDoctors</div>
-        </button>
-      </section>
-      ${selected && profile ? renderDayDetail(selected, profile) : ""}
+      <div class="content-grid two-col">
+        <div class="stack">
+          ${profile ? renderCalendar({ month, days, selectedDate: selected, mode: "hospital" }) : ""}
+          ${selected && profile ? renderDayDetail(selected, profile) : ""}
+        </div>
+        <div class="stack">
+          <section class="card stat-row">
+            <button type="button" class="stat-badge" data-nav-tab="alter">
+              <div class="value">${profile ? openShiftCount(profile.id) : 0}</div>
+              <div class="label">Open\nShifts</div>
+            </button>
+            <button type="button" class="stat-badge" data-open-sheet="analytics">
+              <div class="value">${profile ? fillRatePercent(profile.id) : 0}%</div>
+              <div class="label">Fill Rate\n30 days</div>
+            </button>
+            <button type="button" class="stat-badge" data-nav-tab="doctors">
+              <div class="value">${autoApprovedCount()}</div>
+              <div class="label">Auto‑Approved\nDoctors</div>
+            </button>
+          </section>
+          <section class="card stack">
+            ${sectionHeader("Quick actions")}
+            <button type="button" class="btn-secondary" data-nav-tab="alter">Alter shift rates</button>
+            <button type="button" class="btn-secondary" data-open-sheet="policy">Scheduling policy</button>
+            <button type="button" class="btn-secondary" data-open-sheet="schedule">Schedule admin</button>
+          </section>
+        </div>
+      </div>
     </main>`;
 }
 
@@ -104,40 +116,44 @@ function renderAlterShifts(state, profile) {
   return `
     ${navBar("Alter Shifts")}
     <main class="main-scroll stack">
-      <section class="card stack">
-        ${sectionHeader("Date & Specialty")}
-        <div class="form-field">
-          <label>Date</label>
-          <input type="date" data-alter-date value="${editDate.toISOString().slice(0, 10)}" />
+      <div class="content-grid two-col">
+        <div class="stack">
+          <section class="card stack">
+            ${sectionHeader("Date & Specialty")}
+            <div class="form-field">
+              <label>Date</label>
+              <input type="date" data-alter-date value="${editDate.toISOString().slice(0, 10)}" />
+            </div>
+            <div class="form-field">
+              <label>Specialty</label>
+              <select data-alter-specialty>
+                ${SPECIALTIES.map((sp) => `<option value="${escapeHtml(sp)}" ${sp === specialty ? "selected" : ""}>${escapeHtml(sp)}</option>`).join("")}
+              </select>
+            </div>
+          </section>
+          <section class="card stack">
+            ${sectionHeader("Rate Editor")}
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span class="tertiary">Algorithm rate</span>
+              <span style="font-weight:700;color:var(--accent)">$${Math.round(proposed.algorithmRate)}${unit}</span>
+            </div>
+            <div class="form-field">
+              <label>Proposed rate ${proposed.isCustom ? "(custom)" : ""}</label>
+              <input type="number" step="25" data-alter-rate value="${Math.round(proposed.rate)}" />
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="btn-primary" style="flex:1;min-width:140px" data-save-rate>Save Rate</button>
+              <button type="button" class="btn-bordered" data-reset-rate>Reset to algorithm</button>
+            </div>
+          </section>
         </div>
-        <div class="form-field">
-          <label>Specialty</label>
-          <select data-alter-specialty>
-            ${SPECIALTIES.map((sp) => `<option value="${escapeHtml(sp)}" ${sp === specialty ? "selected" : ""}>${escapeHtml(sp)}</option>`).join("")}
-          </select>
-        </div>
-      </section>
-      <section class="card stack">
-        ${sectionHeader("Rate Editor")}
-        <div style="display:flex;justify-content:space-between;align-items:baseline">
-          <span class="tertiary">Algorithm rate</span>
-          <span style="font-weight:700;color:var(--accent)">$${Math.round(proposed.algorithmRate)}${unit}</span>
-        </div>
-        <div class="form-field">
-          <label>Proposed rate ${proposed.isCustom ? "(custom)" : ""}</label>
-          <input type="number" step="25" data-alter-rate value="${Math.round(proposed.rate)}" />
-        </div>
-        <div style="display:flex;gap:8px">
-          <button type="button" class="btn-primary" style="flex:1" data-save-rate>Save Rate</button>
-          <button type="button" class="btn-bordered" data-reset-rate>Reset to algorithm</button>
-        </div>
-      </section>
-      <section class="card stack">
-        ${sectionHeader("Upcoming shifts")}
-        ${appStore.shifts.filter((s) => s.hospitalID === profile.id).slice(0, 15).map((s) =>
-          `<div>${shiftRow(s)}</div>`
-        ).join('<div class="divider"></div>')}
-      </section>
+        <section class="card stack">
+          ${sectionHeader("Upcoming shifts")}
+          ${appStore.shifts.filter((s) => s.hospitalID === profile.id).slice(0, 15).map((s) =>
+            `<div>${shiftRow(s)}</div>`
+          ).join('<div class="divider"></div>') || `<p class="subtitle">No upcoming shifts.</p>`}
+        </section>
+      </div>
     </main>`;
 }
 
@@ -146,13 +162,17 @@ function renderDoctors(profile) {
   return `
     ${navBar("Doctors")}
     <main class="main-scroll stack">
-      <div style="display:flex;gap:8px;padding:0 4px">
-        <button type="button" class="btn-secondary" data-seed-mocks>Seed demo doctors</button>
+      <div class="page-header">
+        <div>
+          <h2>Roster</h2>
+          <p class="muted">Manage doctors and auto-approve settings.</p>
+        </div>
+        <button type="button" class="btn-secondary" style="width:auto;min-width:180px" data-seed-mocks>Seed demo doctors</button>
       </div>
-      ${roster.length ? roster.map((d) => `
-        <section class="card" style="display:flex;align-items:center;gap:12px">
+      ${roster.length ? `<div class="roster-grid">${roster.map((d) => `
+        <section class="card" style="display:flex;align-items:center;gap:14px">
           <div style="flex:1;min-width:0">
-            <div style="font-weight:600">${escapeHtml(d.name)}</div>
+            <div style="font-weight:600;font-size:1.05rem">${escapeHtml(d.name)}</div>
             <div class="subtitle">${escapeHtml(d.specialty)} · NPI ${escapeHtml(d.npi)}</div>
             ${verificationBadge(d.verificationStatus, true)}
           </div>
@@ -160,7 +180,7 @@ function renderDoctors(profile) {
             <span style="font-size:11px" class="tertiary">Auto-approve</span>
             <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />
           </label>
-        </section>`).join("") : emptyState("Doctor roster", "Doctors appear when they register or you seed demo doctors.", "doctors")}
+        </section>`).join("")}</div>` : emptyState("Doctor roster", "Doctors appear when they register or you seed demo doctors.", "doctors")}
     </main>`;
 }
 
