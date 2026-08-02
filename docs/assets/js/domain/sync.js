@@ -8,6 +8,7 @@ function toDateOnly(iso) {
 }
 
 function mapShiftRow(row) {
+  const escalation = row.escalation || {};
   return normalizeShift({
     id: row.id,
     hospital_id: row.hospital_id,
@@ -17,7 +18,8 @@ function mapShiftRow(row) {
     rate_floor: row.rate_floor,
     rate_unit: row.rate_unit,
     duration_hours: row.duration_hours,
-    escalation: row.escalation
+    escalation,
+    usesAlgorithmPricing: escalation.usesAlgorithmPricing ?? escalation.uses_algorithm_pricing
   });
 }
 
@@ -109,6 +111,10 @@ export async function fetchAllShifts(hospitalID) {
 export async function upsertShift(shift) {
   if (!isConfigured()) return shift;
   const supabase = getSupabase();
+  const escalation = {
+    ...(shift.escalationMode ? { type: shift.escalationMode.type, rate: shift.escalationMode.rate } : {}),
+    usesAlgorithmPricing: shift.usesAlgorithmPricing !== false
+  };
   const row = {
     id: shift.id,
     hospital_id: shift.hospitalID,
@@ -118,7 +124,7 @@ export async function upsertShift(shift) {
     rate_floor: shift.rateFloor,
     rate_unit: shift.rateUnit === "per hour" ? "per_hour" : "per_day",
     duration_hours: shift.durationHours ?? 24,
-    escalation: shift.escalationMode ? { type: shift.escalationMode.type, rate: shift.escalationMode.rate } : {}
+    escalation
   };
   const { error } = await supabase.from("shifts").upsert(row);
   if (error) throw error;
@@ -366,7 +372,26 @@ export async function syncEverything(hooks) {
 
     if (shifts.length) {
       const local = hooks.readLocal("shifts") || [];
-      const merged = [...local.filter((s) => !shifts.some((r) => r.id === s.id)), ...shifts];
+      const byId = new Map(local.map((s) => [s.id, s]));
+      const remoteMerged = shifts.map((remote) => {
+        const prev = byId.get(remote.id);
+        if (!prev) {
+          return remote.usesAlgorithmPricing == null
+            ? { ...remote, usesAlgorithmPricing: true }
+            : remote;
+        }
+        if (remote.usesAlgorithmPricing == null && prev.usesAlgorithmPricing != null) {
+          return { ...remote, usesAlgorithmPricing: prev.usesAlgorithmPricing };
+        }
+        return {
+          ...remote,
+          usesAlgorithmPricing: remote.usesAlgorithmPricing == null ? true : remote.usesAlgorithmPricing
+        };
+      });
+      const merged = [
+        ...local.filter((s) => !shifts.some((r) => r.id === s.id)),
+        ...remoteMerged
+      ];
       hooks.writeLocal("shifts", merged);
     }
 

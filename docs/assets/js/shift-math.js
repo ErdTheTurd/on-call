@@ -77,6 +77,11 @@ export function urgencyIcon(tier) {
 }
 
 export function normalizeShift(raw) {
+  const escalation = raw.escalationMode || raw.escalation || { type: "automatic" };
+  const hasAlgoKey = Object.prototype.hasOwnProperty.call(raw, "usesAlgorithmPricing")
+    || Object.prototype.hasOwnProperty.call(escalation, "usesAlgorithmPricing")
+    || Object.prototype.hasOwnProperty.call(escalation, "uses_algorithm_pricing");
+  const algoFlag = raw.usesAlgorithmPricing ?? escalation.usesAlgorithmPricing ?? escalation.uses_algorithm_pricing;
   return {
     id: raw.id,
     hospitalID: raw.hospitalID || raw.hospital_id,
@@ -86,8 +91,12 @@ export function normalizeShift(raw) {
     durationHours: raw.durationHours ?? raw.duration_hours ?? 24,
     rateFloor: Number(raw.rateFloor ?? raw.rate_floor ?? 0),
     rateUnit: raw.rateUnit || (raw.rate_unit === "per_hour" ? "per hour" : "per day"),
-    escalationMode: raw.escalationMode || { type: "automatic" },
-    usesAlgorithmPricing: raw.usesAlgorithmPricing ?? true
+    escalationMode: {
+      type: escalation.type || "automatic",
+      ...(escalation.rate != null ? { rate: escalation.rate } : {})
+    },
+    // null = unknown (e.g. remote row before the field existed); treat as algo in UI
+    usesAlgorithmPricing: hasAlgoKey ? !!algoFlag : null
   };
 }
 

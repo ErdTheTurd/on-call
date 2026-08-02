@@ -38,6 +38,7 @@ function update(patch) {
     "tab", "sheet", "daySheet", "tradeSheet", "calendarMonth", "selectedDate",
     "alterDate", "alterSpecialty", "alterUseAlgo", "alterOverride",
     "alterCalendarMonth", "alterRateFloor", "alterUseFlat", "alterFlatRate", "alterSaved",
+    "alterDrafts",
     "adminFilter", "adminSearch", "policyTab", "doctorFilter", "doctorAutoOnly",
     "doctorDetailId", "rateEditSpecialty"
   ];

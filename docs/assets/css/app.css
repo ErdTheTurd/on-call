@@ -1106,8 +1106,9 @@ a { color: var(--accent); text-decoration: none; }
   font-size: 13px;
   color: var(--text-secondary);
 }
-.factor-up { font-weight: 650; color: var(--accent); }
-.factor-down { font-weight: 650; color: var(--text-secondary); }
+.factor-up { font-weight: 650; color: var(--success); }
+.factor-down { font-weight: 650; color: var(--danger); }
+.factor-neutral { font-weight: 650; color: var(--text-secondary); }
 
 .algo-breakdown {
   padding: 12px;
