@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct on_call_wizardApp: App {
+    @AppStorage(ThemeManager.storageKey) private var themeRaw: String = ThemeManager.Theme.system.rawValue
     @StateObject private var deepLinks = DeepLinkRouter.shared
 
     init() {
@@ -14,8 +15,9 @@ struct on_call_wizardApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .appColorScheme()
+                .id(themeRaw)
                 .environmentObject(deepLinks)
-                .preferredColorScheme(.dark)
                 .onOpenURL { url in
                     deepLinks.handle(url)
                 }

@@ -54,8 +54,10 @@ struct ContentView: View {
         switch role {
         case .doctor:
             DoctorOnboardingView { _ in auth.completeOnboarding(role: .doctor) }
+                .withContactSupport()
         case .hospital:
             HospitalOnboardingView { _ in auth.completeOnboarding(role: .hospital) }
+                .withContactSupport()
         }
     }
 
@@ -109,8 +111,8 @@ struct RoleButton: View {
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Color.secondary.opacity(0.5))
             }
             .padding(16)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Brand.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Brand.cardRadius, style: .continuous).strokeBorder(Color.white.opacity(0.1)))
+            .background(Brand.surface, in: RoundedRectangle(cornerRadius: Brand.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Brand.cardRadius, style: .continuous).strokeBorder(Brand.border))
         }
         .buttonStyle(.plain)
     }
@@ -150,13 +152,26 @@ final class DoctorPreferencesStore: ObservableObject {
     private init() { load() }
 
     /// Returns `true` when `shift` should be shown to the doctor with the given profile.
+    /// Doctors only ever see shifts in their registered specialty(ies).
     func passes(shift: Shift, profile: DoctorProfile?) -> Bool {
         if hiddenHospitalIDs.contains(shift.hospitalID) { return false }
-        if hiddenSpecialties.contains(shift.specialty)  { return false }
-        if showOnlyMySpecialties, let specialties = profile?.specialties, !specialties.isEmpty {
-            return specialties.contains(shift.specialty)
+        guard let specialties = profile?.specialties, !specialties.isEmpty else {
+            return false
         }
-        return true
+        return specialties.contains { Self.specialtyMatches($0, shift.specialty) }
+    }
+
+    /// Treats "Surgery" / "General Surgery" as the same specialty.
+    static func specialtyMatches(_ a: String, _ b: String) -> Bool {
+        normalizeSpecialty(a) == normalizeSpecialty(b)
+    }
+
+    static func normalizeSpecialty(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.caseInsensitiveCompare("Surgery") == .orderedSame {
+            return "General Surgery"
+        }
+        return trimmed
     }
 
     // MARK: Persistence
@@ -198,7 +213,6 @@ struct DoctorRootView: View {
     var onSignOut: () -> Void
     @State private var showDashboard = false
     @StateObject private var tokens = TokenStore.shared
-    @StateObject private var points = PointsStore.shared
     @StateObject private var assignments = AssignedShiftsStore.shared
 
     var body: some View {
@@ -209,7 +223,7 @@ struct DoctorRootView: View {
                 MyAssignedShiftsView()
             }
             .tabItem { Label("My Shifts", systemImage: "arrow.triangle.2.circlepath") }
-            .badge(assignments.pendingTradeCount > 0 ? assignments.pendingTradeCount : 0)
+            .badge(assignments.pendingTradeCount)
             CredentialsView(profile: profile)
                 .tabItem { Label("Credentials", systemImage: "checkmark.seal.fill") }
         }
@@ -225,7 +239,6 @@ struct DoctorDashboardView: View {
     let profile: DoctorProfile?
     var onSignOut: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var points = PointsStore.shared
     @StateObject private var tokens = TokenStore.shared
 
     var body: some View {
@@ -251,21 +264,6 @@ struct DoctorDashboardView: View {
                             .padding(.vertical, 6)
                         }
                         .listRowBackground(Color.clear)
-                    }
-
-                    // Points
-                    Section("Rewards") {
-                        NavigationLink {
-                            ZStack { BackgroundGradient(); ScrollView { PointsCard(store: points).padding() } }
-                                .navigationTitle("My Points")
-                        } label: {
-                            HStack {
-                                Image(systemName: points.level.icon).foregroundStyle(Color.accentColor).frame(width: 28)
-                                Text("Points & Level")
-                                Spacer()
-                                Text("\(points.totalPoints) pts").font(.subheadline.weight(.semibold)).foregroundStyle(Color.accentColor)
-                            }
-                        }
                     }
 
                     Section("Schedule") {
@@ -301,6 +299,7 @@ struct DoctorDashboardView: View {
                     }
 
                     Section("Account") {
+                        ThemePickerRow()
                         NavigationLink {
                             MyInfoView(profile: profile)
                         } label: {
@@ -314,6 +313,11 @@ struct DoctorDashboardView: View {
                         Button(role: .destructive) { dismiss(); onSignOut() } label: {
                             Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                         }
+                    }
+                    Section {
+                        ContactSupportRow()
+                    } footer: {
+                        Text("Questions about shifts, credentials, or your account? Email us anytime.")
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -350,36 +354,21 @@ struct DoctorPreferencesView: View {
 
                 // MARK: Specialty
                 Section {
-                    Toggle(isOn: $prefs.showOnlyMySpecialties) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Show only my specialties")
-                                .font(.subheadline.weight(.medium))
-                            Text("Hides shifts outside your registered specialties")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if !prefs.showOnlyMySpecialties && !mySpecialties.isEmpty {
+                    if mySpecialties.isEmpty {
+                        Text("No specialty on file — update your profile.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
                         ForEach(mySpecialties, id: \.self) { sp in
-                            let hidden = prefs.hiddenSpecialties.contains(sp)
-                            Toggle(sp, isOn: Binding(
-                                get: { !hidden },
-                                set: { show in
-                                    if show { prefs.hiddenSpecialties.remove(sp) }
-                                    else     { prefs.hiddenSpecialties.insert(sp) }
-                                }
-                            ))
+                            Label(sp, systemImage: "stethoscope")
+                                .font(.subheadline.weight(.medium))
                         }
                     }
                 } header: {
-                    Label("My Specialties", systemImage: "stethoscope")
+                    Label("My Specialty", systemImage: "stethoscope")
                 } footer: {
-                    if mySpecialties.isEmpty {
-                        Text("No specialties on file — update your profile.")
-                    } else if prefs.showOnlyMySpecialties {
-                        Text("You are currently seeing: \(mySpecialties.joined(separator: ", "))")
-                            .font(.caption)
-                    }
+                    Text("You only see open shifts and calendar days for your specialty.")
+                        .font(.caption)
                 }
 
                 // MARK: Hospitals
@@ -528,12 +517,11 @@ struct UpcomingScheduleView: View {
             ScrollView {
                 VStack(spacing: 10) {
                     if upcoming.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "calendar.badge.plus").font(.system(size: 44)).foregroundStyle(.secondary)
-                            Text("No upcoming schedule").font(.headline).foregroundStyle(.secondary)
-                            Text("Tap days on the calendar to request call.").font(.subheadline).foregroundStyle(.tertiary)
-                        }
-                        .frame(maxWidth: .infinity).padding(40)
+                        EmptyStateCard(
+                            title: "No upcoming schedule",
+                            message: "Request call days from the calendar to build your coverage week.",
+                            systemImage: "calendar.badge.plus"
+                        )
                     } else {
                         ForEach(upcoming) { req in
                             HStack(spacing: 14) {
@@ -595,9 +583,9 @@ struct EarningsHistoryView: View {
                                 .font(.subheadline).foregroundStyle(.secondary)
                         } else {
                             HStack(spacing: 20) {
-                                StatPill(label: "Earned", value: "$\(Int(totalEarned))")
+                                StatPill(label: "Earned", value: NumberFormat.currency(totalEarned))
                                 StatPill(label: "Shifts", value: "\(completed.count + assignments.activeAssignedShifts().count)")
-                                StatPill(label: "Avg/shift", value: completed.isEmpty ? "—" : "$\(Int(totalEarned / Double(max(1, completed.count))))")
+                                StatPill(label: "Avg/shift", value: completed.isEmpty ? "—" : NumberFormat.currency(totalEarned / Double(max(1, completed.count))))
                             }
                         }
                     }
@@ -618,7 +606,7 @@ struct EarningsHistoryView: View {
                                         Text(assigned.shift.displayDateLabel).font(.subheadline).foregroundStyle(.secondary)
                                     }
                                     Spacer()
-                                    Text("$\(Int(assigned.shift.totalEarnings))").font(.headline).foregroundStyle(Color.accentColor)
+                                    Text(NumberFormat.currency(assigned.shift.totalEarnings)).font(.headline).foregroundStyle(Color.accentColor)
                                 }
                                 .padding(.vertical, 6)
                                 if i < min(4, completed.count - 1) { Divider() }
@@ -679,12 +667,17 @@ struct DoctorHomeView: View {
     @State private var selectedDate: Date? = nil
     @State private var calendarMonth: Date = Date()
     @State private var shiftDaySheet: IdentifiableDate? = nil
+    @State private var hoverDate: Date? = nil
+    @State private var focusOpenDays = false
     @StateObject private var tokens = TokenStore.shared
-    @StateObject private var points = PointsStore.shared
     @StateObject private var assignments = AssignedShiftsStore.shared
     @StateObject private var unavailable = UnavailableDaysStore.shared
     @ObservedObject private var hospitalService = Services.hospital
     @ObservedObject private var prefs = DoctorPreferencesStore.shared
+
+    private var doctorSpecialty: String {
+        profile?.specialties.first ?? "Internal Medicine"
+    }
 
     private var allShifts: [Shift] {
         hospitalService.shifts
@@ -711,6 +704,11 @@ struct DoctorHomeView: View {
         return allShifts.filter { Calendar.current.isDate($0.date, inSameDayAs: date) }
     }
 
+    private var hoverShifts: [Shift] {
+        guard let hoverDate else { return [] }
+        return allShifts.filter { Calendar.current.isDate($0.date, inSameDayAs: hoverDate) }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -722,30 +720,41 @@ struct DoctorHomeView: View {
                             PendingVerificationBanner(status: p.verificationStatus, flags: p.verificationFlags)
                         }
 
-                        // Points card
-                        PointsCard(store: points)
+                        PointsCard(store: PointsStore.shared)
 
                         // Token badge
                         HStack {
                             TokenBadge(store: tokens)
                             Spacer()
-                            Text("Tap a day to request call").font(.caption).foregroundStyle(.secondary)
+                            Button { showDashboard = true } label: {
+                                Text("Dashboard ›")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Brand.accent)
+                            }
+                            .buttonStyle(.plain)
                         }
                         .padding(.horizontal, 2)
 
                         // Calendar
                         VStack(alignment: .leading, spacing: 0) {
                             HStack {
-                                Button { calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth) ?? calendarMonth } label: {
-                                    Image(systemName: "chevron.left").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.white.opacity(0.5))
-                                }.buttonStyle(.plain)
+                                MonthNavButton(systemName: "chevron.left") {
+                                    calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth) ?? calendarMonth
+                                }
                                 Spacer()
-                                Button { calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth) ?? calendarMonth } label: {
-                                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.white.opacity(0.5))
-                                }.buttonStyle(.plain)
+                                MonthNavButton(systemName: "chevron.right") {
+                                    calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth) ?? calendarMonth
+                                }
                             }
                             .padding(.bottom, 4)
-                            CalendarHeatmap(month: calendarMonth, dayData: dayData, mode: .doctor, embedded: true) { date in
+                            CalendarHeatmap(
+                                month: calendarMonth,
+                                dayData: dayData,
+                                mode: .doctor,
+                                embedded: true,
+                                hoverDate: $hoverDate,
+                                focusOpenDays: focusOpenDays
+                            ) { date in
                                 guard let info = dayInfo(for: date),
                                       !info.isFilledByOthers,
                                       !info.isHospitalUnavailable else { return }
@@ -753,15 +762,39 @@ struct DoctorHomeView: View {
                                 shiftDaySheet = IdentifiableDate(date: date)
                             }
 
-                            CalendarDayLegend()
-                                .padding(.top, 8)
-                            if let date = selectedDate {
+                            Toggle(isOn: $focusOpenDays.animation(.spring(response: 0.45, dampingFraction: 0.78))) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Show open days only")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Brand.textPrimary)
+                                    Text(focusOpenDays
+                                         ? "Your booked days pop away · only free days remain"
+                                         : "Hide days you're already scheduled for")
+                                        .font(.caption)
+                                        .foregroundStyle(Brand.textTertiary)
+                                }
+                            }
+                            .tint(Brand.accent)
+                            .padding(.top, 8)
+
+                            if !focusOpenDays {
+                                CalendarDayLegend()
+                                    .padding(.top, 8)
+                            }
+
+                            if let hoverDate {
+                                DoctorDayBidCard(date: hoverDate, shifts: hoverShifts, specialty: doctorSpecialty)
+                                    .padding(.top, 12)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+
+                            if let date = selectedDate, hoverDate == nil {
                                 Divider().padding(.top, 12)
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text(date.formatted(.dateTime.weekday(.wide).month().day()))
                                         .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 10)
                                     if shiftsForSelectedDate.isEmpty {
-                                        HStack { Image(systemName: "moon.zzz").foregroundStyle(.secondary); Text("No open shifts").foregroundStyle(Color.white.opacity(0.4)) }
+                                        HStack { Image(systemName: "moon.zzz").foregroundStyle(.secondary); Text("No open \(doctorSpecialty) shifts").foregroundStyle(Color.white.opacity(0.4)) }
                                             .font(.subheadline).padding(.vertical, 6)
                                     } else {
                                         ForEach(shiftsForSelectedDate) { shift in
@@ -773,6 +806,7 @@ struct DoctorHomeView: View {
                             }
                         }
                         .cardStyle()
+                        .animation(.easeOut(duration: 0.18), value: hoverDate)
 
                         UpcomingShiftHighlights()
                         CredentialStatusCard(profile: profile)
@@ -802,10 +836,92 @@ struct DoctorHomeView: View {
             )
         }
         .onAppear {
-            if hospitalService.shifts.isEmpty, let hp = HospitalProfile.load() {
-                hospitalService.ensureDailyShifts(from: Date(), days: 120, hospitalID: hp.id, hospitalName: hp.name)
+            // Seed only this doctor's specialties for ~2 months — not every specialty for 120 days.
+            let specs = profile?.specialties.isEmpty == false
+                ? profile!.specialties
+                : [doctorSpecialty]
+            if let hp = HospitalProfile.load() {
+                hospitalService.ensureDailyShifts(
+                    from: Date(),
+                    days: 60,
+                    hospitalID: hp.id,
+                    hospitalName: hp.name,
+                    specialties: specs
+                )
             }
         }
+    }
+}
+
+/// Long-press preview: current bidding price for the doctor's specialty that day.
+private struct DoctorDayBidCard: View {
+    let date: Date
+    let shifts: [Shift]
+    let specialty: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(specialty)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Brand.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Brand.accentSoft, in: Capsule())
+            }
+
+            if shifts.isEmpty {
+                Text("No open \(specialty) bids for this day.")
+                    .font(.caption)
+                    .foregroundStyle(Brand.textSecondary)
+            } else {
+                ForEach(shifts) { shift in
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(shift.hospital)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Brand.textPrimary)
+                            Text("Going rate")
+                                .font(.caption2)
+                                .foregroundStyle(Brand.textTertiary)
+                        }
+                        Spacer()
+                        Text(shift.rateDisplay)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Brand.accent)
+                    }
+                    if shift.id != shifts.last?.id {
+                        Divider().opacity(0.35)
+                    }
+                }
+
+                let total = shifts.reduce(0.0) { $0 + $1.totalEarnings }
+                if shifts.count > 1 {
+                    HStack {
+                        Text("Day bid total")
+                            .font(.caption)
+                            .foregroundStyle(Brand.textSecondary)
+                        Spacer()
+                        Text(NumberFormat.currency(total))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Brand.success)
+                    }
+                }
+            }
+
+            Text("Long-press another day to compare · Tap to request")
+                .font(.caption2)
+                .foregroundStyle(Brand.textTertiary)
+        }
+        .padding(12)
+        .background(Brand.surfaceHigh, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Brand.border, lineWidth: 1)
+        )
     }
 }
 
@@ -817,7 +933,6 @@ struct DayShiftApplySheet: View {
     let profile: DoctorProfile?
     @Environment(\.dismiss) private var dismiss
     @StateObject private var tokens = TokenStore.shared
-    @StateObject private var points = PointsStore.shared
     @State private var applied: Set<UUID> = []
     @State private var tokenError: String? = nil
 
@@ -901,7 +1016,7 @@ struct DayShiftApplySheet: View {
                                             Text("Est. earnings").font(.caption).foregroundStyle(.secondary)
                                             let premium = HolidayCalendar.premiumMultiplier(on: date)
                                             let adjusted = shift.totalEarnings * premium
-                                            Text("$\(Int(adjusted))")
+                                            Text(NumberFormat.currency(adjusted))
                                                 .font(.title3.bold()).foregroundStyle(Color.accentColor)
                                             if premium > 1.0 {
                                                 Text("Includes \(Int((premium - 1) * 100))% holiday premium")
@@ -943,7 +1058,6 @@ struct DayShiftApplySheet: View {
         let success = requestDay(hospital: shift.hospital, specialty: shift.specialty, hospitalID: shift.hospitalID, shiftRate: shift.currentRate)
         if success {
             applied.insert(shift.id)
-            points.award(.shiftAccepted)
         }
     }
 
@@ -969,10 +1083,14 @@ struct DayShiftApplySheet: View {
 struct UpcomingShiftHighlights: View {
     @ObservedObject private var hospitalService = Services.hospital
     @StateObject private var assignments = AssignedShiftsStore.shared
+    @ObservedObject private var prefs = DoctorPreferencesStore.shared
+
+    private var profile: DoctorProfile? { DoctorProfile.load() }
 
     private var recommended: [Shift] {
         Array(hospitalService.shifts
             .filter { !$0.isPast && !assignments.isShiftFilled($0.id) }
+            .filter { prefs.passes(shift: $0, profile: profile) }
             .sorted { $0.hoursUntilStart < $1.hoursUntilStart }
             .prefix(3))
     }
@@ -981,7 +1099,7 @@ struct UpcomingShiftHighlights: View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "Recommended", systemImage: "sparkles")
             if recommended.isEmpty {
-                Text("No open shifts right now. Check back after hospitals post coverage.")
+                Text("No open shifts in your specialty right now. Check back after hospitals post coverage.")
                     .font(.subheadline).foregroundStyle(.secondary)
             } else {
                 ForEach(recommended) { shift in
@@ -1051,12 +1169,17 @@ struct ShiftsBrowseView: View {
     @State private var searchText = ""
     @ObservedObject private var hospitalService = Services.hospital
     @StateObject private var assignments = AssignedShiftsStore.shared
+    @ObservedObject private var prefs = DoctorPreferencesStore.shared
+
+    private var profile: DoctorProfile? { DoctorProfile.load() }
 
     var filtered: [Shift] {
-        let open = hospitalService.shifts.filter { !$0.isPast && !assignments.isShiftFilled($0.id) }
+        let open = hospitalService.shifts
+            .filter { !$0.isPast && !assignments.isShiftFilled($0.id) }
+            .filter { prefs.passes(shift: $0, profile: profile) }
         guard !searchText.isEmpty else { return open }
         return open.filter {
-            $0.specialty.localizedCaseInsensitiveContains(searchText) || $0.hospital.localizedCaseInsensitiveContains(searchText)
+            $0.hospital.localizedCaseInsensitiveContains(searchText)
         }
     }
 
@@ -1067,9 +1190,13 @@ struct ShiftsBrowseView: View {
                 ScrollView {
                     VStack(spacing: 10) {
                         if filtered.isEmpty {
-                            Text("No open shifts available.")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity).padding(.vertical, 32).cardStyle()
+                            EmptyStateCard(
+                                title: searchText.isEmpty ? "No open shifts in your specialty" : "No shifts match your search",
+                                message: searchText.isEmpty
+                                    ? "Check back soon — hospitals post coverage for your specialty here."
+                                    : "Try a different hospital name.",
+                                systemImage: "calendar.badge.exclamationmark"
+                            )
                         } else {
                             ForEach(filtered) { shift in
                                 Button { selectedShift = shift } label: { ShiftRow(shift: shift).cardStyle() }.buttonStyle(.plain)
@@ -1080,7 +1207,7 @@ struct ShiftsBrowseView: View {
                 }
             }
             .navigationTitle("Shifts")
-            .searchable(text: $searchText, prompt: "Specialty or hospital")
+            .searchable(text: $searchText, prompt: "Hospital")
             .sheet(item: $selectedShift) { ShiftDetailView(shift: $0) }
         }
     }
@@ -1101,7 +1228,7 @@ struct ShiftRow: View {
                 Text(shift.hospital).font(.headline).lineLimit(1)
                 Text("\(shift.specialty) · \(shift.durationLabel)").font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: 6) {
-                    Label("$\(Int(shift.currentRate))\(shift.rateUnitLabel)", systemImage: "dollarsign.circle.fill")
+                    Label("\(NumberFormat.currency(shift.currentRate))\(shift.rateUnitLabel)", systemImage: "dollarsign.circle.fill")
                         .font(.subheadline.weight(.semibold)).foregroundStyle(urgencyColor)
                     if showLockBadge {
                         Label("Rate locked", systemImage: "lock.fill")
@@ -1150,7 +1277,6 @@ struct ShiftRow: View {
 struct ShiftDetailView: View {
     let shift: Shift
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var points = PointsStore.shared
     @State private var isAccepting = false; @State private var didAccept = false; @State private var errorMessage: String? = nil
 
     var body: some View {
@@ -1173,9 +1299,9 @@ struct ShiftDetailView: View {
 
                         VStack(alignment: .leading, spacing: 14) {
                             SectionHeader(title: "Compensation", systemImage: "dollarsign.circle")
-                            DetailRow(label: "Current rate", value: "$\(Int(shift.currentRate))\(shift.rateUnitLabel)", highlight: true)
+                            DetailRow(label: "Current rate", value: "\(NumberFormat.currency(shift.currentRate))\(shift.rateUnitLabel)", highlight: true)
                             Divider()
-                            DetailRow(label: "Rate floor", value: "$\(Int(shift.rateFloor))\(shift.rateUnitLabel)")
+                            DetailRow(label: "Rate floor", value: "\(NumberFormat.currency(shift.rateFloor))\(shift.rateUnitLabel)")
                             Divider()
                             switch shift.escalationMode {
                             case .automatic:
@@ -1187,10 +1313,10 @@ struct ShiftDetailView: View {
                                     DetailRow(label: "Time away", value: shift.hoursUntilStart < 1 ? "< 1 hour" : "\(Int(shift.hoursUntilStart))h")
                                 }
                             case .flat(let r):
-                                DetailRow(label: "Rate type", value: "Fixed — $\(Int(r))\(shift.rateUnitLabel)")
+                                DetailRow(label: "Rate type", value: "Fixed — \(NumberFormat.currency(r))\(shift.rateUnitLabel)")
                             }
                             Divider()
-                            DetailRow(label: "Est. total", value: "$\(Int(shift.totalEarnings))", highlight: true)
+                            DetailRow(label: "Est. total", value: NumberFormat.currency(shift.totalEarnings), highlight: true)
                         }
                         .cardStyle()
 
@@ -1202,7 +1328,7 @@ struct ShiftDetailView: View {
                                         HStack {
                                             Text(label).foregroundStyle(.secondary).font(.subheadline)
                                             Spacer()
-                                            Text("$\(Int(rate))/day").font(.subheadline.weight(.semibold))
+                                            Text("\(NumberFormat.currency(rate))/day").font(.subheadline.weight(.semibold))
                                                 .foregroundStyle(rate > shift.rateFloor * 1.5 ? Color.red : Color.accentColor)
                                         }
                                     }
@@ -1211,7 +1337,7 @@ struct ShiftDetailView: View {
                                         HStack {
                                             Text(label).foregroundStyle(.secondary).font(.subheadline)
                                             Spacer()
-                                            Text("$\(Int(rate))/hr").font(.subheadline.weight(.semibold))
+                                            Text("\(NumberFormat.currency(rate))/hr").font(.subheadline.weight(.semibold))
                                                 .foregroundStyle(rate > shift.rateFloor * 1.5 ? Color.red : Color.accentColor)
                                         }
                                     }
@@ -1267,10 +1393,6 @@ struct ShiftDetailView: View {
                 }
                 await MainActor.run {
                     isAccepting = false; didAccept = true
-                    points.award(.shiftAccepted)
-                    if shift.granularity == .day ? shift.daysUntilStart < 1 : shift.hoursUntilStart < 2 {
-                        points.award(.fastResponse)
-                    }
                 }
                 try await Task.sleep(nanoseconds: 900_000_000)
                 await MainActor.run { dismiss() }
@@ -1397,7 +1519,7 @@ struct HospitalRootView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             HospitalDashboardView(profile: profile, showDashboard: $showDashboard, selectedTab: $selectedTab)
-                .tabItem { Label("Dashboard", systemImage: "rectangle.grid.2x2.fill") }
+                .tabItem { Label("Home", systemImage: "house.fill") }
                 .tag(0)
             AlterShiftsView(profile: profile)
                 .tabItem { Label("Alter Shifts", systemImage: "calendar.badge.clock") }
@@ -1410,6 +1532,10 @@ struct HospitalRootView: View {
         .onAppear {
             if let profile {
                 policyBootstrap(profile)
+                InvestorDemo.bootstrapIfNeeded(
+                    hospitalID: profile.id,
+                    hospitalName: profile.name
+                )
                 if Services.hospital.shifts.filter({ $0.hospitalID == profile.id }).isEmpty {
                     Services.hospital.ensureDailyShifts(from: Date(), days: 120, hospitalID: profile.id, hospitalName: profile.name, policy: profile.schedulingPolicy)
                 }
@@ -1459,11 +1585,6 @@ struct HospitalDashboardSheet: View {
                     }
                     Section("Management") {
                         NavigationLink {
-                            HospitalOpenShiftsView(profile: profile)
-                        } label: {
-                            Label("Open Shifts", systemImage: "clock.badge.exclamationmark")
-                        }
-                        NavigationLink {
                             HospitalAnalyticsView(profile: profile)
                         } label: {
                             Label("Analytics", systemImage: "chart.bar.fill")
@@ -1476,15 +1597,21 @@ struct HospitalDashboardSheet: View {
                         NavigationLink {
                             HospitalPolicySettingsView(hospitalProfile: profile)
                         } label: {
-                            Label("On Call", systemImage: "slider.horizontal.3")
+                            Label("Scheduling", systemImage: "slider.horizontal.3")
                         }
                     }
                     Section("Account") {
+                        ThemePickerRow()
                         Toggle("Priority Posting", isOn: $priorityPosting)
                         Toggle("Auto-pay Invoices", isOn: $autoPayInvoices)
                         Button(role: .destructive) { dismiss(); onSignOut() } label: {
                             Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                         }
+                    }
+                    Section {
+                        ContactSupportRow()
+                    } footer: {
+                        Text("Questions about coverage, billing, or your account? Email us anytime.")
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -1509,6 +1636,7 @@ struct HospitalDashboardView: View {
     @State private var calendarMonth = Date()
     @State private var hoverDate: Date?
     @State private var detailDate: IdentifiableDate?
+    @State private var focusOpenDays = false
 
     private var hospitalID: UUID? { profile?.id }
 
@@ -1532,24 +1660,35 @@ struct HospitalDashboardView: View {
                             PendingVerificationBanner(status: p.verificationStatus, flags: p.verificationFlags)
                         }
 
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Coverage calendar")
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundStyle(Brand.textPrimary)
+                                Text(focusOpenDays
+                                     ? "Open days only — filled coverage pops away so gaps stay obvious."
+                                     : "See what’s filled, then open a day to set rates or approve coverage.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Brand.textSecondary)
+                            }
+
                             HStack {
-                                Button { calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth) ?? calendarMonth } label: {
-                                    Image(systemName: "chevron.left").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.white.opacity(0.5))
-                                }.buttonStyle(.plain)
+                                MonthNavButton(systemName: "chevron.left") {
+                                    calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth) ?? calendarMonth
+                                }
                                 Spacer()
-                                Text("Long press for coverage · Tap for details")
+                                Text(focusOpenDays ? "Open coverage gaps" : "Tap for overview · Hold for day details")
                                     .font(.caption).foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
                                 Spacer()
-                                Button { calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth) ?? calendarMonth } label: {
-                                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.white.opacity(0.5))
-                                }.buttonStyle(.plain)
+                                MonthNavButton(systemName: "chevron.right") {
+                                    calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth) ?? calendarMonth
+                                }
                             }
 
-                            if let hoverSummary {
+                            if let hoverSummary, !focusOpenDays {
                                 HospitalDayHoverCard(summary: hoverSummary)
-                                    .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .top)))
+                                    .transition(.opacity)
                             }
 
                             CalendarHeatmap(
@@ -1557,28 +1696,74 @@ struct HospitalDashboardView: View {
                                 dayData: dayData,
                                 mode: .hospital,
                                 embedded: true,
-                                hoverDate: $hoverDate
+                                hoverDate: $hoverDate,
+                                focusOpenDays: focusOpenDays
                             ) { date in
                                 hoverDate = nil
                                 detailDate = IdentifiableDate(date: date)
                             }
-                            CalendarDayLegend(showHospitalHint: true)
-                        }
-                        .cardStyle()
-                        .animation(.easeOut(duration: 0.2), value: hoverDate)
 
-                        HStack(spacing: 12) {
-                            Button { selectedTab = 1 } label: {
-                                StatBadge(value: "\(hospitalService.openShiftCount)", label: "Open\nShifts")
-                            }.buttonStyle(.plain)
-                            Button { showDashboard = true } label: {
-                                StatBadge(value: "\(hospitalService.fillRatePercent)%", label: "Fill Rate\n30 days")
-                            }.buttonStyle(.plain)
-                            Button { selectedTab = 2 } label: {
-                                StatBadge(value: "\(roster.doctors.filter(\.isAutoApproved).count)", label: "Auto‑Approved\nDoctors")
-                            }.buttonStyle(.plain)
+                            Toggle(isOn: $focusOpenDays.animation(.spring(response: 0.45, dampingFraction: 0.78))) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Show open days only")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Brand.textPrimary)
+                                    Text(focusOpenDays
+                                         ? "Filled days pop away · gaps tint rose"
+                                         : "Turn on to hunt unfilled coverage")
+                                        .font(.caption)
+                                        .foregroundStyle(Brand.textTertiary)
+                                }
+                            }
+                            .tint(Brand.accent)
+                            .padding(.top, 4)
+
+                            if !focusOpenDays {
+                                CalendarDayLegend(showHospitalHint: true)
+                            } else {
+                                HStack(spacing: 14) {
+                                    legendSwatch(color: Color(hex: "94A3B8"), label: "Filled (gone)")
+                                    legendSwatch(color: Color(hex: "E11D48"), label: "Needs coverage")
+                                    Spacer()
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(Brand.textSecondary)
+                            }
                         }
                         .cardStyle()
+                        .animation(.easeOut(duration: 0.18), value: hoverDate)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("At a glance")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Brand.textPrimary)
+                            HStack(spacing: 12) {
+                                Button { showDashboard = true } label: {
+                                    StatBadge(
+                                        value: "\(hospitalService.fillRatePercent)%",
+                                        label: "Fill rate",
+                                        hint: "Last 30 days"
+                                    )
+                                }.buttonStyle(.plain)
+                                Button { selectedTab = 2 } label: {
+                                    StatBadge(
+                                        value: "\(roster.doctors.filter(\.isAutoApproved).count)",
+                                        label: "Auto‑approved",
+                                        hint: "Ready doctors"
+                                    )
+                                }.buttonStyle(.plain)
+                                Button { selectedTab = 1 } label: {
+                                    StatBadge(
+                                        value: "\(dayData.filter { $0.coverageFillLevel != .allFilled }.count)",
+                                        label: "Open days",
+                                        hint: focusOpenDays ? "In focus" : "This month"
+                                    )
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                        .cardStyle()
+
+                        AdBannerView(placement: "dashboard")
                     }
                     .padding()
                 }
@@ -1598,17 +1783,42 @@ struct HospitalDashboardView: View {
             }
         }
     }
+
+    private func legendSwatch(color: Color, label: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(color.opacity(0.45))
+                .frame(width: 12, height: 12)
+            Text(label)
+        }
+    }
 }
 
 private struct StatBadge: View {
-    let value: String; let label: String
+    let value: String
+    let label: String
+    var hint: String? = nil
+
     var body: some View {
-        VStack(spacing: 4) {
-            Text(value).font(.system(.title2, design: .rounded, weight: .bold)).foregroundStyle(Color.accentColor)
-            Text(label).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        VStack(spacing: 6) {
+            Text(value)
+                .font(.system(.title2, design: .rounded).weight(.bold))
+                .foregroundStyle(Brand.accent)
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Brand.textPrimary)
+                .multilineTextAlignment(.center)
+            if let hint {
+                Text(hint)
+                    .font(.caption2)
+                    .foregroundStyle(Brand.textTertiary)
+                    .multilineTextAlignment(.center)
+            }
         }
-        .frame(maxWidth: .infinity).padding(12)
-        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 8)
+        .background(Brand.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -1684,11 +1894,13 @@ struct ScheduleAdminView: View {
                         .background(Brand.surface, in: RoundedRectangle(cornerRadius: 10))
 
                         if filtered.isEmpty {
-                            Text(rows.isEmpty ? "No token requests yet." : "No requests match your filters.")
-                                .font(.subheadline)
-                                .foregroundStyle(Brand.textSecondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 32)
+                            EmptyStateCard(
+                                title: rows.isEmpty ? "No coverage requests yet" : "No requests match filters",
+                                message: rows.isEmpty
+                                    ? "When doctors request call days, they’ll appear here for you to approve."
+                                    : "Try clearing search or switching status filters.",
+                                systemImage: "person.badge.clock"
+                            )
                         } else {
                             ForEach(filtered) { row in
                                 ScheduleCardRow(
@@ -1756,7 +1968,7 @@ private struct CompactScheduleRow: View {
                 .frame(width: 120, alignment: .leading)
 
             // Rate
-            Text("$\(row.rate)/d")
+            Text("\(NumberFormat.currency(row.rate))/d")
                 .font(.system(size: 12, weight: .bold)).foregroundStyle(Brand.accent)
                 .frame(width: 80, alignment: .center)
 
@@ -1863,7 +2075,7 @@ struct ScheduleCardRow: View {
 
                 // Right side
                 VStack(alignment: .trailing, spacing: 6) {
-                    Text("$\(row.rate)/day")
+                    Text("\(NumberFormat.currency(row.rate))/day")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(Brand.accent)
                     statusBadge(row.status)
@@ -2006,6 +2218,8 @@ struct AlterShiftsView: View {
     let profile: HospitalProfile?
     @ObservedObject private var hospitalService = Services.hospital
     @StateObject private var policyStore = SchedulingPolicyStore.shared
+    @ObservedObject private var algoStore = AlgorithmPresetStore.shared
+    @State private var mode: Mode = .dayRates
     @State private var calendarMonth = Date()
     @State private var selectedDate = Calendar.current.startOfDay(for: Date().addingTimeInterval(86_400))
     @State private var specialty = "Internal Medicine"
@@ -2016,6 +2230,14 @@ struct AlterShiftsView: View {
     @State private var suggestedRate: SuggestedRate? = nil
     @State private var didSave = false
     @State private var editingShiftID: UUID?
+    @State private var showSaveAlgoSheet = false
+    @State private var newAlgoName = ""
+    @State private var weekdayAppliedMessage: String?
+
+    private enum Mode: String, CaseIterable {
+        case dayRates = "Day rates"
+        case payRates = "Pay Rates"
+    }
 
     private var hospitalID: UUID? { profile?.id }
     private var hospitalName: String { profile?.name ?? "" }
@@ -2033,20 +2255,95 @@ struct AlterShiftsView: View {
                 BackgroundGradient()
                 ScrollView {
                     VStack(spacing: 14) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            SectionHeader(title: "Pick a Day", systemImage: "calendar")
-                            Text("Each day has an on-call shift. Select a day below to view or customize it.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            HStack {
-                                Button { calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth) ?? calendarMonth } label: {
-                                    Image(systemName: "chevron.left").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.white.opacity(0.5))
-                                }.buttonStyle(.plain)
-                                Spacer()
-                                Button { calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth) ?? calendarMonth } label: {
-                                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.white.opacity(0.5))
-                                }.buttonStyle(.plain)
+                        Picker("", selection: $mode) {
+                            ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal, 2)
+
+                        if mode == .payRates {
+                            SpecialtyPayEditor(policy: $policyStore.policy)
+                        } else {
+                            dayRatesContent
+                        }
+                    }
+                    .padding()
+                    .animation(.easeOut(duration: 0.22), value: didSave)
+                    .animation(.easeOut(duration: 0.22), value: weekdayAppliedMessage)
+                    .animation(.easeOut(duration: 0.2), value: mode)
+                }
+            }
+            .navigationTitle("Alter Shifts")
+            .onAppear {
+                policyStore.loadForHospital(profile)
+                if let hospitalID {
+                    hospitalService.ensureDailyShifts(
+                        from: Date(),
+                        days: 120,
+                        hospitalID: hospitalID,
+                        hospitalName: hospitalName,
+                        policy: policyStore.policy
+                    )
+                    hospitalService.ensureMonthShifts(
+                        for: calendarMonth,
+                        hospitalID: hospitalID,
+                        hospitalName: hospitalName,
+                        policy: policyStore.policy
+                    )
+                    loadShift(for: selectedDate)
+                }
+            }
+            .onDisappear {
+                policyStore.saveForHospital(profile)
+            }
+            .sheet(isPresented: $showSaveAlgoSheet) {
+                saveAlgoSheet
+            }
+            .onChange(of: algoStore.activePresetID) { _, _ in
+                computeRate()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var dayRatesContent: some View {
+                        // Weekday bulk-apply + calendar
+                        VStack(alignment: .leading, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                SectionHeader(title: "Set coverage rates", systemImage: "calendar")
+                                Text("Choose a day, confirm the rate, then save. Rates doctors see stay locked once posted.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Brand.textSecondary)
                             }
-                            CalendarHeatmap(month: calendarMonth, dayData: dayData, mode: .hospital, embedded: true) { date in
+                            Text("Tap a weekday letter to apply the active algorithm to every matching day this month.")
+                                .font(.caption)
+                                .foregroundStyle(Brand.textTertiary)
+
+                            WeekdayAlgoStrip(
+                                assignments: algoStore.weekdayAssignments,
+                                activePresetID: algoStore.activePresetID,
+                                onTap: { weekday in applyAlgo(toWeekday: weekday) }
+                            )
+
+                            if let msg = weekdayAppliedMessage {
+                                ActionSuccessBanner(title: msg)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+
+                            HStack {
+                                MonthNavButton(systemName: "chevron.left") {
+                                    calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth) ?? calendarMonth
+                                }
+                                Spacer()
+                                Text(calendarMonth.formatted(.dateTime.month(.wide).year()))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Brand.textPrimary)
+                                Spacer()
+                                MonthNavButton(systemName: "chevron.right") {
+                                    calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth) ?? calendarMonth
+                                }
+                            }
+                            CalendarHeatmap(month: calendarMonth, dayData: dayData, mode: .hospital, embedded: true, tapSelectsDay: true) { date in
                                 selectedDate = date.onlyDate()
                                 loadShift(for: date.onlyDate())
                             }
@@ -2067,52 +2364,70 @@ struct AlterShiftsView: View {
                             SpecialtyPicker(selection: $specialty)
                                 .onChange(of: specialty) { _, _ in loadShift(for: selectedDate) }
 
+                            // Algorithm picker
+                            algoPickerRow
+
                             Toggle(isOn: $useAlgorithm.animation()) {
-                                Label("Use On Call pricing algorithm", systemImage: "sparkles")
+                                Label(
+                                    useAlgorithm ? "Auto · Algorithm pricing" : "Proprietary · Set rates",
+                                    systemImage: useAlgorithm ? "sparkles" : "slider.horizontal.3"
+                                )
                                     .font(.subheadline.weight(.medium))
                             }
                             .tint(Brand.accent)
                             .onChange(of: useAlgorithm) { _, _ in refreshRate() }
 
+                            if useAlgorithm {
+                                algoEstimateSummary
+                            }
+
                             Divider()
 
                             HStack {
-                                Text(useAlgorithm ? "Algorithm rate floor" : "Manual rate floor")
+                                Text(useAlgorithm ? "Algorithm rate max" : "Manual rate max")
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                Text("$\(Int(rateFloor))\(rateUnitLabel)")
+                                Text("\(NumberFormat.currency(rateFloor))\(rateUnitLabel)")
                                     .font(.headline)
                                     .foregroundStyle(Color.accentColor)
                             }
 
-                            if useAlgorithm {
-                                if let sr = suggestedRate {
-                                    Text("\(sr.breakdown.variableCount) pricing variables · \(Int(sr.breakdown.confidence * 100))% confidence")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                let baseRate = policyStore.policy.specialtyBaseRates[specialty] ?? 0
-                                if baseRate > 0 {
-                                    Text("Floor capped at base rate: $\(Int(baseRate))\(rateUnitLabel)")
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
-                                Button { computeRate() } label: {
-                                    Label("Recalculate", systemImage: "arrow.clockwise")
-                                        .font(.caption.weight(.semibold))
-                                }
-                            } else {
-                                let baseRate = policyStore.policy.specialtyBaseRates[specialty] ?? 0
-                                let minRate = max(isHourly ? 80.0 : 800.0, baseRate)
-                                Stepper("", value: $rateFloor, in: minRate...(isHourly ? 400 : 5000), step: isHourly ? 5 : 50)
-                                    .labelsHidden()
-                                if baseRate > 0 {
-                                    Text("Minimum: $\(Int(minRate))\(rateUnitLabel) (specialty base rate)")
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
+                            let baseRate = policyStore.policy.specialtyBaseRates[specialty] ?? 0
+                            let minRate = max(isHourly ? 80.0 : 800.0, baseRate)
+                            Stepper("", value: $rateFloor, in: minRate...(isHourly ? 400 : 5000), step: isHourly ? 5 : 50)
+                                .labelsHidden()
+                            if baseRate > 0 {
+                                Text("Minimum: \(NumberFormat.currency(minRate))\(rateUnitLabel) (specialty base rate)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if useAlgorithm, let sr = suggestedRate {
+                                Text("\(sr.breakdown.variableCount) pricing variables · \(Int(sr.breakdown.confidence * 100))% confidence · auto-updates")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
 
                             if useAlgorithm, let sr = suggestedRate, !sr.breakdown.allComponents.isEmpty {
-                                PricingFactorBreakdownView(components: sr.breakdown.allComponents)
+                                PricingFactorControlsView(
+                                    components: sr.breakdown.allComponents,
+                                    policy: $policyStore.policy,
+                                    hospitalID: hospitalID,
+                                    specialty: specialty,
+                                    onChanged: { computeRate() }
+                                )
+                            }
+
+                            if useAlgorithm {
+                                Button {
+                                    newAlgoName = ""
+                                    showSaveAlgoSheet = true
+                                } label: {
+                                    Label("Save algorithm for reuse", systemImage: "square.and.arrow.down")
+                                        .font(.subheadline.weight(.medium))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 10)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(Brand.accent)
                             }
 
                             Divider()
@@ -2121,52 +2436,270 @@ struct AlterShiftsView: View {
                                 HStack {
                                     Text("Flat rate").foregroundStyle(.secondary)
                                     Spacer()
-                                    Text("$\(Int(flatRate))\(rateUnitLabel)").font(.headline).foregroundStyle(Color.accentColor)
+                                    Text("\(NumberFormat.currency(flatRate))\(rateUnitLabel)").font(.headline).foregroundStyle(Color.accentColor)
                                 }
                                 Stepper("", value: $flatRate, in: rateFloor...(isHourly ? 600 : 8000), step: isHourly ? 5 : 50).labelsHidden()
+                                Text("Doctors will see this exact rate — no range, no surprise.")
+                                    .font(.caption2)
+                                    .foregroundStyle(Brand.textTertiary)
                             }
                         }
                         .cardStyle()
 
-                        Button { saveShift() } label: {
-                            Group {
-                                if didSave {
-                                    Label("Saved!", systemImage: "checkmark.circle.fill")
-                                } else {
-                                    Text("Save Shift for This Day")
-                                }
-                            }
-                            .font(.headline).frame(maxWidth: .infinity).padding()
+                        if didSave {
+                            ActionSuccessBanner(
+                                title: "Shift saved for \(selectedDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))",
+                                subtitle: "Rate locked at \(NumberFormat.currency(useCustomRate ? flatRate : rateFloor))\(rateUnitLabel) · \(specialty)"
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+
+                        Button {
+                            withAnimation(.easeOut(duration: 0.2)) { saveShift() }
+                        } label: {
+                            Text(didSave ? "Saved — tap to update again" : "Save shift for this day")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding()
                         }
                         .buttonStyle(PrimaryButtonStyle())
+                        .disabled(didSave)
+                        .opacity(didSave ? 0.72 : 1)
+    }
+
+    private var currentAskingPrice: Double? {
+        guard let hospitalID else {
+            let base = policyStore.policy.specialtyBaseRates[specialty]
+            return base.flatMap { $0 > 0 ? $0 : nil }
+        }
+        return ProposedRateStore.resolveAskingPrice(
+            specialty: specialty,
+            date: selectedDate,
+            hospitalID: hospitalID
+        )
+    }
+
+    private var algoEstimateTotal: Double {
+        guard let sr = suggestedRate else { return rateFloor }
+        // Day rates: floor is the day total. Hourly: floor × typical shift hours.
+        if isHourly {
+            return sr.floor * 12
+        }
+        return sr.floor
+    }
+
+    private var algoPickerRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Algorithm")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(algoStore.presets) { preset in
+                        Button {
+                            algoStore.selectPreset(preset.id)
+                            // Apply case-volume settings from preset into policy for editing
+                            if !preset.isSmart {
+                                policyStore.policy.caseVolumeRewardEnabled = preset.caseVolumeRewardEnabled
+                                policyStore.policy.caseVolumeRewardScale = preset.caseVolumeRewardScale
+                                policyStore.policy.caseVolumeRewardAuto = preset.caseVolumeRewardAuto
+                            }
+                            computeRate()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    if preset.isSmart {
+                                        Image(systemName: "sparkles")
+                                            .font(.caption2.weight(.bold))
+                                    }
+                                    Text(preset.name)
+                                        .font(.caption.weight(.semibold))
+                                }
+                                if preset.isSmart {
+                                    Text(askingChipLabel)
+                                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                                        .opacity(0.92)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(algoStore.activePresetID == preset.id ? .white : Brand.textPrimary)
+                            .background(
+                                algoStore.activePresetID == preset.id
+                                    ? Brand.accent
+                                    : Brand.accentSoft,
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .padding()
-                }
-            }
-            .navigationTitle("Alter Shifts")
-            .onAppear {
-                if let hospitalID {
-                    hospitalService.ensureDailyShifts(
-                        from: Date(),
-                        days: 120,
-                        hospitalID: hospitalID,
-                        hospitalName: hospitalName,
-                        policy: policyStore.policy
-                    )
-                    hospitalService.ensureMonthShifts(
-                        for: calendarMonth,
-                        hospitalID: hospitalID,
-                        hospitalName: hospitalName,
-                        policy: policyStore.policy
-                    )
-                    loadShift(for: selectedDate)
                 }
             }
         }
     }
 
+    private var askingChipLabel: String {
+        if let ask = currentAskingPrice {
+            return "Ask \(NumberFormat.currency(ask))"
+        }
+        if let sr = suggestedRate {
+            return "Ask \(NumberFormat.currency(sr.floor))"
+        }
+        return "Ask —"
+    }
+
+    private var algoEstimateSummary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Current asking")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Brand.textTertiary)
+                    Text(currentAskingPrice.map { NumberFormat.currency($0) } ?? "—")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Brand.textPrimary)
+                        .contentTransition(.numericText())
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Algo estimate")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Brand.textTertiary)
+                    Text(NumberFormat.currency(suggestedRate?.floor ?? rateFloor))
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Brand.accent)
+                        .contentTransition(.numericText())
+                }
+            }
+            HStack {
+                Text("Est. total payout")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Brand.textSecondary)
+                Spacer()
+                Text("\(NumberFormat.currency(algoEstimateTotal))\(isHourly ? " (12h)" : "/day")")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(Brand.success)
+                    .contentTransition(.numericText())
+            }
+            if let sr = suggestedRate, abs(sr.peakRate - sr.floor) > 1 {
+                Text("Peak if scarce: \(NumberFormat.currency(sr.peakRate))\(rateUnitLabel)")
+                    .font(.caption2)
+                    .foregroundStyle(Brand.textTertiary)
+            }
+        }
+        .padding(12)
+        .background(Brand.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .animation(.easeOut(duration: 0.2), value: suggestedRate?.floor)
+        .animation(.easeOut(duration: 0.2), value: currentAskingPrice)
+    }
+
+    private var saveAlgoSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Name this algorithm") {
+                    TextField("e.g. Weekend Premium", text: $newAlgoName)
+                }
+                Section {
+                    Text("Saves your current variable toggles, long-press scales, and case volume settings for reuse.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Save Algorithm")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showSaveAlgoSheet = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        _ = algoStore.saveAsNew(name: newAlgoName, fromPolicy: policyStore.policy)
+                        showSaveAlgoSheet = false
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    /// Apply the active algorithm to every matching weekday in the visible month.
+    private func applyAlgo(toWeekday weekday: Int) {
+        algoStore.assignWeekday(weekday)
+        guard let hospitalID else {
+            let names = ["", "Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"]
+            withAnimation {
+                weekdayAppliedMessage = "\(names[weekday]) will use \(algoStore.activePreset.name)"
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+                withAnimation { weekdayAppliedMessage = nil }
+            }
+            return
+        }
+
+        let cal = Calendar.current
+        let monthStart = calendarMonth.startOfMonth()
+        guard let range = cal.range(of: .day, in: .month, for: monthStart) else { return }
+        var applied = 0
+        for day in range {
+            guard let date = cal.date(byAdding: .day, value: day - 1, to: monthStart) else { continue }
+            guard cal.component(.weekday, from: date) == weekday else { continue }
+            let dayDate = date.onlyDate()
+            // Ensure shift exists and stamp rate from this weekday's algo
+            let result = ProposedRateStore.shared.pricingResult(
+                specialty: specialty,
+                date: dayDate,
+                hospitalID: hospitalID
+            )
+            var shift = hospitalService.shift(
+                on: dayDate,
+                specialty: specialty,
+                hospitalID: hospitalID,
+                hospitalName: hospitalName,
+                policy: policyStore.policy
+            )
+            shift = Shift(
+                id: shift.id,
+                hospitalID: shift.hospitalID,
+                hospital: shift.hospital,
+                specialty: shift.specialty,
+                start: shift.start,
+                durationHours: shift.durationHours,
+                rateFloor: result.floor,
+                rateUnit: shift.rateUnit,
+                escalationMode: .automatic,
+                escalationIntervalHours: shift.escalationIntervalHours,
+                usesAlgorithmPricing: true
+            )
+            hospitalService.upsertShift(shift)
+            applied += 1
+        }
+
+        let names = ["", "Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"]
+        withAnimation {
+            weekdayAppliedMessage = "Applied \(algoStore.activePreset.name) to \(applied) \(names[weekday].lowercased())"
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation { weekdayAppliedMessage = nil }
+        }
+        // Refresh selected day if it matches
+        if cal.component(.weekday, from: selectedDate) == weekday {
+            loadShift(for: selectedDate)
+        }
+    }
+
     private func loadShift(for date: Date) {
         guard let hospitalID else { return }
+        // Switch to weekday-assigned algo if one exists
+        let weekday = Calendar.current.component(.weekday, from: date.onlyDate())
+        if let assigned = algoStore.preset(forWeekday: weekday) {
+            algoStore.selectPreset(assigned.id)
+            if !assigned.isSmart {
+                policyStore.policy.caseVolumeRewardEnabled = assigned.caseVolumeRewardEnabled
+                policyStore.policy.caseVolumeRewardScale = assigned.caseVolumeRewardScale
+                policyStore.policy.caseVolumeRewardAuto = assigned.caseVolumeRewardAuto
+            }
+        }
         hospitalService.ensureMonthShifts(
             for: date,
             hospitalID: hospitalID,
@@ -2181,14 +2714,20 @@ struct AlterShiftsView: View {
             policy: policyStore.policy
         )
         editingShiftID = shift.id
-        useAlgorithm = shift.usesAlgorithmPricing
+        useAlgorithm = policyStore.policy.usesAlgorithmPricing(for: specialty)
         if case .flat(let r) = shift.escalationMode {
             useCustomRate = true
             flatRate = r
         } else {
             useCustomRate = false
         }
-        refreshRate(fallback: shift.rateFloor)
+        if useAlgorithm {
+            refreshRate(fallback: shift.rateFloor)
+        } else {
+            let base = policyStore.policy.specialtyBaseRates[specialty] ?? shift.rateFloor
+            rateFloor = max(base, isHourly ? 80 : 800)
+            refreshRate(fallback: rateFloor)
+        }
     }
 
     private func refreshRate(fallback: Double? = nil) {
@@ -2200,14 +2739,37 @@ struct AlterShiftsView: View {
     }
 
     private func computeRate() {
+        let specialtyBase = policyStore.policy.specialtyBaseRates[specialty] ?? 0
+        let baseForAlgo = specialtyBase > 0
+            ? (policyStore.policy.granularity == .day ? specialtyBase / 10 : specialtyBase)
+            : 120.0
+
+        // Auto-set case volume scale from trailing 90-day cases when enabled
+        if let hospitalID, policyStore.policy.caseVolumeRewardAuto {
+            let cases = CaseVolumeInsights.casesLast90Days(hospitalID: hospitalID, specialty: specialty)
+            let suggested = CaseVolumeInsights.suggestedScale(casesLast90Days: cases)
+            if policyStore.policy.caseVolumeRewardScale != suggested {
+                policyStore.policy.caseVolumeRewardScale = suggested
+                policyStore.setPolicy(policyStore.policy, for: hospitalID)
+            }
+        }
+
         guard let hospitalID else {
+            var obs = PricingObservables.neutral
+            obs.casesLast90Days = 0
+            obs.currentAskingPrice = currentAskingPrice
             suggestedRate = OnCallPricingEngine.compute(
                 specialty: specialty,
                 date: selectedDate,
-                granularity: policyStore.policy.granularity
+                baseMarketRate: baseForAlgo,
+                granularity: policyStore.policy.granularity,
+                observables: obs,
+                disabledFactorIDs: Set(algoStore.workingDisabled),
+                factorOverrides: algoStore.workingOverrides,
+                caseVolumeRewardEnabled: policyStore.policy.caseVolumeRewardEnabled,
+                caseVolumeRewardScale: policyStore.policy.caseVolumeRewardScale
             ).toSuggestedRate()
-            rateFloor = max(suggestedRate?.floor ?? rateFloor,
-                            policyStore.policy.specialtyBaseRates[specialty] ?? 0)
+            rateFloor = max(suggestedRate?.floor ?? rateFloor, specialtyBase)
             return
         }
         suggestedRate = ProposedRateStore.shared.suggestedRate(
@@ -2215,8 +2777,7 @@ struct AlterShiftsView: View {
             date: selectedDate,
             hospitalID: hospitalID
         )
-        rateFloor = max(suggestedRate?.floor ?? rateFloor,
-                        policyStore.policy.specialtyBaseRates[specialty] ?? 0)
+        rateFloor = max(suggestedRate?.floor ?? rateFloor, specialtyBase)
     }
 
     private func saveShift() {
@@ -2237,79 +2798,323 @@ struct AlterShiftsView: View {
         )
         hospitalService.upsertShift(shift)
         editingShiftID = shift.id
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         didSave = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { didSave = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            withAnimation(.easeOut(duration: 0.2)) { didSave = false }
+        }
     }
 }
 
-// MARK: - Pricing factor breakdown (Alter Shifts)
+// MARK: - Weekday strip (apply algo to all S/M/T/…)
 
-private struct PricingFactorBreakdownView: View {
+private struct WeekdayAlgoStrip: View {
+    let assignments: [Int: UUID]
+    let activePresetID: UUID
+    let onTap: (Int) -> Void
+
+    private let labels = ["S", "M", "T", "W", "T", "F", "S"]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(1...7, id: \.self) { weekday in
+                let assigned = assignments[weekday]
+                let isActiveAssign = assigned == activePresetID
+                Button { onTap(weekday) } label: {
+                    Text(labels[weekday - 1])
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(assigned != nil ? .white : Brand.textPrimary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 36)
+                        .background(
+                            assigned != nil
+                                ? (isActiveAssign ? Brand.accent : Brand.accent.opacity(0.55))
+                                : Brand.surfaceHigh,
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Brand.border, lineWidth: 1)
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+// MARK: - Pricing factor controls (Alter Shifts)
+
+private struct PricingFactorControlsView: View {
     let components: [PricingFactorComponent]
+    @Binding var policy: SchedulingPolicy
+    let hospitalID: UUID?
+    let specialty: String
+    let onChanged: () -> Void
 
-    private var grouped: [(String, [PricingFactorComponent])] {
-        Dictionary(grouping: components.filter { $0.weight > 0 || $0.id == "base" }, by: \.category)
-            .sorted { $0.key < $1.key }
+    @ObservedObject private var algoStore = AlgorithmPresetStore.shared
+    @State private var expandedID: String?
+    /// Raw auto multipliers captured before overrides (id → algo value).
+    @State private var autoMults: [String: Double] = [:]
+
+    private var casesLast90: Int {
+        guard let hospitalID else { return 0 }
+        return CaseVolumeInsights.casesLast90Days(hospitalID: hospitalID, specialty: specialty)
+    }
+
+    private var algoSuggestedScale: Int {
+        CaseVolumeInsights.suggestedScale(casesLast90Days: casesLast90)
+    }
+
+    private var groupedCatalog: [(String, [PricingVariableCatalog.Item])] {
+        Dictionary(grouping: PricingVariableCatalog.all, by: \.category)
+            .sorted { lhs, rhs in
+                let order = ["Context", "Market", "Interaction", "Reward"]
+                let li = order.firstIndex(of: lhs.key) ?? 99
+                let ri = order.firstIndex(of: rhs.key) ?? 99
+                return li < ri
+            }
             .map { ($0.key, $0.value) }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Algorithm breakdown")
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Algorithm variables")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.secondary)
-            ForEach(grouped, id: \.0) { category, items in
+            Text("Toggle on/off. Long-press a variable to fine-tune its scale (0.1 – 2.0).")
+                .font(.caption2)
+                .foregroundStyle(Brand.textTertiary)
+
+            ForEach(groupedCatalog, id: \.0) { category, items in
                 Text(category.uppercased())
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(Brand.textTertiary)
+                    .padding(.top, 4)
+
                 ForEach(items) { item in
-                    HStack {
-                        Text(item.label)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(item.displayValue)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(item.multiplier >= 1.0 ? Brand.accent : Brand.textSecondary)
+                    if item.id != "caseVolume" {
+                        factorRow(item)
                     }
                 }
+            }
+
+            Divider().padding(.vertical, 4)
+            caseVolumeSection
+        }
+        .padding(12)
+        .background(Brand.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onAppear { captureAutoMults() }
+        .onChange(of: components.map(\.id).joined()) { _, _ in captureAutoMults() }
+    }
+
+    private func captureAutoMults() {
+        // Remember algo values for factors that don't yet have an override
+        for c in components where c.id != "confidence" && c.id != "prior" {
+            if algoStore.workingOverrides[c.id] == nil, algoStore.isEnabled(c.id) {
+                autoMults[c.id] = c.multiplier
+            } else if autoMults[c.id] == nil {
+                autoMults[c.id] = max(0.1, c.multiplier == 0 ? 1.0 : c.multiplier)
+            }
+        }
+    }
+
+    private func shownMultiplier(for id: String) -> Double {
+        if !algoStore.isEnabled(id) { return 1.0 }
+        if let o = algoStore.workingOverrides[id] { return o }
+        if let c = components.first(where: { $0.id == id }) { return c.multiplier }
+        return autoMults[id] ?? 1.0
+    }
+
+    private func factorRow(_ item: PricingVariableCatalog.Item) -> some View {
+        let shown = shownMultiplier(for: item.id)
+        let component = components.first(where: { $0.id == item.id })
+        let isOff = !algoStore.isEnabled(item.id) || (component?.weight ?? 0) <= 0 && abs(shown - 1.0) < 0.001
+        let isExpanded = expandedID == item.id
+        let valueLabel: String = {
+            if isOff { return "Off" }
+            if let display = component?.displayValue, item.id == "askingPrice" || display.hasPrefix("$") || display.hasPrefix("+") {
+                return display
+            }
+            return String(format: "%.3f", shown)
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.label)
+                        .font(.caption)
+                        .foregroundStyle(isOff ? Brand.textTertiary : Brand.textPrimary)
+                    Text(valueLabel)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(isOff ? Brand.textTertiary : (shown < 0.999 ? Brand.danger : Brand.textSecondary))
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { algoStore.isEnabled(item.id) },
+                    set: { newValue in
+                        algoStore.setEnabled(item.id, enabled: newValue)
+                        onChanged()
+                    }
+                ))
+                .labelsHidden()
+                .tint(Brand.accent)
+            }
+            .contentShape(Rectangle())
+            .onLongPressGesture(minimumDuration: 0.4) {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                    expandedID = isExpanded ? nil : item.id
+                    if expandedID == item.id, algoStore.workingOverrides[item.id] == nil {
+                        let seed = autoMults[item.id] ?? (abs(shown - 1.0) < 0.001 ? 1.0 : shown)
+                        algoStore.seedWorkingOverride(item.id, value: seed)
+                    }
+                }
+            }
+
+            if isExpanded {
+                factorScaleSlider(itemID: item.id)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func factorScaleSlider(itemID: String) -> some View {
+        let binding = Binding<Double>(
+            get: { algoStore.workingOverrides[itemID] ?? autoMults[itemID] ?? 1.0 },
+            set: {
+                algoStore.setOverride(itemID, value: $0)
+                onChanged()
+            }
+        )
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Scale")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: "%.2f", binding.wrappedValue))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Brand.textPrimary)
+            }
+            Slider(value: binding, in: 0.1...2.0, step: 0.05)
+            .tint(Brand.accent)
+
+            HStack {
+                Text("0.1").font(.caption2).foregroundStyle(Brand.textTertiary)
+                Spacer()
+                Text("1.0 = Off").font(.caption2).foregroundStyle(Brand.textTertiary)
+                Spacer()
+                Text("2.0").font(.caption2).foregroundStyle(Brand.textTertiary)
+            }
+
+            Button {
+                algoStore.clearOverride(itemID)
+                withAnimation { expandedID = nil }
+                onChanged()
+            } label: {
+                Label("Reset to auto", systemImage: "sparkles")
+                    .font(.caption.weight(.semibold))
             }
         }
         .padding(10)
-        .background(Brand.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-// MARK: - Hospital management screens
-
-struct HospitalOpenShiftsView: View {
-    let profile: HospitalProfile?
-    @ObservedObject private var hospitalService = Services.hospital
-    @ObservedObject private var assignments = AssignedShiftsStore.shared
-
-    private var openShifts: [Shift] {
-        hospitalService.shifts
-            .filter { !$0.isPast && !assignments.isShiftFilled($0.id) }
-            .sorted { $0.date < $1.date }
+        .background(Brand.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    var body: some View {
-        ZStack {
-            BackgroundGradient()
-            ScrollView {
-                VStack(spacing: 10) {
-                    if openShifts.isEmpty {
-                        Text("All shifts are filled.").foregroundStyle(.secondary).padding(40)
+    private var caseVolumeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Case volume premium", systemImage: "chart.bar.doc.horizontal")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Brand.textPrimary)
+                    Text("Rewards doctors who bring cases to the hospital")
+                        .font(.caption2)
+                        .foregroundStyle(Brand.textSecondary)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { policy.caseVolumeRewardEnabled },
+                    set: { newValue in
+                        policy.caseVolumeRewardEnabled = newValue
+                        if let hid = hospitalID {
+                            SchedulingPolicyStore.shared.setPolicy(policy, for: hid)
+                        }
+                        onChanged()
+                    }
+                ))
+                .labelsHidden()
+                .tint(Brand.accent)
+            }
+
+            if policy.caseVolumeRewardEnabled {
+                HStack {
+                    Text("Compensation scale")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("+\(policy.caseVolumeRewardScale)%")
+                        .font(.headline)
+                        .foregroundStyle(Brand.accent)
+                }
+
+                Slider(
+                    value: Binding(
+                        get: { Double(policy.caseVolumeRewardScale) },
+                        set: { raw in
+                            policy.caseVolumeRewardScale = SchedulingPolicy.clampCaseVolumeScale(Int(raw.rounded()))
+                            policy.caseVolumeRewardAuto = false
+                        }
+                    ),
+                    in: 10...100,
+                    step: 10
+                ) { editing in
+                    if !editing {
+                        if let hid = hospitalID {
+                            SchedulingPolicyStore.shared.setPolicy(policy, for: hid)
+                        }
+                        onChanged()
+                    }
+                }
+                .tint(Brand.accent)
+
+                HStack {
+                    Text("10%").font(.caption2).foregroundStyle(Brand.textTertiary)
+                    Spacer()
+                    Text("100%").font(.caption2).foregroundStyle(Brand.textTertiary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(casesLast90) cases in the last 90 days · algo suggests +\(algoSuggestedScale)%")
+                        .font(.caption2)
+                        .foregroundStyle(Brand.textSecondary)
+
+                    if policy.caseVolumeRewardAuto {
+                        Text("Scale is auto-set by the algorithm")
+                            .font(.caption2)
+                            .foregroundStyle(Brand.textTertiary)
                     } else {
-                        ForEach(openShifts) { shift in
-                            ShiftRow(shift: shift).cardStyle()
+                        Button {
+                            policy.caseVolumeRewardScale = algoSuggestedScale
+                            policy.caseVolumeRewardAuto = true
+                            if let hid = hospitalID {
+                                SchedulingPolicyStore.shared.setPolicy(policy, for: hid)
+                            }
+                            onChanged()
+                        } label: {
+                            Label("Reset to algo (+\(algoSuggestedScale)%)", systemImage: "sparkles")
+                                .font(.caption.weight(.semibold))
                         }
                     }
                 }
-                .padding()
+            } else {
+                Text("Off — no case-volume compensation (scale = 0)")
+                    .font(.caption2)
+                    .foregroundStyle(Brand.textTertiary)
             }
         }
-        .navigationTitle("Open Shifts")
+        .padding(10)
+        .background(Brand.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -2330,6 +3135,7 @@ struct HospitalAnalyticsView: View {
                     timeBucketsRow
                     savingsSummaryCard
                     specialtyListCard
+                    DoctorStockBoard(profile: profile)
                 }
                 .padding(18)
             }
@@ -2365,8 +3171,10 @@ struct HospitalAnalyticsView: View {
         hospitalLedger.filter { Calendar.current.component(.year, from: $0.createdAt) == currentYear }
     }
 
-    /// True when no real data exists yet — drives demo/placeholder values.
-    private var noRealData: Bool { hospitalShifts.isEmpty && hospitalLedger.isEmpty }
+    /// Prefer full mock analytics in investor demo (calendar seed has fills but no trade/cancel ledger).
+    private var noRealData: Bool {
+        InvestorDemo.isEnabled || (hospitalShifts.isEmpty && hospitalLedger.isEmpty)
+    }
 
     private var tradedCount:   Int { noRealData ? 34  : tradedShifts.count }
     private var canceledCount: Int { noRealData ? 23  : canceledShifts.count }
@@ -2423,9 +3231,9 @@ struct HospitalAnalyticsView: View {
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
             // Row 2 — totals (bottom-left: total traded, bottom-right: total canceled)
             HStack(spacing: 0) {
-                AnalyticsCornerStat(label: "Total Traded \(yr)",   value: "\(tradedCount)",   color: Brand.accent, large: true)
+                AnalyticsCornerStat(label: "Total Traded \(yr)",   value: NumberFormat.grouped(tradedCount),   color: Brand.accent, large: true)
                 Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1)
-                AnalyticsCornerStat(label: "Total Canceled \(yr)", value: "\(canceledCount)", color: Brand.danger, large: true)
+                AnalyticsCornerStat(label: "Total Canceled \(yr)", value: NumberFormat.grouped(canceledCount), color: Brand.danger, large: true)
             }
         }
         .background {
@@ -2474,7 +3282,7 @@ struct HospitalAnalyticsView: View {
                     .foregroundStyle(Brand.textSecondary)
             }
             Spacer()
-            Text(String(format: "$%.0f", savingsPerDay))
+            Text(NumberFormat.currency(savingsPerDay))
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(Brand.success)
         }
@@ -2513,7 +3321,7 @@ struct HospitalAnalyticsView: View {
                                         .foregroundStyle(Brand.textTertiary)
                                 }
                                 Spacer()
-                                Text(String(format: "$%.0f", item.1))
+                                Text(NumberFormat.currency(item.1))
                                     .font(.system(size: 16, weight: .bold, design: .rounded))
                                     .foregroundStyle(Brand.success)
                                 Image(systemName: "chevron.right")
@@ -2536,8 +3344,11 @@ struct HospitalAnalyticsView: View {
                 ("Cardiology",         58.0),
                 ("Emergency Medicine", 42.0),
                 ("Orthopedics",        27.0),
+                ("Neurology",          22.0),
                 ("General Surgery",    15.0),
-                ("Internal Medicine",   5.0)
+                ("Anesthesiology",     12.0),
+                ("Internal Medicine",   5.0),
+                ("Pediatrics",          4.0),
             ]
         }
         // Year-scoped: only entries logged in the current calendar year
@@ -2621,7 +3432,7 @@ private struct AnalyticsMiniStat: View {
     let color: Color
     var body: some View {
         VStack(spacing: 4) {
-            Text("\(count)")
+            Text(NumberFormat.grouped(count))
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .foregroundStyle(color)
             Text(label)
@@ -2681,9 +3492,9 @@ struct SpecialtySavingsChart: View {
             }
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
             HStack(spacing: 0) {
-                AnalyticsCornerStat(label: "Total Traded \(yr)",   value: "\(tradedCount)",   color: Brand.accent, large: true)
+                AnalyticsCornerStat(label: "Total Traded \(yr)",   value: NumberFormat.grouped(tradedCount),   color: Brand.accent, large: true)
                 Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1)
-                AnalyticsCornerStat(label: "Total Canceled \(yr)", value: "\(canceledCount)", color: Brand.danger, large: true)
+                AnalyticsCornerStat(label: "Total Canceled \(yr)", value: NumberFormat.grouped(canceledCount), color: Brand.danger, large: true)
             }
         }
         .background {
@@ -2726,12 +3537,12 @@ struct SpecialtySavingsChart: View {
                 Text("Amount Saved per Day")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Brand.textPrimary)
-                Text("Total recovered: \(String(format: "$%.0f", totalRevenue))")
+                Text("Total recovered: \(NumberFormat.currency(totalRevenue))")
                     .font(.system(size: 12))
                     .foregroundStyle(Brand.textSecondary)
             }
             Spacer()
-            Text(String(format: "$%.0f", savingsPerDay))
+            Text(NumberFormat.currency(savingsPerDay))
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(Brand.success)
         }
@@ -2784,7 +3595,7 @@ struct SpecialtySavingsChart: View {
                     AxisMarks(position: .leading) { v in
                         if let d = v.as(Double.self) {
                             AxisValueLabel {
-                                Text("$\(Int(d))")
+                                Text(NumberFormat.currency(d))
                                     .font(.system(size: 10))
                                     .foregroundStyle(Brand.textTertiary)
                             }
@@ -2845,7 +3656,9 @@ struct SpecialtySavingsChart: View {
     private var specialtyLedger: [PenaltyLedgerStore.Entry] {
         allSpecialtyLedger.filter { Calendar.current.component(.year, from: $0.createdAt) == currentYear }
     }
-    private var noRealData: Bool { specialtyLedger.isEmpty && specialtyShifts.isEmpty }
+    private var noRealData: Bool {
+        InvestorDemo.isEnabled || (specialtyLedger.isEmpty && specialtyShifts.isEmpty)
+    }
 
     private var tradedCount:   Int    { noRealData ? Int((34.0 * (0.4 + mockScale * 0.6)).rounded()) : specialtyTradedShifts.count }
     private var canceledCount: Int    { noRealData ? Int((23.0 * (0.3 + mockScale * 0.7)).rounded()) : specialtyCanceledShifts.count }
@@ -2914,8 +3727,11 @@ struct SpecialtySavingsChart: View {
                     (monthlyTotal * 1.51).rounded()    // year after projected
                 ]
                 return zip([thisYear, thisYear + 1, thisYear + 2], yearAmounts).map { year, amt in
-                    DataPoint(label: "\(year)", amount: amt,
-                              sortKey: cal.date(from: DateComponents(year: year)) ?? Date())
+                    DataPoint(
+                        label: String(year),
+                        amount: amt,
+                        sortKey: cal.date(from: DateComponents(year: year)) ?? Date()
+                    )
                 }
             }
         }
@@ -2949,61 +3765,6 @@ struct SpecialtySavingsChart: View {
     }
 }
 
-struct HospitalBillingView: View {
-    let profile: HospitalProfile?
-    @ObservedObject private var hospitalService = Services.hospital
-    @ObservedObject private var assignments = AssignedShiftsStore.shared
-
-    private var committedTotal: Int {
-        hospitalService.shifts
-            .filter { assignments.isShiftFilled($0.id) }
-            .reduce(0) { $0 + Int($1.totalEarnings) }
-    }
-
-    var body: some View {
-        ZStack {
-            BackgroundGradient()
-            ScrollView {
-                VStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionHeader(title: "This Month")
-                        HStack {
-                            Text("Committed payouts").foregroundStyle(.secondary)
-                            Spacer()
-                            Text("$\(committedTotal)").font(.title2.bold()).foregroundStyle(Color.accentColor)
-                        }
-                        Text("Based on filled shifts at current rates.")
-                            .font(.caption).foregroundStyle(.tertiary)
-                    }
-                    .cardStyle()
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionHeader(title: "Recent Filled Shifts")
-                        ForEach(Array(filledShifts.prefix(8))) { shift in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(shift.displayDateLabel).font(.subheadline.weight(.semibold))
-                                    Text(shift.specialty).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text("$\(Int(shift.totalEarnings))").font(.headline).foregroundStyle(Color.accentColor)
-                            }
-                            if shift.id != filledShifts.prefix(8).last?.id { Divider() }
-                        }
-                    }
-                    .cardStyle()
-                }
-                .padding()
-            }
-        }
-        .navigationTitle("Billing")
-    }
-
-    private var filledShifts: [Shift] {
-        hospitalService.shifts.filter { assignments.isShiftFilled($0.id) }
-    }
-}
-
 private struct PostField: View {
     let label: String; @Binding var text: String
     var body: some View {
@@ -3020,9 +3781,15 @@ private struct SpecialtyPicker: View {
 
 struct CandidatesView: View {
     @EnvironmentObject var store: DoctorRosterStore
-    @State private var filterSpecialty = "All"; @State private var showAutoOnly = false
+    @State private var filterSpecialty = "All"
+    @State private var showAutoOnly = false
 
-    private var filtered: [DoctorSummary] { store.doctors.filter { (filterSpecialty == "All" || $0.specialty == filterSpecialty) && (!showAutoOnly || $0.isAutoApproved) } }
+    private var filtered: [DoctorSummary] {
+        store.doctors.filter {
+            (filterSpecialty == "All" || $0.specialty == filterSpecialty) &&
+            (!showAutoOnly || $0.isAutoApproved)
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -3030,19 +3797,24 @@ struct CandidatesView: View {
                 BackgroundGradient()
                 ScrollView {
                     VStack(spacing: 14) {
+                        AdBannerView(placement: "doctors")
+
                         VStack(alignment: .leading, spacing: 10) {
                             Toggle("Auto-approved only", isOn: $showAutoOnly.animation()).font(Brand.brandFont)
                             Divider()
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 8) {
                                     FilterChip(label: "All", isSelected: filterSpecialty == "All") { filterSpecialty = "All" }
-                                    ForEach(Array(Set(store.doctors.map { $0.specialty })).sorted(), id: \.self) { sp in FilterChip(label: sp, isSelected: filterSpecialty == sp) { filterSpecialty = sp } }
+                                    ForEach(Array(Set(store.doctors.map { $0.specialty })).sorted(), id: \.self) { sp in
+                                        FilterChip(label: sp, isSelected: filterSpecialty == sp) { filterSpecialty = sp }
+                                    }
                                 }
                             }
                         }
                         .cardStyle()
+
                         if filtered.isEmpty {
-                            Text("No doctors match filters.").font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).cardStyle()
+                            doctorsEmptyState
                         } else {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(filtered) { doc in
@@ -3060,6 +3832,35 @@ struct CandidatesView: View {
                 }
             }
             .navigationTitle("Doctors")
+            .onAppear {
+                DoctorRosterStore.shared.seedMockDoctorsIfNeeded()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var doctorsEmptyState: some View {
+        let title = store.doctors.isEmpty ? "No doctors on roster yet" : "No doctors match filters"
+        let message = store.doctors.isEmpty
+            ? "Approved doctors appear here once they request coverage. Auto-approve trusted specialists to fill faster."
+            : "Clear filters or switch specialty to see more of your roster."
+        if showAutoOnly || filterSpecialty != "All" {
+            EmptyStateCard(
+                title: title,
+                message: message,
+                systemImage: "stethoscope",
+                actionTitle: "Clear filters",
+                onAction: {
+                    showAutoOnly = false
+                    filterSpecialty = "All"
+                }
+            )
+        } else {
+            EmptyStateCard(
+                title: title,
+                message: message,
+                systemImage: "stethoscope"
+            )
         }
     }
 }
@@ -3147,16 +3948,17 @@ struct DoctorDetailView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         SectionHeader(title: "Schedule", systemImage: "calendar")
                         HStack {
-                            Button { calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth) ?? calendarMonth } label: {
-                                Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.white.opacity(0.5))
-                            }.buttonStyle(.plain)
+                            MonthNavButton(systemName: "chevron.left") {
+                                calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth) ?? calendarMonth
+                            }
                             Spacer()
                             Text(calendarMonth.formatted(.dateTime.month(.wide).year()))
                                 .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Brand.textPrimary)
                             Spacer()
-                            Button { calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth) ?? calendarMonth } label: {
-                                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.white.opacity(0.5))
-                            }.buttonStyle(.plain)
+                            MonthNavButton(systemName: "chevron.right") {
+                                calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth) ?? calendarMonth
+                            }
                         }
 
                         DoctorScheduleCalendar(month: calendarMonth, scheduledDates: scheduledDates)

@@ -59,7 +59,7 @@ final class InMemoryDoctorService: DoctorService, ObservableObject {
             guard !shift.isPast else { return false }
             guard !AssignedShiftsStore.shared.isShiftFilled(shift.id) else { return false }
             guard shift.currentRate >= minRate else { return false }
-            if specialties.isEmpty { return true }
+            if specialties.isEmpty { return false }
             return specialties.contains(shift.specialty)
         }
     }
@@ -101,8 +101,10 @@ final class InMemoryHospitalService: HospitalService, ObservableObject {
         specialty: String,
         hospitalID: UUID,
         hospitalName: String,
-        policy: SchedulingPolicy = SchedulingPolicy()
+        policy: SchedulingPolicy? = nil,
+        persistImmediately: Bool = true
     ) -> Shift {
+        let policy = policy ?? SchedulingPolicy()
         let day = date.onlyDate()
         if let existing = shifts.first(where: {
             $0.hospitalID == hospitalID &&
@@ -113,28 +115,26 @@ final class InMemoryHospitalService: HospitalService, ObservableObject {
         }
 
         let unit: RateUnit = policy.granularity == .hour ? .perHour : .perDay
-        let algoFloor = ProposedRateStore.shared.algorithmRate(
-            specialty: specialty,
-            date: day,
-            hospitalID: hospitalID
-        )
+        // Prefer specialty base rate for seeding — full algo on every day is too slow.
+        let base = policy.specialtyBaseRates[specialty]
+            ?? (policy.granularity == .day ? 1_200 : 120)
         let newShift = Shift(
             hospitalID: hospitalID,
             hospital: hospitalName.isEmpty ? "Hospital" : hospitalName,
             specialty: specialty,
             start: day,
             durationHours: policy.granularity == .hour ? 12 : 24,
-            rateFloor: algoFloor,
+            rateFloor: base,
             rateUnit: unit,
             usesAlgorithmPricing: true
         )
         shifts.append(newShift)
-        persist()
+        if persistImmediately { persist() }
         return newShift
     }
 
     /// Legacy helper — returns Internal Medicine shift for the day.
-    func shift(on date: Date, hospitalID: UUID, hospitalName: String, policy: SchedulingPolicy = SchedulingPolicy()) -> Shift {
+    func shift(on date: Date, hospitalID: UUID, hospitalName: String, policy: SchedulingPolicy? = nil) -> Shift {
         shift(on: date, specialty: "Internal Medicine", hospitalID: hospitalID, hospitalName: hospitalName, policy: policy)
     }
 
@@ -159,40 +159,57 @@ final class InMemoryHospitalService: HospitalService, ObservableObject {
         days count: Int,
         hospitalID: UUID,
         hospitalName: String,
-        policy: SchedulingPolicy = SchedulingPolicy()
+        policy: SchedulingPolicy? = nil,
+        specialties: [String]? = nil
     ) {
+        let policy = policy ?? SchedulingPolicy()
         let cal = Calendar.current
-        let specialties = DemoData.specialties
+        let specs = specialties?.isEmpty == false ? specialties! : DemoData.specialties
+        let before = shifts.count
         for offset in 0..<count {
             guard let date = cal.date(byAdding: .day, value: offset, to: start.onlyDate()) else { continue }
-            for specialty in specialties {
+            for specialty in specs {
                 _ = shift(
                     on: date,
                     specialty: specialty,
                     hospitalID: hospitalID,
                     hospitalName: hospitalName,
-                    policy: policy
+                    policy: policy,
+                    persistImmediately: false
                 )
             }
         }
+        if shifts.count != before { persist() }
     }
 
-    /// Ensures every day in a calendar month has all specialty shifts.
+    /// Ensures every day in a calendar month has the given specialty shifts.
     func ensureMonthShifts(
         for month: Date,
         hospitalID: UUID,
         hospitalName: String,
-        policy: SchedulingPolicy = SchedulingPolicy()
+        policy: SchedulingPolicy? = nil,
+        specialties: [String]? = nil
     ) {
+        let policy = policy ?? SchedulingPolicy()
         let cal = Calendar.current
         let monthStart = month.startOfMonth()
         guard let range = cal.range(of: .day, in: .month, for: monthStart) else { return }
+        let specs = specialties?.isEmpty == false ? specialties! : DemoData.specialties
+        let before = shifts.count
         for offset in range {
             guard let date = cal.date(byAdding: .day, value: offset - 1, to: monthStart) else { continue }
-            for specialty in DemoData.specialties {
-                _ = shift(on: date, specialty: specialty, hospitalID: hospitalID, hospitalName: hospitalName, policy: policy)
+            for specialty in specs {
+                _ = shift(
+                    on: date,
+                    specialty: specialty,
+                    hospitalID: hospitalID,
+                    hospitalName: hospitalName,
+                    policy: policy,
+                    persistImmediately: false
+                )
             }
         }
+        if shifts.count != before { persist() }
     }
 
     var openShiftCount: Int {

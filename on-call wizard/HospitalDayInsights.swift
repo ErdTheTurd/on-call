@@ -119,14 +119,45 @@ enum HospitalDayInsights {
         guard let range = cal.range(of: .day, in: .month, for: start) else { return [] }
         let today = cal.startOfDay(for: Date())
         let unavailable = UnavailableDaysStore.shared
+        let assignments = AssignedShiftsStore.shared
+        let specialties = trackedSpecialties(hospitalID: hospitalID)
+        let specialtyCount = max(1, specialties.count)
+
+        // Index shifts once for the month instead of rebuilding a full summary per day
+        let monthShifts = Services.hospital.shifts.filter {
+            $0.hospitalID == hospitalID && cal.isDate($0.date, equalTo: start, toGranularity: .month)
+        }
+        var postedByDay: [Date: Set<String>] = [:]
+        var filledByDay: [Date: Set<String>] = [:]
+        for shift in monthShifts {
+            let day = shift.date.onlyDate()
+            postedByDay[day, default: []].insert(shift.specialty)
+            if assignments.isShiftFilled(shift.id) {
+                filledByDay[day, default: []].insert(shift.specialty)
+            }
+        }
 
         return range.compactMap { offset -> CalendarHeatmap.DayData? in
             guard let date = cal.date(byAdding: .day, value: offset - 1, to: start) else { return nil }
             let day = date.onlyDate()
             let isPast = day < today
             let blocked = unavailable.isBlocked(day, hospitalID: hospitalID)
-            let summary = summary(for: day, hospitalID: hospitalID)
-            let openCount = summary.specialtyRows.filter { $0.hasShiftPosted && !$0.isFilled }.count
+            let posted = postedByDay[day] ?? []
+            let filled = filledByDay[day] ?? []
+            let openCount = posted.subtracting(filled).count
+
+            let level: CalendarHeatmap.DayData.CoverageFillLevel?
+            if blocked {
+                level = nil
+            } else if posted.isEmpty {
+                level = .noneFilled
+            } else if filled.count >= posted.count || filled.count >= specialtyCount {
+                level = .allFilled
+            } else if filled.isEmpty {
+                level = .noneFilled
+            } else {
+                level = .partial
+            }
 
             return CalendarHeatmap.DayData(
                 date: day,
@@ -134,7 +165,7 @@ enum HospitalDayInsights {
                 shiftCount: openCount,
                 isPast: isPast,
                 isHospitalUnavailable: blocked,
-                coverageFillLevel: blocked ? nil : summary.coverageFillLevel
+                coverageFillLevel: level
             )
         }
     }

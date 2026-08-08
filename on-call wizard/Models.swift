@@ -226,7 +226,7 @@ public struct Shift: Identifiable, Hashable, Codable {
         return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
     }
 
-    public var rateDisplay: String { "$\(Int(currentRate))\(rateUnitLabel)" }
+    public var rateDisplay: String { "\(NumberFormat.currency(currentRate))\(rateUnitLabel)" }
 
     public var urgencyTier: UrgencyTier {
         isPast ? .past : EscalationCurve.urgencyTier(hoursUntilShift: hoursUntilStart, perDay: rateUnit == .perDay)
@@ -349,7 +349,15 @@ public struct HospitalProfile: Codable {
 
     public static func load() -> HospitalProfile? {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let p = try? JSONDecoder().decode(HospitalProfile.self, from: data) else { return nil }
+              var p = try? JSONDecoder().decode(HospitalProfile.self, from: data) else { return nil }
+        // Migrate legacy demo name
+        if p.name.localizedCaseInsensitiveContains("bayview") {
+            p.name = "Average Hospital"
+            if p.email.lowercased().contains("bayview") {
+                p.email = "admin@averagehospital.org"
+            }
+            p.save()
+        }
         return p
     }
 
@@ -392,7 +400,7 @@ public enum DemoData {
         "Emergency Medicine",
         "Anesthesiology",
         "Radiology",
-        "Surgery",
+        "General Surgery",
         "Pediatrics",
         "Psychiatry",
         "Cardiology",
@@ -424,24 +432,31 @@ public enum DemoData {
                 hospitalIDs: hospitalIDs.isEmpty ? (fallbackHospitalID.map { [$0] } ?? []) : hospitalIDs
             )
             let isFilled = assignments.isFilledByOthers(on: date, shifts: shifts, currentDoctorID: currentDoctorID)
+            let isMine = assignments.isScheduled(on: date, doctorID: currentDoctorID)
 
             if isPast {
+                let pastRate = dayShifts.map(\.currentRate).max()
                 return CalendarHeatmap.DayData(
                     date: date, urgencyValue: -1, shiftCount: dayShifts.count, isPast: true,
-                    isFilledByOthers: isFilled, isHospitalUnavailable: isUnavailable
+                    isFilledByOthers: isFilled, isHospitalUnavailable: isUnavailable,
+                    isMyScheduledDay: isMine,
+                    goingRate: pastRate
                 )
             }
 
             let futureShifts = dayShifts.filter { !$0.isPast && !assignments.isShiftFilled($0.id) }
             let bestShift = futureShifts.min(by: { $0.hoursUntilStart < $1.hoursUntilStart })
             let urgencyValue: Double = bestShift.map { $0.hoursUntilStart } ?? 0
+            let goingRate = futureShifts.map(\.currentRate).max() ?? bestShift?.currentRate
 
             return CalendarHeatmap.DayData(
                 date: date, urgencyValue: urgencyValue,
                 shiftCount: futureShifts.count,
                 isPast: false,
                 isFilledByOthers: isFilled,
-                isHospitalUnavailable: isUnavailable
+                isHospitalUnavailable: isUnavailable,
+                isMyScheduledDay: isMine,
+                goingRate: goingRate
             )
         }
     }

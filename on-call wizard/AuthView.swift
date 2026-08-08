@@ -192,6 +192,7 @@ struct AuthView: View {
                 }
             }
         }
+        .withContactSupport()
         .sheet(isPresented: $showDevRolePicker) {
             DevRolePickerView(auth: auth)
         }
@@ -438,23 +439,13 @@ private struct AuthField: View {
 // MARK: - Animated Mesh Background
 
 private struct MeshBackground: View {
-    @State private var phase: CGFloat = 0
-
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.05)) { _ in
-            Canvas { ctx, size in
-                let blobs: [(CGPoint, Color, CGFloat)] = [
-                    (CGPoint(x: size.width * 0.2, y: size.height * 0.15), Color(hex: "1E3A8A").opacity(0.6), 300),
-                    (CGPoint(x: size.width * 0.85, y: size.height * 0.25), Color(hex: "4C1D95").opacity(0.5), 280),
-                    (CGPoint(x: size.width * 0.5, y: size.height * 0.6),  Color(hex: "1E40AF").opacity(0.4), 340),
-                ]
-                for (center, color, radius) in blobs {
-                    let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-                    ctx.fill(Path(ellipseIn: rect), with: .color(color))
-                }
-            }
-        }
-        .blur(radius: 80)
+        // Static gradient — animated TimelineView + blur was too expensive on device
+        LinearGradient(
+            colors: [Color(hex: "0A0F1E"), Color(hex: "1E3A8A").opacity(0.45), Color(hex: "0A0F1E")],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
         .ignoresSafeArea()
     }
 }

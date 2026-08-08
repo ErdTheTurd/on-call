@@ -4,34 +4,102 @@
 import Foundation
 
 public struct ShiftTradeRequest: Identifiable, Codable, Sendable, Equatable {
-    public enum State: String, Codable, Sendable { case pending, accepted, rejected, canceled }
+    public enum State: String, Codable, Sendable { case pending, accepted, rejected, canceled, countered }
+
     public var id: UUID
+    /// Doctor offering to give up `shiftID`.
     public var fromDoctorID: UUID
+    /// Doctor being asked to take `shiftID` and (optionally) give up `requestedShiftID`.
     public var toDoctorID: UUID
+    /// Day the requester is giving up.
     public var shiftID: UUID
+    /// Day the requester wants from the partner (day swap).
+    public var requestedShiftID: UUID?
+    /// Optional cash sweetener offered by the requester (or counter amount).
+    public var compensationAmount: Double
+    /// If this trade is a counter to another pending trade.
+    public var counterOfTradeID: UUID?
     public var createdAt: Date
     public var state: State
-    public init(id: UUID = UUID(), fromDoctorID: UUID, toDoctorID: UUID, shiftID: UUID, createdAt: Date = Date(), state: State = .pending) {
+
+    // Cached display fields (survive even if shifts move)
+    public var fromDoctorName: String?
+    public var toDoctorName: String?
+    public var offeredDate: Date?
+    public var requestedDate: Date?
+    public var specialty: String?
+
+    public init(
+        id: UUID = UUID(),
+        fromDoctorID: UUID,
+        toDoctorID: UUID,
+        shiftID: UUID,
+        requestedShiftID: UUID? = nil,
+        compensationAmount: Double = 0,
+        counterOfTradeID: UUID? = nil,
+        createdAt: Date = Date(),
+        state: State = .pending,
+        fromDoctorName: String? = nil,
+        toDoctorName: String? = nil,
+        offeredDate: Date? = nil,
+        requestedDate: Date? = nil,
+        specialty: String? = nil
+    ) {
         self.id = id
         self.fromDoctorID = fromDoctorID
         self.toDoctorID = toDoctorID
         self.shiftID = shiftID
+        self.requestedShiftID = requestedShiftID
+        self.compensationAmount = max(0, min(1_000, compensationAmount))
+        self.counterOfTradeID = counterOfTradeID
         self.createdAt = createdAt
         self.state = state
+        self.fromDoctorName = fromDoctorName
+        self.toDoctorName = toDoctorName
+        self.offeredDate = offeredDate
+        self.requestedDate = requestedDate
+        self.specialty = specialty
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, fromDoctorID, toDoctorID, shiftID, requestedShiftID
+        case compensationAmount, counterOfTradeID, createdAt, state
+        case fromDoctorName, toDoctorName, offeredDate, requestedDate, specialty
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        fromDoctorID = try c.decode(UUID.self, forKey: .fromDoctorID)
+        toDoctorID = try c.decode(UUID.self, forKey: .toDoctorID)
+        shiftID = try c.decode(UUID.self, forKey: .shiftID)
+        requestedShiftID = try c.decodeIfPresent(UUID.self, forKey: .requestedShiftID)
+        compensationAmount = try c.decodeIfPresent(Double.self, forKey: .compensationAmount) ?? 0
+        counterOfTradeID = try c.decodeIfPresent(UUID.self, forKey: .counterOfTradeID)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        state = try c.decodeIfPresent(State.self, forKey: .state) ?? .pending
+        fromDoctorName = try c.decodeIfPresent(String.self, forKey: .fromDoctorName)
+        toDoctorName = try c.decodeIfPresent(String.self, forKey: .toDoctorName)
+        offeredDate = try c.decodeIfPresent(Date.self, forKey: .offeredDate)
+        requestedDate = try c.decodeIfPresent(Date.self, forKey: .requestedDate)
+        specialty = try c.decodeIfPresent(String.self, forKey: .specialty)
     }
 }
 
 public enum TradeDirection: Sendable { case incoming, outgoing }
 
-private struct ShiftTradeSnapshot: Codable {
+private struct ShiftTradeSnapshot: Codable, Sendable {
     var shifts: [UUID: DoctorShift]
     var trades: [UUID: ShiftTradeRequest]
     var policies: [UUID: SchedulingPolicy]
 }
 
-public actor ShiftTradeService {
+/// MainActor class (not actor) so it shares isolation with SchedulingPolicy / PenaltyCalculator
+/// under the project's default MainActor isolation — avoids Swift 6 concurrency alerts.
+@MainActor
+public final class ShiftTradeService {
     public static let shared = ShiftTradeService()
-    private let storageKey = "shift_trade_service_v1"
+    private let storageKey = "shift_trade_service_v2"
 
     private var shifts: [UUID: DoctorShift] = [:]
     private var trades: [UUID: ShiftTradeRequest] = [:]
@@ -43,6 +111,12 @@ public actor ShiftTradeService {
             shifts = snap.shifts
             trades = snap.trades
             policies = snap.policies
+        } else if let legacy = UserDefaults.standard.data(forKey: "shift_trade_service_v1"),
+                  let snap = try? JSONDecoder().decode(ShiftTradeSnapshot.self, from: legacy) {
+            shifts = snap.shifts
+            trades = snap.trades
+            policies = snap.policies
+            persist()
         }
     }
 
@@ -75,23 +149,56 @@ public actor ShiftTradeService {
         }.sorted { $0.createdAt > $1.createdAt }
     }
 
-    public func requestTrade(shiftID: UUID, fromDoctorID: UUID, toDoctorID: UUID) throws -> ShiftTradeRequest {
-        // Update shift status if it exists; ownership check removed
+    public func requestTrade(
+        shiftID: UUID,
+        fromDoctorID: UUID,
+        toDoctorID: UUID,
+        requestedShiftID: UUID? = nil,
+        compensationAmount: Double = 0,
+        counterOfTradeID: UUID? = nil,
+        fromDoctorName: String? = nil,
+        toDoctorName: String? = nil,
+        offeredDate: Date? = nil,
+        requestedDate: Date? = nil,
+        specialty: String? = nil
+    ) throws -> ShiftTradeRequest {
+        guard fromDoctorID != toDoctorID else { throw TradeError.invalidState }
         if var shift = shifts[shiftID] {
             shift.status = .tradedPending
             shifts[shift.id] = shift
         }
-        let trade = ShiftTradeRequest(fromDoctorID: fromDoctorID, toDoctorID: toDoctorID, shiftID: shiftID)
+        if let requestedShiftID, var wanted = shifts[requestedShiftID] {
+            wanted.status = .tradedPending
+            shifts[wanted.id] = wanted
+        }
+        if let parentID = counterOfTradeID, var parent = trades[parentID] {
+            parent.state = .countered
+            trades[parentID] = parent
+        }
+        let trade = ShiftTradeRequest(
+            fromDoctorID: fromDoctorID,
+            toDoctorID: toDoctorID,
+            shiftID: shiftID,
+            requestedShiftID: requestedShiftID,
+            compensationAmount: compensationAmount,
+            counterOfTradeID: counterOfTradeID,
+            fromDoctorName: fromDoctorName,
+            toDoctorName: toDoctorName,
+            offeredDate: offeredDate ?? shifts[shiftID]?.date,
+            requestedDate: requestedDate ?? requestedShiftID.flatMap { shifts[$0]?.date },
+            specialty: specialty
+        )
         trades[trade.id] = trade
         persist()
         return trade
     }
 
     public func respondToTrade(tradeID: UUID, accept: Bool) throws -> Decimal {
-        guard var trade = trades[tradeID], var shift = shifts[trade.shiftID] else { throw TradeError.notFound }
+        guard var trade = trades[tradeID] else { throw TradeError.notFound }
         guard trade.state == .pending else { throw TradeError.invalidState }
-        let policy = policies[shift.hospitalID] ?? SchedulingPolicy()
-        let start = effectiveStart(for: shift, policy: policy)
+        var offered = shifts[trade.shiftID]
+        let policy = policies[offered?.hospitalID ?? UUID()] ?? SchedulingPolicy()
+        let start = offered.map { effectiveStart(for: $0, policy: policy) } ?? Date()
         var penalty: Decimal = 0
 
         if accept {
@@ -100,22 +207,52 @@ public actor ShiftTradeService {
                 for: .trade,
                 policy: policy,
                 shiftStart: start,
-                baseAmountOverride: shift.payRate == 0 ? nil : shift.payRate
+                baseAmountOverride: offered.flatMap { $0.payRate == 0 ? nil : $0.payRate }
             )
-            shift.doctorID = trade.toDoctorID
-            shift.status = .tradedComplete
+            if var o = offered {
+                o.doctorID = trade.toDoctorID
+                o.status = .tradedComplete
+                shifts[o.id] = o
+                offered = o
+            }
+            if let wantID = trade.requestedShiftID, var wanted = shifts[wantID] {
+                wanted.doctorID = trade.fromDoctorID
+                wanted.status = .scheduled
+                shifts[wantID] = wanted
+            }
         } else {
             trade.state = .rejected
-            shift.status = .scheduled
+            if var o = offered {
+                o.status = .scheduled
+                shifts[o.id] = o
+            }
+            if let wantID = trade.requestedShiftID, var wanted = shifts[wantID] {
+                wanted.status = .scheduled
+                shifts[wantID] = wanted
+            }
         }
         trades[tradeID] = trade
-        shifts[shift.id] = shift
         persist()
         return penalty
     }
 
+    /// Drops a trade from the store (used when UI has a stale row).
+    public func forceRemoveTrade(tradeID: UUID) {
+        if var trade = trades[tradeID] {
+            trade.state = .rejected
+            trades[tradeID] = trade
+        } else {
+            trades.removeValue(forKey: tradeID)
+        }
+        persist()
+    }
+
+    public func clearAllTrades() {
+        trades.removeAll()
+        persist()
+    }
+
     public func cancelShift(shiftID: UUID, by doctorID: UUID) throws -> Decimal {
-        // Ownership check removed; calculate penalty from policy if shift is registered
         let policy: SchedulingPolicy
         let start: Date
         if var shift = shifts[shiftID] {
@@ -146,6 +283,7 @@ public enum TradeError: LocalizedError {
     case notFound
     case invalidState
     case tokenNotApproved
+    case missingRequestedDay
 
     public var errorDescription: String? {
         switch self {
@@ -155,6 +293,7 @@ public enum TradeError: LocalizedError {
         case .notFound: return "Item not found."
         case .invalidState: return "Invalid trade state."
         case .tokenNotApproved: return "You need hospital approval for this day before accepting a shift."
+        case .missingRequestedDay: return "Pick a day on their calendar to trade for."
         }
     }
 }
