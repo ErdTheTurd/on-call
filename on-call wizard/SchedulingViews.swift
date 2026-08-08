@@ -1725,7 +1725,7 @@ private struct IncomingTradeRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Compensation")
+                    Text("Ask them for")
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Spacer()
                     Text(NumberFormat.currency(counterComp))
@@ -1735,11 +1735,7 @@ private struct IncomingTradeRow: View {
                 }
                 Slider(value: $counterComp, in: 0...1_000, step: 25)
                     .tint(Color.accentColor)
-                Text(counterComp == trade.compensationAmount
-                     ? "Matches their offer of \(NumberFormat.currency(trade.compensationAmount))"
-                     : counterComp > trade.compensationAmount
-                        ? "Above their \(NumberFormat.currency(trade.compensationAmount)) offer"
-                        : "Below their \(NumberFormat.currency(trade.compensationAmount)) offer")
+                Text(counterCompHint)
                     .font(.caption2).foregroundStyle(.tertiary)
             }
 
@@ -1776,6 +1772,18 @@ private struct IncomingTradeRow: View {
         }
         .padding(10)
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// The counter keeps them as the requester, so this amount is what they pay you.
+    private var counterCompHint: String {
+        let theirs = trade.compensationAmount
+        let delta = counterComp - theirs
+        if delta == 0 {
+            return theirs > 0 ? "Same as their \(NumberFormat.currency(theirs)) offer" : "No compensation"
+        }
+        return delta > 0
+            ? "\(NumberFormat.currency(delta)) more than they offered"
+            : "\(NumberFormat.currency(-delta)) less than they offered"
     }
 
     private func openCounter() {
