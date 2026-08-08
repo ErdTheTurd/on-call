@@ -344,9 +344,34 @@ export async function savePolicy(hospitalID, policy) {
 
 export const DEMO_HOSPITAL_ID = "00000000-0000-4000-8000-000000000001";
 
+// Shown to real accounts while the marketplace fills out, so it must read like
+// a hospital rather than a placeholder.
+const PLACEHOLDER_HOSPITAL_NAME = "Riverside General";
+
 export function demoHospital() {
-  return { id: DEMO_HOSPITAL_ID, name: "Demo Medical Center" };
+  return { id: DEMO_HOSPITAL_ID, name: PLACEHOLDER_HOSPITAL_NAME };
 }
+
+/**
+ * Anyone who used the app before the rename has the old placeholder saved in
+ * their browser, and the generator will not revisit those days.
+ */
+(function renameStoredPlaceholder() {
+  const legacy = "Demo Medical Center";
+  const rename = (shift) =>
+    shift?.hospital === legacy ? { ...shift, hospital: PLACEHOLDER_HOSPITAL_NAME } : shift;
+
+  const shifts = read(KEYS.hospitalShifts, []);
+  if (shifts.some((s) => s.hospital === legacy)) {
+    write(KEYS.hospitalShifts, shifts.map(rename));
+  }
+
+  const raw = read(KEYS.assignments, { shifts: [] });
+  const list = Array.isArray(raw) ? raw : (raw.shifts || []);
+  if (list.some((a) => a.shift?.hospital === legacy)) {
+    write(KEYS.assignments, { shifts: list.map((a) => ({ ...a, shift: rename(a.shift) })) });
+  }
+})();
 
 export function pricingObservables(specialty, date, hospitalID) {
   const day = startOfDay(date);
@@ -415,7 +440,7 @@ export function pricingObservables(specialty, date, hospitalID) {
 
 export function ensureDemoShifts(hospitalID, hospitalName) {
   const hid = hospitalID || DEMO_HOSPITAL_ID;
-  const hname = hospitalName || "Demo Medical Center";
+  const hname = hospitalName || PLACEHOLDER_HOSPITAL_NAME;
   const policy = getPolicy(hid);
   let shifts = [...appStore.shifts];
   const existing = shifts.filter((s) => s.hospitalID === hid && !isPastShift(s));
