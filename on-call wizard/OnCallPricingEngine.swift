@@ -22,8 +22,100 @@ public struct PricingObservables: Sendable, Equatable {
     public var pendingTradeCount: Int = 0
     public var recentCancelCount: Int = 0
     public var sampleSize: Int = 0
+    /// Cases brought to this hospital (specialty) over the trailing ~90 days.
+    public var casesLast90Days: Int = 0
+    /// Hospital’s current posted / base asking price for this day + specialty (nil if unknown).
+    public var currentAskingPrice: Double? = nil
 
     public static let neutral = PricingObservables()
+}
+
+/// Catalog of toggleable pricing variables shown on Alter Shifts.
+public enum PricingVariableCatalog {
+    public struct Item: Identifiable, Hashable, Sendable {
+        public let id: String
+        public let category: String
+        public let label: String
+    }
+
+    public static let all: [Item] = [
+        .init(id: "specialty",   category: "Context",     label: "Specialty demand index"),
+        .init(id: "dow",         category: "Context",     label: "Day-of-week index"),
+        .init(id: "season",      category: "Context",     label: "Seasonal index"),
+        .init(id: "holiday",     category: "Context",     label: "Holiday premium"),
+        .init(id: "quarter",     category: "Context",     label: "Quarter index"),
+        .init(id: "monthPos",    category: "Context",     label: "Month-position index"),
+        .init(id: "weekendAdj",  category: "Context",     label: "Weekend adjacency"),
+        .init(id: "duration",    category: "Context",     label: "Shift duration"),
+        .init(id: "scarcity",    category: "Market",      label: "Supply / demand scarcity"),
+        .init(id: "fillHist",    category: "Market",      label: "Historical fill rate"),
+        .init(id: "leadTime",    category: "Market",      label: "Lead-time urgency"),
+        .init(id: "hospLoad",    category: "Market",      label: "Hospital-wide open load"),
+        .init(id: "tokens",      category: "Market",      label: "Pending token demand"),
+        .init(id: "rosterDepth", category: "Market",      label: "Roster depth ratio"),
+        .init(id: "autoPipe",    category: "Market",      label: "Auto-approve pipeline"),
+        .init(id: "adjGap",      category: "Market",      label: "Adjacent coverage gaps"),
+        .init(id: "fillTime",    category: "Market",      label: "Avg time-to-fill"),
+        .init(id: "trades",      category: "Market",      label: "Trade friction"),
+        .init(id: "cancelRisk",  category: "Market",      label: "Cancellation risk"),
+        .init(id: "askingPrice", category: "Market",      label: "Current asking price"),
+        .init(id: "sxw",         category: "Interaction", label: "Specialty × weekend"),
+        .init(id: "hxs",         category: "Interaction", label: "Holiday × scarcity"),
+        .init(id: "lxs",         category: "Interaction", label: "Lead-time × scarcity"),
+        .init(id: "caseVolume",  category: "Reward",      label: "Case volume premium"),
+    ]
+}
+
+/// Trailing case volume → suggested reward scale (10…100).
+public enum CaseVolumeInsights {
+    /// Maps 3‑month case count to the 10–100 compensation scale (step 10).
+    public static func suggestedScale(casesLast90Days: Int) -> Int {
+        let scale: Int
+        switch casesLast90Days {
+        case ..<15:   scale = 10
+        case ..<40:   scale = 20
+        case ..<80:   scale = 30
+        case ..<120:  scale = 40
+        case ..<180:  scale = 50
+        case ..<250:  scale = 60
+        case ..<350:  scale = 70
+        case ..<500:  scale = 80
+        case ..<700:  scale = 90
+        default:      scale = 100
+        }
+        return SchedulingPolicy.clampCaseVolumeScale(scale)
+    }
+
+    /// Pay multiplier from scale when enabled. Scale 10 → ×1.10, 100 → ×2.00.
+    public static func multiplier(scale: Int, enabled: Bool) -> Double {
+        guard enabled else { return 1.0 }
+        return 1.0 + Double(SchedulingPolicy.clampCaseVolumeScale(scale)) / 100.0
+    }
+
+    /// Cases at this hospital for a specialty over the past ~90 days.
+    /// Uses completed assigned shifts as a proxy; adds demo volume when InvestorDemo is on.
+    @MainActor
+    public static func casesLast90Days(hospitalID: UUID, specialty: String) -> Int {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let start = cal.date(byAdding: .day, value: -90, to: today) else { return 0 }
+
+        let completed = AssignedShiftsStore.shared.assignedShifts.filter { a in
+            a.status != .canceled &&
+            a.shift.hospitalID == hospitalID &&
+            a.shift.specialty == specialty &&
+            a.shift.date >= start &&
+            a.shift.date < today
+        }.count
+
+        if InvestorDemo.isEnabled {
+            // Stable demo volume so investors always see a meaningful scale.
+            let hash = abs(specialty.hashValue ^ hospitalID.hashValue)
+            let demo = 40 + (hash % 220)
+            return max(completed, demo)
+        }
+        return completed
+    }
 }
 
 /// A single priced factor surfaced in hospital UI / audit trail.
@@ -66,7 +158,11 @@ public enum OnCallPricingEngine {
         durationHours: Int = 24,
         baseMarketRate: Double = 120,
         granularity: SchedulingPolicy.Granularity = .day,
-        observables: PricingObservables = .neutral
+        observables: PricingObservables = .neutral,
+        disabledFactorIDs: Set<String> = [],
+        factorOverrides: [String: Double] = [:],
+        caseVolumeRewardEnabled: Bool = true,
+        caseVolumeRewardScale: Int = 40
     ) -> PricingResult {
         let cal = Calendar.current
         let day = date.onlyDate()
@@ -77,25 +173,45 @@ public enum OnCallPricingEngine {
         let quarter = (month - 1) / 3 + 1
 
         var components: [PricingFactorComponent] = []
+        var disabled = disabledFactorIDs
+        if !caseVolumeRewardEnabled { disabled.insert("caseVolume") }
 
         func factor(
             _ id: String, _ category: String, _ label: String,
             _ mult: Double, _ weight: Double = 1.0,
-            display: String? = nil
+            display: String? = nil,
+            keepVisibleWhenNeutral: Bool = false
         ) {
+            let algoMult = mult
+            let overridden = factorOverrides[id]
+            let rawMult = overridden ?? algoMult
+            let nearNeutral = abs(rawMult - 1.0) < 0.001
+            let forcedOff = disabled.contains(id) || (nearNeutral && !keepVisibleWhenNeutral && overridden == nil)
+            let effectiveMult = forcedOff ? 1.0 : rawMult
+            let effectiveWeight = forcedOff ? 0 : weight
+
+            let displayText: String
+            if forcedOff {
+                displayText = "Off"
+            } else if let display, overridden == nil {
+                // Keep specialty display strings like "+15%" only when not manually overridden
+                displayText = display
+            } else {
+                displayText = String(format: "%.3f", effectiveMult)
+            }
+
             components.append(PricingFactorComponent(
                 id: id,
                 category: category,
                 label: label,
-                displayValue: display ?? String(format: "×%.3f", mult),
-                multiplier: mult,
-                weight: weight
+                displayValue: displayText,
+                multiplier: effectiveMult,
+                weight: effectiveWeight
             ))
         }
 
         // ── Phase 1: Static contextual tensor (9 variables) ─────────────────
         let base = granularity == .day ? baseMarketRate * 10 : baseMarketRate
-        factor("base", "Context", "Base market rate", 1.0, 0, display: "$\(Int(base))\(granularity == .day ? "/day" : "/hr")")
 
         let specialtyMult = specialtyDemandIndex(specialty)
         factor("specialty", "Context", "Specialty demand index", specialtyMult, 1.0)
@@ -108,10 +224,11 @@ public enum OnCallPricingEngine {
 
         let holiday = HolidayCalendar.holiday(on: day)
         let holidayMult = 1.0 + (holiday?.premium ?? 0)
-        if holidayMult > 1.001 {
-            factor("holiday", "Context", "\(holiday?.name ?? "Holiday") premium", holidayMult, 1.0,
-                   display: String(format: "+%.0f%%", (holidayMult - 1) * 100))
-        }
+        factor("holiday", "Context", holiday.map { "\($0.name) premium" } ?? "Holiday premium",
+               max(holidayMult, 1.0), holidayMult > 1.001 ? 1.0 : 0.4,
+               display: holidayMult > 1.001
+                    ? String(format: "+%.0f%%", (holidayMult - 1) * 100)
+                    : "×1.000")
 
         let quarterMult = quarterIndex(quarter)
         factor("quarter", "Context", "Quarter index", quarterMult, 0.85)
@@ -165,34 +282,60 @@ public enum OnCallPricingEngine {
         let cancelMult = cancelRiskIndex(recent: observables.recentCancelCount)
         factor("cancelRisk", "Market", "Cancellation risk", cancelMult, 0.7)
 
+        let asking = observables.currentAskingPrice
+        let askingMult: Double
+        if let asking, priorRate(base: base, specialty: specialty, granularity: granularity) > 0 {
+            let prior = priorRate(base: base, specialty: specialty, granularity: granularity)
+            askingMult = min(1.40, max(0.70, asking / prior))
+        } else {
+            askingMult = 1.0
+        }
+        factor(
+            "askingPrice", "Market", "Current asking price",
+            askingMult, asking != nil ? 1.0 : 0.25,
+            display: asking.map { NumberFormat.currency($0) } ?? "—",
+            keepVisibleWhenNeutral: asking != nil
+        )
+
         // ── Phase 3: Nonlinear interaction mesh (3 cross-terms) ─────────────
         let sxw = specialtyWeekendInteraction(specialtyMult: specialtyMult, weekday: weekday)
         factor("sxw", "Interaction", "Specialty × weekend", sxw, 0.9)
 
         let hxs = holidayScarcityInteraction(holidayMult: holidayMult, scarcityMult: scarcityMult)
-        if hxs > 1.001 {
-            factor("hxs", "Interaction", "Holiday × scarcity", hxs, 0.95)
-        }
+        factor("hxs", "Interaction", "Holiday × scarcity", max(hxs, 1.0), hxs > 1.001 ? 0.95 : 0.4)
 
         let lxs = leadScarcityInteraction(leadMult: leadMult, scarcityMult: scarcityMult)
         factor("lxs", "Interaction", "Lead-time × scarcity", lxs, 0.9)
+
+        // ── Case volume premium (surgical block / cases brought) ────────────
+        let scale = SchedulingPolicy.clampCaseVolumeScale(caseVolumeRewardScale)
+        let caseMult = CaseVolumeInsights.multiplier(scale: scale, enabled: caseVolumeRewardEnabled)
+        factor(
+            "caseVolume", "Reward", "Case volume premium",
+            caseMult, caseVolumeRewardEnabled ? 1.0 : 0,
+            display: caseVolumeRewardEnabled
+                ? "+\(scale)% · \(observables.casesLast90Days) cases/90d"
+                : "Off"
+        )
 
         // ── Phase 4: Confidence-weighted prior blend (2 meta variables) ───────
         let confidence = dataConfidence(sampleSize: observables.sampleSize)
         factor("confidence", "Meta", "Data confidence", 1.0, 0, display: String(format: "%.0f%%", confidence * 100))
 
         let priorFloor = priorRate(base: base, specialty: specialty, granularity: granularity)
-        factor("prior", "Meta", "Prior anchor rate", 1.0, 0, display: "$\(Int(priorFloor))")
+        factor("prior", "Meta", "Prior anchor rate", 1.0, 0, display: NumberFormat.currency(priorFloor))
 
         // Weighted composite product (excluding base + meta display rows)
-        let priced = components.filter { $0.weight > 0 && $0.id != "base" }
+        let priced = components.filter { $0.weight > 0 && $0.id != "base" && $0.id != "confidence" && $0.id != "prior" }
         var weightedLogSum = 0.0
         var totalWeight = 0.0
         for c in priced {
             weightedLogSum += log(max(0.01, c.multiplier)) * c.weight
             totalWeight += c.weight
         }
-        let meshMultiplier = exp(weightedLogSum / max(0.001, totalWeight))
+        let meshMultiplier = totalWeight > 0
+            ? exp(weightedLogSum / totalWeight)
+            : 1.0
 
         var rawFloor = base * meshMultiplier
         rawFloor = confidence * rawFloor + (1.0 - confidence) * priorFloor

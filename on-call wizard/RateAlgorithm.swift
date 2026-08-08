@@ -158,7 +158,7 @@ public struct RateBreakdown {
         }
         let unit = granularity == .day ? "/day" : "/hr"
         var items: [(String, String, Double)] = [
-            ("Base market rate", "$\(Int(baseRate))\(unit)", 0),
+            ("Base market rate", "\(NumberFormat.currency(baseRate))\(unit)", 0),
             ("Specialty demand", String(format: "×%.2f", specialtyMultiplier), specialtyMultiplier - 1),
             ("Day of week", String(format: "×%.2f", dayOfWeekMultiplier), dayOfWeekMultiplier - 1),
             ("Season", String(format: "×%.2f", seasonMultiplier), seasonMultiplier - 1),

@@ -8,6 +8,7 @@ final class ProposedRateStore: ObservableObject {
     static let shared = ProposedRateStore()
 
     private let storageKey = "proposed_rates_v1"
+    private let doctorDayKey = "doctor_day_rates_v1"
 
     private struct Entry: Codable, Equatable {
         let hospitalID: UUID
@@ -16,7 +17,15 @@ final class ProposedRateStore: ObservableObject {
         var rate: Double
     }
 
+    private struct DoctorDayEntry: Codable, Equatable {
+        let hospitalID: UUID
+        let date: Date
+        let doctorID: UUID
+        var rate: Double
+    }
+
     @Published private var entries: [Entry] = []
+    @Published private var doctorDayEntries: [DoctorDayEntry] = []
 
     private init() { load() }
 
@@ -29,12 +38,41 @@ final class ProposedRateStore: ObservableObject {
     }
 
     func pricingResult(specialty: String, date: Date, hospitalID: UUID) -> PricingResult {
-        let granularity = SchedulingPolicyStore.shared.policy(for: hospitalID).granularity
+        let policy = SchedulingPolicyStore.shared.policy(for: hospitalID)
+        let algoStore = AlgorithmPresetStore.shared
+        var obs = observables(specialty: specialty, date: date, hospitalID: hospitalID)
+        obs.casesLast90Days = CaseVolumeInsights.casesLast90Days(hospitalID: hospitalID, specialty: specialty)
+
+        let weekday = Calendar.current.component(.weekday, from: date.onlyDate())
+        let preset = algoStore.preset(forWeekday: weekday) ?? algoStore.activePreset
+
+        let disabled: Set<String>
+        let overrides: [String: Double]
+        let caseEnabled: Bool
+        let caseScale: Int
+
+        if preset.id == algoStore.activePresetID {
+            // Live editing the active preset
+            disabled = Set(algoStore.workingDisabled)
+            overrides = algoStore.workingOverrides
+            caseEnabled = policy.caseVolumeRewardEnabled
+            caseScale = policy.caseVolumeRewardScale
+        } else {
+            disabled = Set(preset.disabledVariables)
+            overrides = preset.factorOverrides
+            caseEnabled = preset.caseVolumeRewardEnabled
+            caseScale = preset.caseVolumeRewardScale
+        }
+
         return OnCallPricingEngine.compute(
             specialty: specialty,
             date: date.onlyDate(),
-            granularity: granularity,
-            observables: observables(specialty: specialty, date: date, hospitalID: hospitalID)
+            granularity: policy.granularity,
+            observables: obs,
+            disabledFactorIDs: disabled,
+            factorOverrides: overrides,
+            caseVolumeRewardEnabled: caseEnabled,
+            caseVolumeRewardScale: caseScale
         )
     }
 
@@ -88,6 +126,12 @@ final class ProposedRateStore: ObservableObject {
         }
 
         let sampleSize = pastShifts.count + specialtyShifts.count
+        let asking = Self.resolveAskingPrice(
+            specialty: specialty,
+            date: day,
+            hospitalID: hospitalID,
+            specialtyShifts: specialtyShifts
+        )
 
         return PricingObservables(
             openShiftCount: openCount,
@@ -102,8 +146,28 @@ final class ProposedRateStore: ObservableObject {
             avgFillHours: nil,
             pendingTradeCount: 0,
             recentCancelCount: 0,
-            sampleSize: sampleSize
+            sampleSize: sampleSize,
+            casesLast90Days: 0,
+            currentAskingPrice: asking
         )
+    }
+
+    /// Posted shift rate for the day, else specialty base — never the live algo output (avoids feedback loop).
+    static func resolveAskingPrice(
+        specialty: String,
+        date: Date,
+        hospitalID: UUID,
+        specialtyShifts: [Shift]? = nil
+    ) -> Double? {
+        let day = date.onlyDate()
+        let shifts = specialtyShifts ?? Services.hospital.shifts.filter {
+            $0.hospitalID == hospitalID && $0.specialty == specialty
+        }
+        if let posted = shifts.first(where: { Calendar.current.isDate($0.date, inSameDayAs: day) }) {
+            return posted.rateFloor
+        }
+        let base = SchedulingPolicyStore.shared.policy(for: hospitalID).specialtyBaseRates[specialty]
+        return base.flatMap { $0 > 0 ? $0 : nil }
     }
 
     /// Legacy bridge for MarketConditions call sites.
@@ -159,15 +223,56 @@ final class ProposedRateStore: ObservableObject {
         save()
     }
 
+    // MARK: - Per-doctor day rates (long-press day → specialty → doctor)
+
+    func doctorDayRate(
+        doctorID: UUID,
+        date: Date,
+        hospitalID: UUID,
+        fallback: Double
+    ) -> Double {
+        let day = date.onlyDate()
+        if let entry = doctorDayEntries.first(where: {
+            $0.hospitalID == hospitalID &&
+            $0.doctorID == doctorID &&
+            Calendar.current.isDate($0.date, inSameDayAs: day)
+        }) {
+            return entry.rate
+        }
+        return fallback
+    }
+
+    func setDoctorDayRate(_ rate: Double, doctorID: UUID, date: Date, hospitalID: UUID) {
+        let day = date.onlyDate()
+        doctorDayEntries.removeAll {
+            $0.hospitalID == hospitalID &&
+            $0.doctorID == doctorID &&
+            Calendar.current.isDate($0.date, inSameDayAs: day)
+        }
+        doctorDayEntries.append(DoctorDayEntry(hospitalID: hospitalID, date: day, doctorID: doctorID, rate: rate))
+        saveDoctorDays()
+    }
+
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? JSONDecoder().decode([Entry].self, from: data) else { return }
-        entries = decoded
+        if let data = UserDefaults.standard.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([Entry].self, from: data) {
+            entries = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: doctorDayKey),
+           let decoded = try? JSONDecoder().decode([DoctorDayEntry].self, from: data) {
+            doctorDayEntries = decoded
+        }
     }
 
     private func save() {
         guard let data = try? JSONEncoder().encode(entries) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    private func saveDoctorDays() {
+        guard let data = try? JSONEncoder().encode(doctorDayEntries) else { return }
+        UserDefaults.standard.set(data, forKey: doctorDayKey)
+        objectWillChange.send()
     }
 }
 

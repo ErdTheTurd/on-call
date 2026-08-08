@@ -39,12 +39,29 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
     /// Per-doctor pay override keyed by doctorID.uuidString. Falls back to specialty rate.
     public var doctorBaseRates: [String: Double] = [:]
 
+    /// Global default: `true` = On Call algorithm pricing; `false` = hospital proprietary set rates.
+    public var useAlgorithmPricingByDefault: Bool = true
+    /// Per-specialty override. `true` = algorithm, `false` = proprietary. Missing → `useAlgorithmPricingByDefault`.
+    public var specialtyUsesAlgorithm: [String: Bool] = [:]
+
+    /// Pricing factor IDs that are turned off in Alter Shifts (all others are on).
+    public var disabledPricingVariables: [String] = []
+    /// Case volume premium (surgical block reward) — off = scale treated as 0.
+    public var caseVolumeRewardEnabled: Bool = true
+    /// Compensation intensity 10…100 in steps of 10. Algo auto-sets from 3‑month case volume.
+    public var caseVolumeRewardScale: Int = 40
+    /// When true, Recalculate overwrites `caseVolumeRewardScale` from the algo.
+    public var caseVolumeRewardAuto: Bool = true
+
     private enum CodingKeys: String, CodingKey {
         case granularity, administratorApproveShifts
         case cancellationPenaltyScale, tradePenaltyScale
         case cancelWindowHours, tradeWindowHours, basePenaltyAmount
         case tradePenaltiesEnabled, tradePenaltyAmount, tradePenaltyHoursBeforeStart
         case specialtyBaseRates, doctorBaseRates
+        case useAlgorithmPricingByDefault, specialtyUsesAlgorithm
+        case disabledPricingVariables, caseVolumeRewardEnabled
+        case caseVolumeRewardScale, caseVolumeRewardAuto
     }
 
     public init(
@@ -60,12 +77,18 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
         ],
         cancelWindowHours: Int = 6,
         tradeWindowHours: Int = 12,
-        basePenaltyAmount: Decimal = 250,
+        basePenaltyAmount: Decimal = 0,
         tradePenaltiesEnabled: Bool = true,
         tradePenaltyAmount: Decimal = 250,
         tradePenaltyHoursBeforeStart: Int = 72,
         specialtyBaseRates: [String: Double] = [:],
-        doctorBaseRates: [String: Double] = [:]
+        doctorBaseRates: [String: Double] = [:],
+        useAlgorithmPricingByDefault: Bool = true,
+        specialtyUsesAlgorithm: [String: Bool] = [:],
+        disabledPricingVariables: [String] = [],
+        caseVolumeRewardEnabled: Bool = true,
+        caseVolumeRewardScale: Int = 40,
+        caseVolumeRewardAuto: Bool = true
     ) {
         self.granularity = granularity
         self.administratorApproveShifts = administratorApproveShifts
@@ -79,6 +102,12 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
         self.tradePenaltyHoursBeforeStart = tradePenaltyHoursBeforeStart
         self.specialtyBaseRates = specialtyBaseRates
         self.doctorBaseRates = doctorBaseRates
+        self.useAlgorithmPricingByDefault = useAlgorithmPricingByDefault
+        self.specialtyUsesAlgorithm = specialtyUsesAlgorithm
+        self.disabledPricingVariables = disabledPricingVariables
+        self.caseVolumeRewardEnabled = caseVolumeRewardEnabled
+        self.caseVolumeRewardScale = Self.clampCaseVolumeScale(caseVolumeRewardScale)
+        self.caseVolumeRewardAuto = caseVolumeRewardAuto
     }
 
     public init(from decoder: Decoder) throws {
@@ -90,12 +119,81 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
         tradePenaltyScale = try c.decodeIfPresent([PenaltyBracket].self, forKey: .tradePenaltyScale) ?? Self().tradePenaltyScale
         cancelWindowHours = try c.decodeIfPresent(Int.self, forKey: .cancelWindowHours) ?? 6
         tradeWindowHours = try c.decodeIfPresent(Int.self, forKey: .tradeWindowHours) ?? 12
-        basePenaltyAmount = try c.decodeIfPresent(Decimal.self, forKey: .basePenaltyAmount) ?? 250
+        basePenaltyAmount = try c.decodeIfPresent(Decimal.self, forKey: .basePenaltyAmount) ?? 0
         tradePenaltiesEnabled = try c.decodeIfPresent(Bool.self, forKey: .tradePenaltiesEnabled) ?? true
         tradePenaltyAmount = try c.decodeIfPresent(Decimal.self, forKey: .tradePenaltyAmount) ?? 250
         tradePenaltyHoursBeforeStart = try c.decodeIfPresent(Int.self, forKey: .tradePenaltyHoursBeforeStart) ?? 72
         specialtyBaseRates = try c.decodeIfPresent([String: Double].self, forKey: .specialtyBaseRates) ?? [:]
         doctorBaseRates = try c.decodeIfPresent([String: Double].self, forKey: .doctorBaseRates) ?? [:]
+        useAlgorithmPricingByDefault = try c.decodeIfPresent(Bool.self, forKey: .useAlgorithmPricingByDefault) ?? true
+        specialtyUsesAlgorithm = try c.decodeIfPresent([String: Bool].self, forKey: .specialtyUsesAlgorithm) ?? [:]
+        disabledPricingVariables = try c.decodeIfPresent([String].self, forKey: .disabledPricingVariables) ?? []
+        caseVolumeRewardEnabled = try c.decodeIfPresent(Bool.self, forKey: .caseVolumeRewardEnabled) ?? true
+        caseVolumeRewardScale = Self.clampCaseVolumeScale(
+            try c.decodeIfPresent(Int.self, forKey: .caseVolumeRewardScale) ?? 40
+        )
+        caseVolumeRewardAuto = try c.decodeIfPresent(Bool.self, forKey: .caseVolumeRewardAuto) ?? true
+    }
+
+    public static func clampCaseVolumeScale(_ value: Int) -> Int {
+        let stepped = Int((Double(value) / 10.0).rounded()) * 10
+        return min(100, max(10, stepped))
+    }
+
+    public func usesAlgorithmPricing(for specialty: String) -> Bool {
+        specialtyUsesAlgorithm[specialty] ?? useAlgorithmPricingByDefault
+    }
+
+    public mutating func setUsesAlgorithmPricing(_ useAlgorithm: Bool, for specialty: String) {
+        specialtyUsesAlgorithm[specialty] = useAlgorithm
+    }
+
+    public mutating func setUsesAlgorithmPricing(_ useAlgorithm: Bool, forSpecialties specialties: [String]) {
+        for sp in specialties {
+            specialtyUsesAlgorithm[sp] = useAlgorithm
+        }
+        if specialties.count > 1 {
+            useAlgorithmPricingByDefault = useAlgorithm
+        }
+    }
+
+    public func isPricingVariableEnabled(_ id: String) -> Bool {
+        if id == "caseVolume" { return caseVolumeRewardEnabled }
+        return !disabledPricingVariables.contains(id)
+    }
+
+    public mutating func setPricingVariable(_ id: String, enabled: Bool) {
+        if id == "caseVolume" {
+            caseVolumeRewardEnabled = enabled
+            return
+        }
+        if enabled {
+            disabledPricingVariables.removeAll { $0 == id }
+        } else if !disabledPricingVariables.contains(id) {
+            disabledPricingVariables.append(id)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(granularity, forKey: .granularity)
+        try c.encode(administratorApproveShifts, forKey: .administratorApproveShifts)
+        try c.encode(cancellationPenaltyScale, forKey: .cancellationPenaltyScale)
+        try c.encode(tradePenaltyScale, forKey: .tradePenaltyScale)
+        try c.encode(cancelWindowHours, forKey: .cancelWindowHours)
+        try c.encode(tradeWindowHours, forKey: .tradeWindowHours)
+        try c.encode(basePenaltyAmount, forKey: .basePenaltyAmount)
+        try c.encode(tradePenaltiesEnabled, forKey: .tradePenaltiesEnabled)
+        try c.encode(tradePenaltyAmount, forKey: .tradePenaltyAmount)
+        try c.encode(tradePenaltyHoursBeforeStart, forKey: .tradePenaltyHoursBeforeStart)
+        try c.encode(specialtyBaseRates, forKey: .specialtyBaseRates)
+        try c.encode(doctorBaseRates, forKey: .doctorBaseRates)
+        try c.encode(useAlgorithmPricingByDefault, forKey: .useAlgorithmPricingByDefault)
+        try c.encode(specialtyUsesAlgorithm, forKey: .specialtyUsesAlgorithm)
+        try c.encode(disabledPricingVariables, forKey: .disabledPricingVariables)
+        try c.encode(caseVolumeRewardEnabled, forKey: .caseVolumeRewardEnabled)
+        try c.encode(caseVolumeRewardScale, forKey: .caseVolumeRewardScale)
+        try c.encode(caseVolumeRewardAuto, forKey: .caseVolumeRewardAuto)
     }
 
     public static func bracketLabel(for bracket: PenaltyBracket, previousHours: Int?) -> String {
