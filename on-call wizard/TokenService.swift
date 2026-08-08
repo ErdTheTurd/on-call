@@ -53,6 +53,34 @@ public final class TokenStore: ObservableObject {
             case .autoApproved: return "blue"
             }
         }
+
+        public init(
+            id: UUID = UUID(),
+            doctorID: UUID,
+            doctorName: String,
+            credential: String,
+            hospitalID: UUID,
+            date: Date,
+            status: RequestStatus,
+            hospitalName: String,
+            specialty: String,
+            requestedAt: Date = Date(),
+            approvedAt: Date? = nil,
+            shiftRate: Double? = nil
+        ) {
+            self.id = id
+            self.doctorID = doctorID
+            self.doctorName = doctorName
+            self.credential = credential
+            self.hospitalID = hospitalID
+            self.date = date
+            self.status = status
+            self.hospitalName = hospitalName
+            self.specialty = specialty
+            self.requestedAt = requestedAt
+            self.approvedAt = approvedAt
+            self.shiftRate = shiftRate
+        }
     }
 
     private struct Stored: Codable {
@@ -109,6 +137,7 @@ public final class TokenStore: ObservableObject {
         requestedDays.append(req)
         if status != .autoApproved { tokensRemaining -= 1 }
         save()
+        Task { try? await Repositories.tokens.submit(req) }
         return true
     }
 
@@ -117,6 +146,7 @@ public final class TokenStore: ObservableObject {
         requestedDays[idx].status = .approved
         requestedDays[idx].approvedAt = Date()
         save()
+        Task { try? await Repositories.tokens.updateStatus(id: id, status: .approved) }
     }
 
     public func deny(id: UUID) {
@@ -126,6 +156,7 @@ public final class TokenStore: ObservableObject {
         }
         requestedDays[idx].status = .denied
         save()
+        Task { try? await Repositories.tokens.updateStatus(id: id, status: .denied) }
     }
 
     public func autoApprovePending(forDoctorID doctorID: UUID) {
@@ -178,6 +209,24 @@ public final class TokenStore: ObservableObject {
         return requestedDays.first {
             $0.doctorID == docID && Calendar.current.isDate($0.date, inSameDayAs: date)
         }
+    }
+
+    /// Merge remote Supabase token rows into local storage (idempotent by id).
+    public func mergeRemote(_ remote: [TokenRequest]) {
+        var changed = false
+        for req in remote {
+            if let idx = requestedDays.firstIndex(where: { $0.id == req.id }) {
+                if requestedDays[idx].status != req.status {
+                    requestedDays[idx].status = req.status
+                    requestedDays[idx].approvedAt = req.approvedAt
+                    changed = true
+                }
+            } else {
+                requestedDays.append(req)
+                changed = true
+            }
+        }
+        if changed { save() }
     }
 
     private func load() {

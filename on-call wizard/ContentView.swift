@@ -11,6 +11,8 @@ struct IdentifiableDate: Identifiable {
 
 struct ContentView: View {
     @StateObject private var auth = AuthService.shared
+    @EnvironmentObject private var deepLinks: DeepLinkRouter
+    @State private var bannerRoute: DeepLinkRoute?
 
     var body: some View {
         ZStack {
@@ -29,8 +31,22 @@ struct ContentView: View {
                 mainView(for: role)
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
             }
+
+            if let bannerRoute {
+                VStack {
+                    DeepLinkBanner(route: bannerRoute) {
+                        withAnimation { self.bannerRoute = nil }
+                    }
+                    .padding(.top, 12)
+                    Spacer()
+                }
+            }
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.82), value: auth.state)
+        .onChange(of: deepLinks.pendingRoute) { _, route in
+            guard let route else { return }
+            bannerRoute = route
+        }
     }
 
     @ViewBuilder

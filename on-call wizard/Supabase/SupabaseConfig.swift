@@ -42,16 +42,26 @@ struct SupabaseHTTPClient {
         path: String,
         method: String = "GET",
         body: Data? = nil,
-        accessToken: String? = nil
+        accessToken: String? = nil,
+        prefer: String? = nil
     ) async throws -> Data {
         guard let base = SupabaseConfig.url, let key = SupabaseConfig.anonKey else {
             throw SupabaseError.notConfigured
         }
-        var req = URLRequest(url: base.appendingPathComponent(path))
+        // Paths may already include query strings — append carefully
+        let url: URL
+        if path.contains("?") {
+            url = URL(string: base.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/" + path)
+                ?? base.appendingPathComponent(path)
+        } else {
+            url = base.appendingPathComponent(path)
+        }
+        var req = URLRequest(url: url)
         req.httpMethod = method
         req.httpBody = body
         req.setValue(key, forHTTPHeaderField: "apikey")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let prefer { req.setValue(prefer, forHTTPHeaderField: "Prefer") }
         if let token = accessToken {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         } else {

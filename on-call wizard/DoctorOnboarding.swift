@@ -222,6 +222,7 @@ struct DoctorOnboardingView: View {
         SessionStore.shared.linkDoctorProfile(&profile)
         profile.save()
         DoctorRosterStore.shared.registerDoctor(profile)
+        Task { await SupabaseProfileSync.upsertDoctor(profile) }
         onComplete(profile)
     }
 }

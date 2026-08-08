@@ -64,9 +64,46 @@ xcrun simctl launch booted callsystems.on-call-wizard
 
 The app runs without Supabase for UI development (local auth/onboarding). Supabase is required for cloud sync, edge functions, and production auth.
 
+## Website companion (GitHub Pages)
+
+The `docs/` folder is a **full web mirror of the On Call iOS app** — auth, onboarding, doctor/hospital tabs, calendar, tokens, trades, cancel/penalties, alter rates, roster, policy, analytics, and billing. Both surfaces share Supabase when configured (same project URL + anon key). Without Supabase they each use matching localStorage / UserDefaults keys offline.
+
+Open `docs/index.html` locally or deploy via GitHub Pages.
+
+### Connect iOS + website (required for shared data)
+
+1. Create a Supabase project at https://supabase.com
+2. In the SQL editor, run migrations in order:
+   - `supabase/migrations/001_initial_schema.sql`
+   - `supabase/migrations/002_full_sync_schema.sql`
+3. Deploy edge functions:
+   ```bash
+   ./scripts/bin/supabase link --project-ref YOUR_PROJECT_REF
+   ./scripts/bin/supabase functions deploy
+   ```
+4. Paste the **same** Project URL + anon key into:
+   - `Config/Secrets.xcconfig` (iOS — copy from `Secrets.example.xcconfig`)
+   - `docs/assets/js/config.js` (website — copy from `config.example.js`)
+5. Auth → URL Configuration:
+   - Site URL: `https://erdtheturd.github.io/on-call`
+   - Redirect: `https://erdtheturd.github.io/on-call/callback.html`
+
+Once both are configured, doctors/hospitals signing in on either surface see the same shifts, tokens, and assignments.
+
+### Enable GitHub Pages
+
+In GitHub → **Settings → Pages**, set **Source** to **Deploy from branch**, branch **main**, folder **/docs**.
+
+Site URL: **https://erdtheturd.github.io/on-call/**
+
+### Universal Links (optional)
+
+Replace `TEAMID` in `docs/.well-known/apple-app-site-association` with your Apple Team ID, then rebuild the iOS app. Custom scheme: `oncallwizard://`.
+
 ## Project layout
 
 ```
+docs/                    GitHub Pages website (landing, auth, dashboard)
 on-call wizard/          SwiftUI iOS app
 supabase/
   migrations/            Database schema
@@ -74,6 +111,7 @@ supabase/
 Config/
   Secrets.example.xcconfig
   Secrets.xcconfig       Local secrets (gitignored)
+  OnCallWizard.entitlements
 scripts/bin/supabase     Bundled Supabase CLI (macOS arm64)
 ```
 
