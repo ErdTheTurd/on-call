@@ -219,6 +219,11 @@ struct DoctorRootView: View {
         TabView {
             DoctorHomeView(profile: profile, showDashboard: $showDashboard)
                 .tabItem { Label("Home", systemImage: "house.fill") }
+            NavigationStack {
+                MyAssignedShiftsView()
+            }
+            .tabItem { Label("My Shifts", systemImage: "arrow.triangle.2.circlepath") }
+            .badge(assignments.pendingTradeCount)
             CredentialsView(profile: profile)
                 .tabItem { Label("Credentials", systemImage: "checkmark.seal.fill") }
         }
