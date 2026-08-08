@@ -38,7 +38,7 @@ struct HospitalOnboardingView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 12) {
-                            OnboardingField(label: "Hospital Name", text: $hospitalName, placeholder: "Bayview Medical Center")
+                            OnboardingField(label: "Hospital Name", text: $hospitalName, placeholder: "Average Hospital")
                             Divider()
                             OnboardingField(label: "Facility NPI", text: $npi, placeholder: "10-digit org NPI", keyboard: .numberPad)
                                 .onChange(of: npi) { _, new in npi = String(new.filter { $0.isNumber }.prefix(10)) }
@@ -51,7 +51,7 @@ struct HospitalOnboardingView: View {
                             }
 
                             Divider()
-                            OnboardingField(label: "Admin Email", text: $email, placeholder: "admin@bayviewmedical.org", keyboard: .emailAddress)
+                            OnboardingField(label: "Admin Email", text: $email, placeholder: "admin@averagehospital.org", keyboard: .emailAddress)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                         }

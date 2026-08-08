@@ -45,13 +45,13 @@ struct HospitalDayHoverCard: View {
                         .font(.caption)
                         .foregroundStyle(Brand.textSecondary)
                     Spacer()
-                    Text("$\(Int(summary.totalPaid))")
+                    Text(NumberFormat.currency(summary.totalPaid))
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Brand.accent)
                 }
             }
 
-            Text("Tap for requests & approvals by specialty")
+            Text("Long press for details · Tap specialty to edit doctor pay")
                 .font(.caption2)
                 .foregroundStyle(Brand.textTertiary)
         }
@@ -190,20 +190,20 @@ struct HospitalDayHoverCard: View {
         switch level {
         case .allFilled:
             if let rate = row.approvedRate {
-                return "$\(Int(rate))\(row.rateUnitLabel)"
+                return "\(NumberFormat.currency(rate))\(row.rateUnitLabel)"
             }
             return row.hasShiftPosted ? "—" : proposedRateLabel(for: row)
         case .noneFilled:
             if let rate = row.goingRate {
-                return "$\(Int(rate))\(row.rateUnitLabel)"
+                return "\(NumberFormat.currency(rate))\(row.rateUnitLabel)"
             }
             return proposedRateLabel(for: row)
         case .partial:
             if row.isFilled, let rate = row.approvedRate {
-                return "$\(Int(rate))\(row.rateUnitLabel)"
+                return "\(NumberFormat.currency(rate))\(row.rateUnitLabel)"
             }
             if row.hasShiftPosted, let rate = row.goingRate {
-                return "$\(Int(rate))\(row.rateUnitLabel)"
+                return "\(NumberFormat.currency(rate))\(row.rateUnitLabel)"
             }
             return proposedRateLabel(for: row)
         }
@@ -211,7 +211,7 @@ struct HospitalDayHoverCard: View {
 
     private func proposedRateLabel(for row: HospitalDaySummary.SpecialtyRow) -> String {
         if let rate = row.proposedRate {
-            return "$\(Int(rate))\(row.rateUnitLabel)"
+            return "\(NumberFormat.currency(rate))\(row.rateUnitLabel)"
         }
         return "No shift"
     }
@@ -301,7 +301,7 @@ struct HospitalDayDetailSheet: View {
                 Spacer()
                 if summary.totalPaid > 0 {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("$\(Int(summary.totalPaid))")
+                        Text(NumberFormat.currency(summary.totalPaid))
                             .font(.title2.bold())
                             .foregroundStyle(Brand.accent)
                         Text("total paid")
@@ -352,7 +352,7 @@ struct HospitalDayDetailSheet: View {
                     }
                 }
                 Spacer()
-                Text("$\(Int(rate))\(row.rateUnitLabel)")
+                Text("\(NumberFormat.currency(rate))\(row.rateUnitLabel)")
                     .font(.headline)
                     .foregroundStyle(Brand.accent)
                 Image(systemName: "chevron.right")
@@ -366,82 +366,79 @@ struct HospitalDayDetailSheet: View {
 
     private func specialtyCard(_ row: HospitalDaySummary.SpecialtyRow) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(row.specialty)
-                    .font(.headline)
-                Spacer()
-                if !row.hasShiftPosted {
-                    Label("No shift posted", systemImage: "minus.circle")
+            NavigationLink {
+                SpecialtyDayDoctorsView(
+                    date: date,
+                    hospitalID: hospitalID,
+                    specialty: row.specialty,
+                    rateUnitLabel: row.rateUnitLabel
+                )
+            } label: {
+                HStack {
+                    Text(row.specialty)
+                        .font(.headline)
+                        .foregroundStyle(Brand.textPrimary)
+                    Spacer()
+                    if !row.hasShiftPosted {
+                        Label("No shift", systemImage: "minus.circle")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Brand.textTertiary)
+                    } else if row.isFilled {
+                        Label("Filled", systemImage: "checkmark.seal.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Brand.success)
+                    } else {
+                        Label("Open", systemImage: "clock")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Brand.warning)
+                    }
+                    Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Brand.textTertiary)
-                } else if row.isFilled {
-                    Label("Filled", systemImage: "checkmark.seal.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Brand.success)
-                } else {
-                    Label("Open", systemImage: "clock")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Brand.warning)
                 }
             }
+            .buttonStyle(.plain)
+
+            // Always-editable specialty rate for this day
+            SpecialtyDayRateRow(
+                specialty: row.specialty,
+                date: date,
+                hospitalID: hospitalID,
+                displayRate: row.approvedRate ?? row.goingRate ?? row.proposedRate ?? 1200,
+                unitLabel: row.rateUnitLabel,
+                hasOpenShift: row.hasShiftPosted && !row.isFilled,
+                existingShift: row.shift
+            )
 
             if let name = row.onCallDoctorName {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("On call")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Image(systemName: "stethoscope")
+                HStack {
+                    Image(systemName: "stethoscope")
+                        .foregroundStyle(Brand.accent)
+                    Text("\(name)\(row.onCallCredential.map { ", \($0)" } ?? "")")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Brand.textPrimary)
+                    Spacer()
+                    if let rate = row.approvedRate {
+                        Text("\(NumberFormat.currency(rate))\(row.rateUnitLabel)")
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Brand.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(name)\(row.onCallCredential.map { ", \($0)" } ?? "")")
-                                .font(.subheadline.weight(.semibold))
-                            if let shift = row.shift {
-                                Text(shift.displayDateLabel)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        if let rate = row.approvedRate {
-                            Text("$\(Int(rate))\(row.rateUnitLabel)")
-                                .font(.headline)
-                                .foregroundStyle(Brand.accent)
-                        }
                     }
                 }
-                Divider()
-            } else if row.hasShiftPosted, let rate = row.goingRate {
-                HStack {
-                    Text("Going rate today")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("$\(Int(rate))\(row.rateUnitLabel)")
-                        .font(.headline)
-                        .foregroundStyle(Brand.warning)
-                }
-                Divider()
-            } else if !row.hasShiftPosted, let rate = row.proposedRate {
-                proposedRateRow(row, rate: rate)
-                Divider()
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            if !row.tokenRequests.isEmpty {
+                Divider()
                 Text("Coverage requests")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
-
-                if row.tokenRequests.isEmpty {
-                    Text("No token requests for this specialty.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(row.tokenRequests) { req in
-                        tokenRequestRow(req)
-                        if req.id != row.tokenRequests.last?.id { Divider() }
-                    }
+                ForEach(row.tokenRequests) { req in
+                    tokenRequestRow(req)
+                    if req.id != row.tokenRequests.last?.id { Divider() }
                 }
+            } else {
+                Text("Tap specialty name to set individual doctor pay")
+                    .font(.caption2)
+                    .foregroundStyle(Brand.textTertiary)
             }
         }
         .cardStyle()
@@ -553,7 +550,7 @@ struct ProposedRateEditorSheet: View {
                             Text("Proposed rate")
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Text("$\(Int(rate))\(unitLabel)")
+                            Text("\(NumberFormat.currency(rate))\(unitLabel)")
                                 .font(.title.bold())
                                 .foregroundStyle(Brand.accent)
                         }
@@ -566,7 +563,7 @@ struct ProposedRateEditorSheet: View {
                     .cardStyle()
 
                     Label {
-                        Text("Algorithm suggests $\(Int(algorithmRate))\(unitLabel)")
+                        Text("Algorithm suggests \(NumberFormat.currency(algorithmRate))\(unitLabel)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } icon: {
@@ -643,5 +640,164 @@ struct ProposedRateEditorSheet: View {
         rate = proposal.rate
         algorithmRate = proposal.algorithmRate
         isCustom = proposal.isCustom
+    }
+}
+
+// MARK: - Always-editable specialty day rate
+
+struct SpecialtyDayRateRow: View {
+    let specialty: String
+    let date: Date
+    let hospitalID: UUID
+    let displayRate: Double
+    let unitLabel: String
+    let hasOpenShift: Bool
+    let existingShift: Shift?
+
+    @ObservedObject private var proposed = ProposedRateStore.shared
+    @State private var rate: Double = 1200
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Rate for this day")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(NumberFormat.currency(rate))\(unitLabel)")
+                    .font(.headline)
+                    .foregroundStyle(Brand.accent)
+            }
+            Slider(value: $rate, in: 100...5000, step: 25) { editing in
+                if !editing { commit() }
+            }
+            .tint(Brand.accent)
+        }
+        .onAppear {
+            let proposal = proposed.proposedRate(specialty: specialty, date: date, hospitalID: hospitalID)
+            rate = proposal.isCustom ? proposal.rate : displayRate
+        }
+    }
+
+    private func commit() {
+        proposed.setRate(rate, specialty: specialty, date: date, hospitalID: hospitalID)
+        if let shift = existingShift, hasOpenShift {
+            let updated = Shift(
+                id: shift.id,
+                hospitalID: shift.hospitalID,
+                hospital: shift.hospital,
+                specialty: shift.specialty,
+                start: shift.start,
+                durationHours: shift.durationHours,
+                rateFloor: rate,
+                rateUnit: shift.rateUnit,
+                escalationMode: .flat(rate),
+                escalationIntervalHours: shift.escalationIntervalHours,
+                usesAlgorithmPricing: false
+            )
+            Services.hospital.upsertShift(updated)
+        }
+    }
+}
+
+// MARK: - Specialty → doctors pay for a single day
+
+struct SpecialtyDayDoctorsView: View {
+    let date: Date
+    let hospitalID: UUID
+    let specialty: String
+    let rateUnitLabel: String
+
+    @ObservedObject private var roster = DoctorRosterStore.shared
+    @ObservedObject private var proposed = ProposedRateStore.shared
+    @ObservedObject private var policyStore = SchedulingPolicyStore.shared
+
+    private var doctors: [DoctorSummary] {
+        let real = roster.doctors.filter { $0.specialty == specialty }
+        if !real.isEmpty { return real }
+        // Fallback demo doctors for empty specialties
+        return [
+            DoctorSummary(name: "Dr. Alex Rivera", credential: "MD", specialty: specialty, npi: "1000000001", isAutoApproved: true),
+            DoctorSummary(name: "Dr. Jordan Lee", credential: "DO", specialty: specialty, npi: "1000000002", isAutoApproved: false),
+            DoctorSummary(name: "Dr. Sam Patel", credential: "MD", specialty: specialty, npi: "1000000003", isAutoApproved: true),
+        ]
+    }
+
+    private func fallbackRate(for doc: DoctorSummary) -> Double {
+        policyStore.policy.doctorBaseRates[doc.id.uuidString]
+            ?? policyStore.policy.specialtyBaseRates[specialty]
+            ?? 1200
+    }
+
+    var body: some View {
+        ZStack {
+            BackgroundGradient()
+            ScrollView {
+                VStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        SectionHeader(title: specialty, systemImage: "stethoscope")
+                        Text(date.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text("Adjust pay for each doctor on this day only. Global rates live under Doctors.")
+                            .font(.caption)
+                            .foregroundStyle(Brand.textSecondary)
+                    }
+                    .cardStyle()
+
+                    ForEach(doctors) { doc in
+                        DoctorDayPayRow(
+                            doctor: doc,
+                            date: date,
+                            hospitalID: hospitalID,
+                            unitLabel: rateUnitLabel,
+                            fallback: fallbackRate(for: doc)
+                        )
+                    }
+                }
+                .padding()
+            }
+        }
+        .navigationTitle("Doctor Pay")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct DoctorDayPayRow: View {
+    let doctor: DoctorSummary
+    let date: Date
+    let hospitalID: UUID
+    let unitLabel: String
+    let fallback: Double
+
+    @ObservedObject private var proposed = ProposedRateStore.shared
+    @State private var rate: Double = 1200
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(doctor.name), \(doctor.credential)")
+                        .font(.subheadline.weight(.semibold))
+                    Text(doctor.npi.isEmpty ? doctor.specialty : "NPI \(doctor.npi)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(NumberFormat.currency(rate))\(unitLabel)")
+                    .font(.headline)
+                    .foregroundStyle(Brand.accent)
+            }
+            Slider(value: $rate, in: 100...5000, step: 25) { editing in
+                if !editing {
+                    proposed.setDoctorDayRate(rate, doctorID: doctor.id, date: date, hospitalID: hospitalID)
+                }
+            }
+            .tint(Brand.accent)
+        }
+        .cardStyle()
+        .onAppear {
+            rate = proposed.doctorDayRate(doctorID: doctor.id, date: date, hospitalID: hospitalID, fallback: fallback)
+        }
     }
 }

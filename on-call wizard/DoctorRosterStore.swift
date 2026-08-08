@@ -46,7 +46,7 @@ public final class DoctorRosterStore: ObservableObject {
     public func eligibleTradePartners(for specialty: String, excluding doctorID: UUID) -> [DoctorSummary] {
         doctors.filter {
             $0.id != doctorID &&
-            $0.specialty == specialty &&
+            DoctorPreferencesStore.specialtyMatches($0.specialty, specialty) &&
             $0.verificationStatus == .verified
         }
     }
@@ -54,7 +54,7 @@ public final class DoctorRosterStore: ObservableObject {
     // MARK: - Demo seed
 
     /// Injects a set of verified mock doctors (one per specialty used in demo shifts).
-    /// No-ops if these specific fixed IDs are already present. Safe to call multiple times.
+    /// Also ensures at least two partners exist for the current doctor's specialties.
     public func seedMockDoctorsIfNeeded() {
         let mockIDs: [UUID] = [
             UUID(uuidString: "E1000001-0000-0000-0000-000000000000")!,
@@ -65,7 +65,6 @@ public final class DoctorRosterStore: ObservableObject {
             UUID(uuidString: "E6000001-0000-0000-0000-000000000000")!,
             UUID(uuidString: "E7000001-0000-0000-0000-000000000000")!,
         ]
-        guard !mockIDs.allSatisfy({ id in doctors.contains(where: { $0.id == id }) }) else { return }
 
         let mocks: [DoctorSummary] = [
             DoctorSummary(id: mockIDs[0], name: "Dr. James Carter",  credential: "MD", specialty: "Cardiology",         npi: "1932756480", isAutoApproved: true, verificationStatus: .verified),
@@ -78,6 +77,31 @@ public final class DoctorRosterStore: ObservableObject {
         ]
         for doc in mocks where !doctors.contains(where: { $0.id == doc.id }) {
             doctors.append(doc)
+        }
+
+        // Guarantee trade partners for whatever specialty the logged-in doctor uses.
+        let profileSpecialties = DoctorProfile.load()?.specialties ?? []
+        let partnerNames = ["Dr. Alex Rivera", "Dr. Jordan Lee"]
+        for (idx, specialty) in profileSpecialties.enumerated() {
+            let matching = doctors.filter {
+                DoctorPreferencesStore.specialtyMatches($0.specialty, specialty)
+            }
+            let needed = max(0, 2 - matching.count)
+            guard needed > 0 else { continue }
+            for n in 0..<needed {
+                let name = partnerNames[(idx + n) % partnerNames.count]
+                let id = UUID(uuidString: String(format: "E8%06X-0000-0000-0000-000000000000", (idx * 10 + n + 1) & 0xFFFFFF))!
+                if doctors.contains(where: { $0.id == id }) { continue }
+                doctors.append(DoctorSummary(
+                    id: id,
+                    name: name,
+                    credential: "MD",
+                    specialty: specialty,
+                    npi: String(format: "1%09d", abs(id.hashValue) % 1_000_000_000),
+                    isAutoApproved: true,
+                    verificationStatus: .verified
+                ))
+            }
         }
         save()
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Hospital On Call Settings
 
@@ -11,7 +12,6 @@ struct HospitalPolicySettingsView: View {
     private enum OnCallSettingsTab: String, CaseIterable {
         case general = "General"
         case cancellation = "Cancellation"
-        case payRates = "Pay Rates"
     }
 
     var body: some View {
@@ -48,7 +48,6 @@ struct HospitalPolicySettingsView: View {
                     switch selectedTab {
                     case .general:      generalSettings
                     case .cancellation: cancellationSettings
-                    case .payRates:     payRatesSettings
                     }
 
                     // Save button
@@ -75,7 +74,7 @@ struct HospitalPolicySettingsView: View {
                 .padding(.vertical, 16)
             }
         }
-        .navigationTitle("On Call")
+        .navigationTitle("Scheduling")
         .onAppear { policyStore.loadForHospital(hospitalProfile) }
     }
 
@@ -129,9 +128,9 @@ struct HospitalPolicySettingsView: View {
                         get: { Double(truncating: policyStore.policy.basePenaltyAmount as NSNumber) },
                         set: { policyStore.policy.basePenaltyAmount = Decimal($0) }
                     ),
-                    range: 50...2000,
+                    range: 0...2000,
                     step: 25,
-                    format: { "$\(Int($0))" }
+                    format: { NumberFormat.currency($0) }
                 )
             }
             .cardStyle()
@@ -161,20 +160,16 @@ struct HospitalPolicySettingsView: View {
             TradePenaltyEditor(policy: $policyStore.policy)
         }
     }
-
-    // MARK: Pay Rates tab
-
-    private var payRatesSettings: some View {
-        SpecialtyPayEditor(policy: $policyStore.policy)
-    }
 }
 
 // MARK: - Specialty pay editor
 
-private struct SpecialtyPayEditor: View {
+struct SpecialtyPayEditor: View {
     @Binding var policy: SchedulingPolicy
     @ObservedObject private var roster = DoctorRosterStore.shared
     @State private var expandedSpecialty: String? = nil
+    @State private var selectedSpecialties: Set<String> = []
+    @State private var globalBasePay: Double = 500
 
     private static let defaultRate: Double = 500
 
@@ -228,33 +223,100 @@ private struct SpecialtyPayEditor: View {
             : Array(Set(roster.doctors.map { $0.specialty })).sorted()
     }
 
+    private var allSelected: Bool {
+        !specialties.isEmpty && specialties.allSatisfy { selectedSpecialties.contains($0) }
+    }
+
     private func doctors(for specialty: String) -> [DoctorSummary] {
         useMockData
             ? Self.mockDoctors.filter { $0.specialty == specialty }
             : roster.doctors.filter { $0.specialty == specialty }
     }
 
+    private func rate(for specialty: String) -> Double {
+        policy.specialtyBaseRates[specialty]
+            ?? Self.mockSpecialtyRates[specialty]
+            ?? Self.defaultRate
+    }
+
+    private func applyBasePay(_ newRate: Double, to targets: [String]) {
+        for sp in targets {
+            policy.specialtyBaseRates[sp] = newRate
+            for doc in doctors(for: sp) {
+                policy.doctorBaseRates[doc.id.uuidString] = newRate
+            }
+        }
+    }
+
+    private func applyPricingMode(_ useAlgorithm: Bool, to targets: [String]) {
+        policy.setUsesAlgorithmPricing(useAlgorithm, forSpecialties: targets)
+        if targets.count == specialties.count {
+            policy.useAlgorithmPricingByDefault = useAlgorithm
+        }
+    }
+
     var body: some View {
         VStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 10) {
+            // Global controls
+            VStack(alignment: .leading, spacing: 14) {
                 SectionHeader(title: "Base Pay per Shift", systemImage: "dollarsign.circle.fill")
-                Text("Set a base pay rate ($100–$5,000) per specialty. Tap a specialty to set individual doctor rates. Moving the specialty slider resets all doctor rates for that specialty.")
+                Text("1) Choose which specialties to update. 2) Pick Auto or Set rates. 3) Drag the slider to set pay for that selection.")
                     .font(.system(size: 13))
                     .foregroundStyle(Brand.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                ApplyToSpecialtiesBar(
+                    selectedCount: selectedSpecialties.count,
+                    totalCount: specialties.count,
+                    allSelected: allSelected,
+                    onSelectAll: { selectedSpecialties = Set(specialties) },
+                    onClear: { selectedSpecialties.removeAll() }
+                )
+
+                PricingModePicker(
+                    useAlgorithm: Binding(
+                        get: {
+                            let targets = selectedSpecialties.isEmpty ? specialties : Array(selectedSpecialties)
+                            guard !targets.isEmpty else { return policy.useAlgorithmPricingByDefault }
+                            return targets.allSatisfy { policy.usesAlgorithmPricing(for: $0) }
+                        },
+                        set: { useAlgo in
+                            let targets = selectedSpecialties.isEmpty ? specialties : Array(selectedSpecialties)
+                            applyPricingMode(useAlgo, to: targets.isEmpty ? specialties : targets)
+                        }
+                    )
+                )
+
+                PolicySliderRow(
+                    label: selectedSpecialties.isEmpty
+                        ? "Base pay (select specialties first)"
+                        : allSelected
+                            ? "Base pay · all specialties"
+                            : "Base pay · \(selectedSpecialties.count) selected",
+                    value: Binding(
+                        get: { globalBasePay },
+                        set: { newValue in
+                            globalBasePay = newValue
+                            let targets = selectedSpecialties.isEmpty ? specialties : Array(selectedSpecialties)
+                            applyBasePay(newValue, to: targets)
+                        }
+                    ),
+                    range: 100...5000,
+                    step: 25,
+                    format: { NumberFormat.currency($0) }
+                )
+                .opacity(selectedSpecialties.isEmpty ? 0.45 : 1)
+                .disabled(selectedSpecialties.isEmpty)
             }
             .cardStyle()
 
             ForEach(specialties, id: \.self) { specialty in
+                let usesAlgo = policy.usesAlgorithmPricing(for: specialty)
                 SpecialtyPayRow(
                     specialty: specialty,
                     doctors: doctors(for: specialty),
                     specialtyRate: Binding(
-                        get: {
-                            policy.specialtyBaseRates[specialty]
-                                ?? Self.mockSpecialtyRates[specialty]
-                                ?? Self.defaultRate
-                        },
+                        get: { rate(for: specialty) },
                         set: { newRate in
                             policy.specialtyBaseRates[specialty] = newRate
                             for doc in doctors(for: specialty) {
@@ -277,10 +339,152 @@ private struct SpecialtyPayEditor: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                             expandedSpecialty = expandedSpecialty == specialty ? nil : specialty
                         }
-                    }
+                    },
+                    isSelected: Binding(
+                        get: { selectedSpecialties.contains(specialty) },
+                        set: { on in
+                            if on { selectedSpecialties.insert(specialty) }
+                            else { selectedSpecialties.remove(specialty) }
+                        }
+                    ),
+                    useAlgorithm: Binding(
+                        get: { usesAlgo },
+                        set: { policy.setUsesAlgorithmPricing($0, for: specialty) }
+                    )
                 )
             }
         }
+        .onAppear {
+            let rates = specialties.map { rate(for: $0) }
+            if let first = rates.first, rates.allSatisfy({ abs($0 - first) < 1 }) {
+                globalBasePay = first
+            } else if let avg = rates.isEmpty ? nil : rates.reduce(0, +) / Double(rates.count) {
+                globalBasePay = (avg / 25).rounded() * 25
+            }
+            if selectedSpecialties.isEmpty {
+                selectedSpecialties = Set(specialties)
+            }
+        }
+    }
+}
+
+// MARK: - Apply-to bar (replaces bare “select all” checkmark)
+
+private struct ApplyToSpecialtiesBar: View {
+    let selectedCount: Int
+    let totalCount: Int
+    let allSelected: Bool
+    let onSelectAll: () -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Apply changes to")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Brand.textTertiary)
+                .textCase(.uppercase)
+
+            HStack(spacing: 10) {
+                Image(systemName: allSelected ? "checkmark.circle.fill" : selectedCount > 0 ? "circle.lefthalf.filled" : "circle")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(selectedCount > 0 ? Brand.accent : Brand.textTertiary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(allSelected
+                         ? "All \(totalCount) specialties"
+                         : selectedCount == 0
+                            ? "None selected"
+                            : "\(selectedCount) of \(totalCount) specialties")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Brand.textPrimary)
+                    Text("Check specialties below, or use Select all.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Brand.textSecondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Button(allSelected ? "Clear" : "Select all") {
+                    if allSelected { onClear() } else { onSelectAll() }
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Brand.accent)
+                .buttonStyle(.plain)
+            }
+            .padding(12)
+            .background(Brand.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+}
+
+// MARK: - Auto / Set rates picker (labeled, not a mystery toggle)
+
+private struct PricingModePicker: View {
+    @Binding var useAlgorithm: Bool
+
+    private enum Mode: String, CaseIterable, Identifiable {
+        case auto, setRates
+        var id: String { rawValue }
+        var title: String { self == .auto ? "Auto" : "Set rates" }
+    }
+
+    private var mode: Binding<Mode> {
+        Binding(
+            get: { useAlgorithm ? .auto : .setRates },
+            set: { useAlgorithm = ($0 == .auto) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Pricing mode")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Brand.textTertiary)
+                .textCase(.uppercase)
+
+            Picker("Pricing mode", selection: mode) {
+                Text("Auto").tag(Mode.auto)
+                Text("Set rates").tag(Mode.setRates)
+            }
+            .pickerStyle(.segmented)
+
+            HStack(alignment: .top, spacing: 12) {
+                modeBlurb(
+                    icon: "sparkles",
+                    title: "Auto",
+                    body: "On Call algorithm prices selected specialties for you.",
+                    active: useAlgorithm
+                )
+                modeBlurb(
+                    icon: "slider.horizontal.3",
+                    title: "Set rates",
+                    body: "You set the dollar amounts with the slider and per-specialty rows.",
+                    active: !useAlgorithm
+                )
+            }
+        }
+    }
+
+    private func modeBlurb(icon: String, title: String, body: String, active: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(active ? Brand.accent : Brand.textTertiary)
+            Text(body)
+                .font(.caption2)
+                .foregroundStyle(active ? Brand.textSecondary : Brand.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(
+            (active ? Brand.accentSoft : Color.white.opacity(0.04)),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(active ? Brand.accent.opacity(0.35) : Color.clear, lineWidth: 1)
+        )
     }
 }
 
@@ -294,100 +498,174 @@ private struct SpecialtyPayRow: View {
     let setDoctorRate: (DoctorSummary, Double) -> Void
     let isExpanded: Bool
     let onToggle: () -> Void
+    @Binding var isSelected: Bool
+    @Binding var useAlgorithm: Bool
 
     @State private var justReset = false
 
+    private enum RowMode: String, CaseIterable, Identifiable {
+        case auto, setRates
+        var id: String { rawValue }
+    }
+
+    private var rowMode: Binding<RowMode> {
+        Binding(
+            get: { useAlgorithm ? .auto : .setRates },
+            set: { useAlgorithm = ($0 == .auto) }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // ── Header row ──────────────────────────────────
-            Button(action: onToggle) {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(specialty)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Brand.textPrimary)
-                        Text(doctors.isEmpty ? "No doctors registered" : "\(doctors.count) doctor\(doctors.count == 1 ? "" : "s")")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Brand.textSecondary)
+            // ── Include in bulk + header ─────────────────────
+            HStack(alignment: .center, spacing: 10) {
+                Button {
+                    isSelected.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(isSelected ? Brand.accent : Brand.textTertiary)
+                        Text(isSelected ? "Included" : "Include")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isSelected ? Brand.accent : Brand.textTertiary)
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        isSelected ? Brand.accentSoft : Color.white.opacity(0.04),
+                        in: Capsule()
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isSelected ? "\(specialty) included in bulk edits" : "Include \(specialty) in bulk edits")
+
+                Spacer(minLength: 4)
+
+                Button(action: onToggle) {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(specialty)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Brand.textPrimary)
+                            Text(doctors.isEmpty ? "No doctors registered" : "\(doctors.count) doctor\(doctors.count == 1 ? "" : "s")")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Brand.textSecondary)
+                        }
+                        if !doctors.isEmpty {
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Brand.textTertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            // ── Mode: clear segmented labels ─────────────────
+            VStack(alignment: .leading, spacing: 6) {
+                Text("How this specialty is priced")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Brand.textTertiary)
+                    .textCase(.uppercase)
+                    .padding(.top, 14)
+
+                Picker("Pricing", selection: rowMode) {
+                    Text("Auto").tag(RowMode.auto)
+                    Text("Set rates").tag(RowMode.setRates)
+                }
+                .pickerStyle(.segmented)
+
+                Text(useAlgorithm
+                     ? "Algorithm sets this specialty’s rates automatically."
+                     : "You set the dollar amount for this specialty below.")
+                    .font(.caption)
+                    .foregroundStyle(Brand.textSecondary)
+            }
+
+            if useAlgorithm {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(Brand.accent)
+                    Text("Auto mode — switch to Set rates to edit dollars.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Brand.textSecondary)
+                }
+                .padding(.top, 10)
+            } else {
+                HStack {
+                    Text("Specialty base")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Brand.textPrimary)
                     Spacer()
-                    ValueChip(text: "$\(Int(specialtyRate))")
-                    if !doctors.isEmpty {
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Brand.textTertiary)
-                            .frame(width: 16)
+                    ValueChip(text: NumberFormat.currency(specialtyRate))
+                }
+                .padding(.top, 12)
+
+                Slider(value: $specialtyRate, in: 100...5000, step: 25,
+                       onEditingChanged: { editing in
+                           guard !editing, !doctors.isEmpty else { return }
+                           withAnimation(.easeInOut(duration: 0.2)) { justReset = true }
+                           DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+                               withAnimation { justReset = false }
+                           }
+                       })
+                .tint(Brand.accent)
+                .padding(.top, 8)
+
+                HStack(spacing: 5) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Brand.textTertiary)
+                    Text(doctors.isEmpty
+                         ? "Add doctors via the Roster to set individual rates"
+                         : "Moving this slider resets all individual doctor rates")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Brand.textTertiary)
+                    Spacer()
+                    if justReset {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("Doctor rates reset")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundStyle(Brand.warning)
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     }
                 }
-            }
-            .buttonStyle(.plain)
+                .padding(.top, 6)
 
-            // ── Specialty slider ─────────────────────────────
-            Slider(value: $specialtyRate, in: 100...5000, step: 25,
-                   onEditingChanged: { editing in
-                       guard !editing, !doctors.isEmpty else { return }
-                       withAnimation(.easeInOut(duration: 0.2)) { justReset = true }
-                       DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-                           withAnimation { justReset = false }
-                       }
-                   })
-            .tint(Brand.accent)
-            .padding(.top, 10)
+                if isExpanded && !doctors.isEmpty {
+                    SubtleDivider().padding(.vertical, 12)
 
-            // ── Warning / reset badge ────────────────────────
-            HStack(spacing: 5) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Brand.textTertiary)
-                Text(doctors.isEmpty
-                     ? "Add doctors via the Roster to set individual rates"
-                     : "Moving this slider resets all individual doctor rates")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Brand.textTertiary)
-                Spacer()
-                if justReset {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Doctor rates reset")
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    .foregroundStyle(Brand.warning)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                }
-            }
-            .padding(.top, 6)
-
-            // ── Doctor list (expanded) ───────────────────────
-            if isExpanded && !doctors.isEmpty {
-                SubtleDivider().padding(.vertical, 12)
-
-                VStack(spacing: 14) {
-                    ForEach(doctors, id: \.id) { doctor in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 10) {
-                                Image(systemName: "person.circle.fill")
-                                    .font(.system(size: 22))
-                                    .foregroundStyle(Brand.accentAlt.opacity(0.8))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(doctor.name)
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(Brand.textPrimary)
-                                    Text(doctor.credential)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(Brand.textTertiary)
+                    VStack(spacing: 14) {
+                        ForEach(doctors, id: \.id) { doctor in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "person.circle.fill")
+                                        .font(.system(size: 22))
+                                        .foregroundStyle(Brand.accentAlt.opacity(0.8))
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(doctor.name)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(Brand.textPrimary)
+                                        Text(doctor.credential)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(Brand.textTertiary)
+                                    }
+                                    Spacer()
+                                    ValueChip(text: NumberFormat.currency(doctorRate(doctor)))
                                 }
-                                Spacer()
-                                ValueChip(text: "$\(Int(doctorRate(doctor)))")
+                                Slider(
+                                    value: Binding(
+                                        get: { doctorRate(doctor) },
+                                        set: { setDoctorRate(doctor, $0) }
+                                    ),
+                                    in: 100...5000, step: 25
+                                )
+                                .tint(Brand.accentAlt)
                             }
-                            Slider(
-                                value: Binding(
-                                    get: { doctorRate(doctor) },
-                                    set: { setDoctorRate(doctor, $0) }
-                                ),
-                                in: 100...5000, step: 25
-                            )
-                            .tint(Brand.accentAlt)
                         }
                     }
                 }
@@ -402,11 +680,14 @@ private struct SpecialtyPayRow: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: Brand.cardRadius, style: .continuous)
-                .strokeBorder(LinearGradient(
-                    colors: [Color.white.opacity(0.15), Color.white.opacity(0.04)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+                .strokeBorder(
+                    isSelected ? Brand.accent.opacity(0.45) : Brand.border.opacity(0.9),
+                    lineWidth: isSelected ? 1.5 : 1
+                )
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: isExpanded)
+        .animation(.easeOut(duration: 0.2), value: useAlgorithm)
+        .animation(.easeOut(duration: 0.2), value: isSelected)
     }
 }
 
@@ -711,7 +992,7 @@ private struct TradePenaltyEditor: View {
                     ),
                     range: 0...2000,
                     step: 25,
-                    format: { "$\(Int($0))" }
+                    format: { NumberFormat.currency($0) }
                 )
 
                 PolicySliderRow(
@@ -737,7 +1018,7 @@ private struct TradePenaltyEditor: View {
 // MARK: - Doctor My Shifts (cancel + trade)
 
 struct MyAssignedShiftsView: View {
-    @StateObject private var store = AssignedShiftsStore.shared
+    @ObservedObject private var store = AssignedShiftsStore.shared
     @State private var actionMessage: String?
     @State private var tradeExpandedID: UUID? = nil
     @State private var cancelExpandedID: UUID? = nil
@@ -750,23 +1031,15 @@ struct MyAssignedShiftsView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     if !store.incomingTrades.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 12) {
                             SectionHeader(title: "Incoming Trade Requests", systemImage: "tray.and.arrow.down.fill")
                             ForEach(store.incomingTrades) { trade in
-                                IncomingTradeRow(trade: trade) { accept in
-                                    Task {
-                                        do {
-                                            let penalty = try await store.respondToTrade(trade, accept: accept)
-                                            let fee = NSDecimalNumber(decimal: penalty).intValue
-                                            actionMessage = accept
-                                                ? (fee > 0 ? "Trade accepted · $\(fee) fee" : "Trade accepted")
-                                                : "Trade declined"
-                                        } catch {
-                                            actionMessage = error.localizedDescription
-                                        }
-                                    }
+                                IncomingTradeRow(trade: trade, store: store) { message in
+                                    actionMessage = message
                                 }
-                                if trade.id != store.incomingTrades.last?.id { Divider() }
+                                if trade.id != store.incomingTrades.last?.id {
+                                    Divider().opacity(0.35)
+                                }
                             }
                         }
                         .cardStyle()
@@ -829,9 +1102,12 @@ private struct AssignedShiftCard: View {
     let onAction: (String) -> Void
 
     @State private var selectedDoctor: DoctorSummary?
+    @State private var selectedPartnerShift: AssignedShiftsStore.AssignedShift?
+    @State private var compensation: Double = 0
     @State private var tradeSending = false
     @State private var tradeSent = false
     @State private var tradeError: String?
+    @State private var sendPulse = false
     @State private var cancelSending = false
     @State private var cancelConfirmed = false
 
@@ -842,6 +1118,15 @@ private struct AssignedShiftCard: View {
         DoctorRosterStore.shared.eligibleTradePartners(
             for: assigned.shift.specialty,
             excluding: assigned.doctorID
+        )
+    }
+
+    private var partnerDays: [AssignedShiftsStore.AssignedShift] {
+        guard let doc = selectedDoctor else { return [] }
+        return store.tradeableShifts(
+            forPartner: doc.id,
+            specialty: assigned.shift.specialty,
+            excludingDate: assigned.shift.date
         )
     }
 
@@ -858,15 +1143,13 @@ private struct AssignedShiftCard: View {
 
             Divider().opacity(0.4)
 
-            // Action buttons
             HStack(spacing: 10) {
-                // Trade button
                 Button {
                     withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
                         cancelExpandedID = nil
                         if isTradeExpanded {
+                            resetTradeForm()
                             tradeExpandedID = nil
-                            selectedDoctor = nil; tradeError = nil
                         } else {
                             tradeExpandedID = assigned.id
                         }
@@ -884,11 +1167,10 @@ private struct AssignedShiftCard: View {
                 .tint(isTradeExpanded ? Color.secondary : Color.accentColor)
                 .disabled(assigned.status == .tradedPending)
 
-                // Cancel button
                 Button {
                     withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
                         tradeExpandedID = nil
-                        selectedDoctor = nil; tradeError = nil
+                        resetTradeForm()
                         if isCancelExpanded {
                             cancelExpandedID = nil
                         } else {
@@ -908,155 +1190,268 @@ private struct AssignedShiftCard: View {
                 .tint(isCancelExpanded ? Color.secondary : Color.red)
             }
 
-            // Trade expansion panel
             if isTradeExpanded {
-                VStack(alignment: .leading, spacing: 10) {
-                    if partners.isEmpty {
-                        Text("No eligible doctors available for this specialty.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    } else {
-                        Text("Choose a doctor to offer the trade to:")
-                            .font(.caption).foregroundStyle(.secondary)
-                        ForEach(partners) { doc in
-                            Button {
-                                withAnimation { selectedDoctor = doc }
-                            } label: {
-                                HStack(spacing: 12) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(selectedDoctor?.id == doc.id
-                                                  ? Color.accentColor.opacity(0.2)
-                                                  : Color.white.opacity(0.06))
-                                            .frame(width: 36, height: 36)
-                                        Text(String(doc.name.split(separator: " ").last?.prefix(2) ?? "Dr"))
-                                            .font(.system(size: 12, weight: .bold))
-                                            .foregroundStyle(selectedDoctor?.id == doc.id ? Color.accentColor : .secondary)
-                                    }
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(doc.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                                        Text("\(doc.credential) · \(doc.specialty)").font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    if selectedDoctor?.id == doc.id {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(Color.accentColor)
-                                            .transition(.scale.combined(with: .opacity))
-                                    }
-                                }
-                                .padding(10)
-                                .background(
-                                    selectedDoctor?.id == doc.id
-                                        ? Color.accentColor.opacity(0.08)
-                                        : Color.white.opacity(0.04),
-                                    in: RoundedRectangle(cornerRadius: 10)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-
-                    if let err = tradeError {
-                        Text(err).font(.caption).foregroundStyle(.red)
-                    }
-
-                    Button { sendTrade() } label: {
-                        HStack {
-                            if tradeSending {
-                                ProgressView().tint(.white).scaleEffect(0.8)
-                            } else if tradeSent {
-                                Label("Request Sent!", systemImage: "checkmark.circle.fill")
-                            } else {
-                                Text("Send Trade Request")
-                            }
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity).padding(.vertical, 11)
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(selectedDoctor == nil || tradeSending || tradeSent || partners.isEmpty)
-                }
-                .padding(12)
-                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                tradePanel
+                    .padding(12)
+                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            // Cancel expansion panel
             if isCancelExpanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    if cancelConfirmed {
-                        HStack(spacing: 12) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 28))
-                                .foregroundStyle(Brand.danger)
-                            Text("Shift Canceled")
-                                .font(.title3.weight(.bold))
-                                .foregroundStyle(Brand.danger)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                        .transition(.scale(scale: 1.0).combined(with: .opacity))
-                    } else {
-                        Text("Are you sure you want to cancel this shift?")
-                            .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-
-                        let penalty = store.preview(for: .cancel, assigned: assigned).penaltyAmount
-                        if penalty > 0 {
-                            Label("Cancellation fee: $\(NSDecimalNumber(decimal: penalty).intValue)",
-                                  systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption.weight(.semibold)).foregroundStyle(.orange)
-                        } else {
-                            Label("No penalty at this time", systemImage: "checkmark.circle")
-                                .font(.caption).foregroundStyle(.green)
-                        }
-
-                        HStack(spacing: 10) {
-                            Button {
-                                withAnimation { cancelExpandedID = nil }
-                            } label: {
-                                Text("Keep Shift")
-                                    .font(.subheadline.weight(.semibold))
-                                    .frame(maxWidth: .infinity).padding(.vertical, 10)
-                            }
-                            .buttonStyle(.bordered).tint(Color.accentColor)
-
-                            Button { doCancel() } label: {
-                                HStack {
-                                    if cancelSending { ProgressView().tint(.white).scaleEffect(0.8) }
-                                    else { Text("Yes, Cancel") }
-                                }
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                            }
-                            .buttonStyle(.bordered).tint(.red)
-                            .disabled(cancelSending)
-                        }
-                    }
-                }
-                .padding(12)
-                .background(
-                    cancelConfirmed ? Color.red.opacity(0.10) : Color.red.opacity(0.06),
-                    in: RoundedRectangle(cornerRadius: 12)
-                )
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.red.opacity(0.2), lineWidth: 1))
-                .scaleEffect(cancelConfirmed ? 1.03 : 1.0)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                cancelPanel
             }
         }
         .cardStyle()
         .animation(.spring(response: 0.32, dampingFraction: 0.8), value: isTradeExpanded)
         .animation(.spring(response: 0.32, dampingFraction: 0.8), value: isCancelExpanded)
+        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: selectedDoctor?.id)
+        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: selectedPartnerShift?.id)
+    }
+
+    @ViewBuilder
+    private var tradePanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if tradeSent {
+                tradeSuccessBanner
+            } else {
+                Text("1. Choose a doctor")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if partners.isEmpty {
+                    Text("No eligible doctors available for this specialty.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    ForEach(partners) { doc in
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                selectedDoctor = doc
+                                selectedPartnerShift = nil
+                                tradeError = nil
+                            }
+                            store.preparePartnerTradeDays(
+                                forPartner: doc.id,
+                                specialty: assigned.shift.specialty,
+                                excludingDate: assigned.shift.date
+                            )
+                        } label: {
+                            doctorPickRow(doc)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if selectedDoctor != nil {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("2. Pick their day (you get this)")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("You give up \(assigned.shift.displayDateLabel).")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                        TradePartnerCalendar(
+                            days: partnerDays,
+                            selected: $selectedPartnerShift
+                        )
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("3. Your offer")
+                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(NumberFormat.currency(compensation))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Color.accentColor)
+                                .contentTransition(.numericText())
+                        }
+                        Slider(value: $compensation, in: 0...1_000, step: 25)
+                            .tint(Color.accentColor)
+                        Text("Optional · $0–$1,000")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    .transition(.opacity)
+                }
+
+                if let err = tradeError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+
+                Button { sendTrade() } label: {
+                    HStack(spacing: 8) {
+                        if tradeSending {
+                            ProgressView().tint(.white).scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                            Text("Send Trade Request")
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity).padding(.vertical, 11)
+                    .scaleEffect(sendPulse ? 1.04 : 1)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(selectedDoctor == nil || selectedPartnerShift == nil || tradeSending || partners.isEmpty)
+            }
+        }
+    }
+
+    private var tradeSuccessBanner: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 42))
+                .foregroundStyle(.green)
+                .symbolEffect(.bounce, value: tradeSent)
+                .scaleEffect(sendPulse ? 1.15 : 1)
+            Text("Trade request sent")
+                .font(.headline.weight(.bold))
+            if let doc = selectedDoctor, let day = selectedPartnerShift {
+                Text("Offered \(assigned.shift.displayDateLabel) ↔ \(day.shift.displayDateLabel) with \(doc.name)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            if compensation > 0 {
+                Text("+\(NumberFormat.currency(compensation)) compensation")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+    }
+
+    private func doctorPickRow(_ doc: DoctorSummary) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(selectedDoctor?.id == doc.id
+                          ? Color.accentColor.opacity(0.2)
+                          : Color.white.opacity(0.06))
+                    .frame(width: 36, height: 36)
+                Text(String(doc.name.split(separator: " ").last?.prefix(2) ?? "Dr"))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(selectedDoctor?.id == doc.id ? Color.accentColor : .secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(doc.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                Text("\(doc.credential) · \(doc.specialty)").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if selectedDoctor?.id == doc.id {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .padding(10)
+        .background(
+            selectedDoctor?.id == doc.id
+                ? Color.accentColor.opacity(0.08)
+                : Color.white.opacity(0.04),
+            in: RoundedRectangle(cornerRadius: 10)
+        )
+    }
+
+    @ViewBuilder
+    private var cancelPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if cancelConfirmed {
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Brand.danger)
+                    Text("Shift Canceled")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(Brand.danger)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .transition(.scale(scale: 1.0).combined(with: .opacity))
+            } else {
+                Text("Are you sure you want to cancel this shift?")
+                    .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+
+                let penalty = store.preview(for: .cancel, assigned: assigned).penaltyAmount
+                if penalty > 0 {
+                    Label("Cancellation fee: \(NumberFormat.currency(NSDecimalNumber(decimal: penalty).intValue))",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                } else {
+                    Label("No penalty at this time", systemImage: "checkmark.circle")
+                        .font(.caption).foregroundStyle(.green)
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        withAnimation { cancelExpandedID = nil }
+                    } label: {
+                        Text("Keep Shift")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity).padding(.vertical, 10)
+                    }
+                    .buttonStyle(.bordered).tint(Color.accentColor)
+
+                    Button { doCancel() } label: {
+                        HStack {
+                            if cancelSending { ProgressView().tint(.white).scaleEffect(0.8) }
+                            else { Text("Yes, Cancel") }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                    }
+                    .buttonStyle(.bordered).tint(.red)
+                    .disabled(cancelSending)
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            cancelConfirmed ? Color.red.opacity(0.10) : Color.red.opacity(0.06),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.red.opacity(0.2), lineWidth: 1))
+        .scaleEffect(cancelConfirmed ? 1.03 : 1.0)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private func resetTradeForm() {
+        selectedDoctor = nil
+        selectedPartnerShift = nil
+        compensation = 0
+        tradeError = nil
+        tradeSent = false
+        tradeSending = false
+        sendPulse = false
     }
 
     private func sendTrade() {
-        guard let doctor = selectedDoctor else { return }
-        tradeSending = true; tradeError = nil
+        guard let doctor = selectedDoctor, let wanted = selectedPartnerShift else {
+            tradeError = TradeError.missingRequestedDay.localizedDescription
+            return
+        }
+        tradeSending = true
+        tradeError = nil
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.5)) { sendPulse = true }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         Task {
             do {
-                _ = try await store.requestTrade(for: assigned, toDoctor: doctor)
-                tradeSent = true
-                try await Task.sleep(nanoseconds: 1_200_000_000)
-                withAnimation { tradeExpandedID = nil }
+                _ = try await store.requestTrade(
+                    for: assigned,
+                    toDoctor: doctor,
+                    requestedShift: wanted,
+                    compensationAmount: compensation
+                )
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
+                    tradeSent = true
+                    sendPulse = true
+                }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                try await Task.sleep(nanoseconds: 1_400_000_000)
+                withAnimation {
+                    tradeExpandedID = nil
+                    resetTradeForm()
+                }
+                onAction("Trade sent to \(doctor.name)")
             } catch {
+                withAnimation { sendPulse = false }
                 tradeError = error.localizedDescription
             }
             tradeSending = false
@@ -1068,16 +1463,14 @@ private struct AssignedShiftCard: View {
         Task {
             do {
                 let penalty = try await store.cancelShift(assigned)
-                // Show confirmed state — card expands briefly then folds away
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     cancelConfirmed = true
                     cancelSending = false
                 }
                 let msg = penalty > 0
-                    ? "Shift canceled · $\(NSDecimalNumber(decimal: penalty).intValue) penalty"
+                    ? "Shift canceled · \(NumberFormat.currency(NSDecimalNumber(decimal: penalty).intValue)) penalty"
                     : "Shift canceled"
                 try await Task.sleep(nanoseconds: 1_100_000_000)
-                // Card is removed from activeAssignedShifts — parent ForEach animates it out
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     cancelExpandedID = nil
                 }
@@ -1090,6 +1483,86 @@ private struct AssignedShiftCard: View {
     }
 }
 
+/// Compact calendar of tradeable days (yours or a partner's).
+private struct TradePartnerCalendar: View {
+    let days: [AssignedShiftsStore.AssignedShift]
+    @Binding var selected: AssignedShiftsStore.AssignedShift?
+    var selectionLabel: String = "Get"
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+
+    private var monthDays: [(date: Date, shift: AssignedShiftsStore.AssignedShift?)] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let end = cal.date(byAdding: .day, value: 41, to: today) else { return [] }
+        var byDay: [Date: AssignedShiftsStore.AssignedShift] = [:]
+        for day in days {
+            byDay[cal.startOfDay(for: day.shift.date)] = day
+        }
+        var result: [(Date, AssignedShiftsStore.AssignedShift?)] = []
+        var cursor = today
+        while cursor <= end {
+            result.append((cursor, byDay[cursor]))
+            guard let next = cal.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return result
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if days.isEmpty {
+                Text("No upcoming scheduled days.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: columns, spacing: 6) {
+                    ForEach(Array(["S", "M", "T", "W", "T", "F", "S"].enumerated()), id: \.offset) { _, w in
+                        Text(w)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity)
+                    }
+                    ForEach(Array(monthDays.enumerated()), id: \.offset) { _, item in
+                        let isSelected = selected?.id == item.shift?.id
+                        let available = item.shift != nil
+                        Button {
+                            guard let shift = item.shift else { return }
+                            selected = shift
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        } label: {
+                            Text("\(Calendar.current.component(.day, from: item.date))")
+                                .font(.system(size: 12, weight: available ? .bold : .regular))
+                                .foregroundStyle(
+                                    isSelected ? Color.white
+                                    : available ? Color.primary
+                                    : Color.secondary.opacity(0.35)
+                                )
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 32)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(
+                                            isSelected ? Color.accentColor
+                                            : available ? Color.accentColor.opacity(0.14)
+                                            : Color.clear
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!available)
+                    }
+                }
+                if let sel = selected {
+                    Label("\(selectionLabel) \(sel.shift.displayDateLabel)", systemImage: "arrow.left.arrow.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
 
 private struct PolicyChip: View {
     let label: String
@@ -1098,7 +1571,7 @@ private struct PolicyChip: View {
     private var feeText: String {
         guard preview.allowed else { return "Blocked" }
         if preview.penaltyAmount > 0 {
-            return "$\(NSDecimalNumber(decimal: preview.penaltyAmount).intValue) fee"
+            return "\(NumberFormat.currency(NSDecimalNumber(decimal: preview.penaltyAmount).intValue)) fee"
         }
         return "Free"
     }
@@ -1122,21 +1595,244 @@ private struct PolicyChip: View {
 
 private struct IncomingTradeRow: View {
     let trade: ShiftTradeRequest
-    let onRespond: (Bool) -> Void
+    @ObservedObject var store: AssignedShiftsStore
+    let onMessage: (String) -> Void
+
+    @State private var showCounter = false
+    @State private var counterDays: [AssignedShiftsStore.AssignedShift] = []
+    @State private var counterShift: AssignedShiftsStore.AssignedShift?
+    @State private var counterComp: Double = 0
+    @State private var busy = false
+    @State private var doneMessage: String?
+    @State private var errorText: String?
+
+    private var fromName: String {
+        trade.fromDoctorName ?? store.doctorName(for: trade.fromDoctorID)
+    }
+
+    private var theirDay: String {
+        if let d = trade.offeredDate {
+            return d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        }
+        return "their shift"
+    }
+
+    private var myDay: String {
+        if let d = trade.requestedDate {
+            return d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        }
+        return "your shift"
+    }
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Shift trade request").font(.headline)
-                Text(trade.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            if let doneMessage {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.green)
+                    Text(doneMessage)
+                        .font(.subheadline.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+            } else {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(fromName)
+                            .font(.headline)
+                        Text("Wants \(theirDay) ↔ your \(myDay)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if trade.compensationAmount > 0 {
+                            Text("Offers \(NumberFormat.currency(trade.compensationAmount))")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.accentColor)
+                        } else {
+                            Text("No compensation offered")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        if trade.counterOfTradeID != nil {
+                            Text("Counter offer")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Color.orange.opacity(0.15), in: Capsule())
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                if let err = errorText {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+
+                if showCounter {
+                    counterPanel
+                } else {
+                    HStack(spacing: 8) {
+                        Button {
+                            respond(accept: true)
+                        } label: {
+                            Label("Accept", systemImage: "checkmark")
+                                .font(.caption.weight(.bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                        .disabled(busy)
+
+                        Button {
+                            openCounter()
+                        } label: {
+                            Label("Counter", systemImage: "arrow.2.squarepath")
+                                .font(.caption.weight(.bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.accentColor)
+                        .disabled(busy)
+
+                        Button {
+                            respond(accept: false)
+                        } label: {
+                            Label("Decline", systemImage: "xmark")
+                                .font(.caption.weight(.bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .disabled(busy)
+                    }
+                }
             }
-            Spacer()
-            Button { onRespond(true) } label: {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title2)
+        }
+    }
+
+    private var counterPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Your calendar · pick a day to give")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            TradePartnerCalendar(days: counterDays, selected: $counterShift, selectionLabel: "Give")
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Compensation")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(NumberFormat.currency(counterComp))
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.accentColor)
+                        .contentTransition(.numericText())
+                }
+                Slider(value: $counterComp, in: 0...1_000, step: 25)
+                    .tint(Color.accentColor)
+                Text(counterComp == trade.compensationAmount
+                     ? "Matches their offer of \(NumberFormat.currency(trade.compensationAmount))"
+                     : counterComp > trade.compensationAmount
+                        ? "Above their \(NumberFormat.currency(trade.compensationAmount)) offer"
+                        : "Below their \(NumberFormat.currency(trade.compensationAmount)) offer")
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
-            Button { onRespond(false) } label: {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.red).font(.title2)
+
+            HStack(spacing: 8) {
+                Button {
+                    showCounter = false
+                    errorText = nil
+                } label: {
+                    Text("Back")
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.bordered)
+                .disabled(busy)
+
+                Button {
+                    sendCounter()
+                } label: {
+                    Group {
+                        if busy {
+                            ProgressView().scaleEffect(0.75)
+                        } else {
+                            Text("Send Counter")
+                        }
+                    }
+                    .font(.caption.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(busy || counterShift == nil)
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func openCounter() {
+        errorText = nil
+        showCounter = true
+        counterComp = trade.compensationAmount
+        // Build days once on tap — never inside body — so Counter stays snappy.
+        let days = store.counterAlternateDays(for: trade)
+        counterDays = days
+        counterShift = days.first
+        if days.isEmpty {
+            showCounter = false
+            errorText = "No other days available to counter with."
+            return
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func respond(accept: Bool) {
+        guard !busy else { return }
+        busy = true
+        errorText = nil
+        Task { @MainActor in
+            do {
+                let penalty = try await store.respondToTrade(trade, accept: accept)
+                let fee = NSDecimalNumber(decimal: penalty).intValue
+                let msg = accept
+                    ? (fee > 0 ? "Accepted · \(NumberFormat.currency(fee)) fee" : "Trade accepted")
+                    : "Trade declined"
+                doneMessage = msg
+                UINotificationFeedbackGenerator().notificationOccurred(accept ? .success : .warning)
+                onMessage(accept ? "Trade accepted with \(fromName)" : "Trade declined")
+            } catch {
+                errorText = error.localizedDescription
+                busy = false
+            }
+        }
+    }
+
+    private func sendCounter() {
+        guard !busy, let alt = counterShift else { return }
+        busy = true
+        errorText = nil
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Task { @MainActor in
+            do {
+                _ = try await store.counterTrade(
+                    original: trade,
+                    newRequestedShift: alt,
+                    compensationAmount: counterComp
+                )
+                doneMessage = "Counter sent"
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                onMessage("Counter sent · your \(alt.shift.displayDateLabel) for \(theirDay)")
+            } catch {
+                errorText = error.localizedDescription
+                busy = false
             }
         }
     }
@@ -1148,10 +1844,21 @@ struct TradeShiftSheet: View {
     @ObservedObject var store: AssignedShiftsStore
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDoctor: DoctorSummary?
+    @State private var selectedPartnerShift: AssignedShiftsStore.AssignedShift?
+    @State private var compensation: Double = 0
     @State private var errorMessage: String?
     @State private var didSend = false
 
     private var tradePreview: PolicyPreview { store.preview(for: .trade, assigned: assigned) }
+
+    private var partnerDays: [AssignedShiftsStore.AssignedShift] {
+        guard let doc = selectedDoctor else { return [] }
+        return store.tradeableShifts(
+            forPartner: doc.id,
+            specialty: assigned.shift.specialty,
+            excludingDate: assigned.shift.date
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -1163,7 +1870,7 @@ struct TradeShiftSheet: View {
                         SectionHeader(title: "Trade Policy", systemImage: "doc.text")
                         if tradePreview.allowed {
                             if tradePreview.penaltyAmount > 0 {
-                                Text("Fee if accepted: $\(NSDecimalNumber(decimal: tradePreview.penaltyAmount).intValue) (\(Int(tradePreview.penaltyPercent * 100))%)")
+                                Text("Fee if accepted: \(NumberFormat.currency(NSDecimalNumber(decimal: tradePreview.penaltyAmount).intValue)) (\(Int(tradePreview.penaltyPercent * 100))%)")
                                     .font(.subheadline).foregroundStyle(.orange)
                             } else {
                                 Text("No trade fee at this time.").font(.subheadline).foregroundStyle(.green)
@@ -1183,6 +1890,12 @@ struct TradeShiftSheet: View {
                             ForEach(partners) { doc in
                                 Button {
                                     selectedDoctor = doc
+                                    selectedPartnerShift = nil
+                                    store.preparePartnerTradeDays(
+                                        forPartner: doc.id,
+                                        specialty: assigned.shift.specialty,
+                                        excludingDate: assigned.shift.date
+                                    )
                                 } label: {
                                     HStack {
                                         VStack(alignment: .leading) {
@@ -1202,13 +1915,30 @@ struct TradeShiftSheet: View {
                     }
                     .cardStyle()
 
+                    if selectedDoctor != nil {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SectionHeader(title: "Their Day You Want", systemImage: "calendar")
+                            TradePartnerCalendar(days: partnerDays, selected: $selectedPartnerShift)
+                        }
+                        .cardStyle()
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            SectionHeader(title: "Your Offer", systemImage: "dollarsign.circle")
+                            HStack {
+                                Text("Amount")
+                                Spacer()
+                                Text(NumberFormat.currency(compensation)).font(.headline).foregroundStyle(Color.accentColor)
+                            }
+                            Slider(value: $compensation, in: 0...1_000, step: 25)
+                        }
+                        .cardStyle()
+                    }
+
                     if let err = errorMessage {
                         Text(err).font(.caption).foregroundStyle(.red).cardStyle()
                     }
 
-                    Button {
-                        sendTrade()
-                    } label: {
+                    Button { sendTrade() } label: {
                         Group {
                             if didSend { Label("Request Sent!", systemImage: "checkmark.circle.fill") }
                             else { Text("Send Trade Request") }
@@ -1216,7 +1946,7 @@ struct TradeShiftSheet: View {
                         .font(.headline).frame(maxWidth: .infinity).padding()
                     }
                     .buttonStyle(PrimaryButtonStyle())
-                    .disabled(selectedDoctor == nil || !tradePreview.allowed || didSend)
+                    .disabled(selectedDoctor == nil || selectedPartnerShift == nil || !tradePreview.allowed || didSend)
                 }
                 .padding()
             }
@@ -1231,10 +1961,15 @@ struct TradeShiftSheet: View {
     }
 
     private func sendTrade() {
-        guard let doctor = selectedDoctor else { return }
+        guard let doctor = selectedDoctor, let wanted = selectedPartnerShift else { return }
         Task {
             do {
-                _ = try await store.requestTrade(for: assigned, toDoctor: doctor)
+                _ = try await store.requestTrade(
+                    for: assigned,
+                    toDoctor: doctor,
+                    requestedShift: wanted,
+                    compensationAmount: compensation
+                )
                 didSend = true
                 try await Task.sleep(nanoseconds: 900_000_000)
                 dismiss()
@@ -1331,7 +2066,7 @@ struct CancelShiftConfirmSheet: View {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Cancellation penalty: $\(penaltyInt)")
+                                Text("Cancellation penalty: \(NumberFormat.currency(penaltyInt))")
                                     .font(.subheadline.weight(.bold))
                                     .foregroundStyle(.orange)
                                 Text("Per hospital policy. Charged immediately upon cancellation.")

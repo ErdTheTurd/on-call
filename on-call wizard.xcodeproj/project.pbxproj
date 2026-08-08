@@ -39,20 +39,20 @@
 			);
 			sourceTree = "<group>";
 		};
-		16BC69C32FEB678000C31198 /* Config */ = {
-			isa = PBXGroup;
-			children = (
-				16BC69C22FEB678000C31198 /* Secrets.xcconfig */,
-			);
-			path = Config;
-			sourceTree = "<group>";
-		};
 		16BC69B52FEB677500C31198 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				16BC69B42FEB677500C31198 /* on-call wizard.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		16BC69C32FEB678000C31198 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				16BC69C22FEB678000C31198 /* Secrets.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
