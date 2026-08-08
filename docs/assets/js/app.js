@@ -1,9 +1,11 @@
 import { isConfigured, getSupabase } from "./supabase-client.js";
 import {
   authState, beginSession, registerAccount, signInLocal,
-  signInRemote, signUpRemote, appStore, syncEverything, startPeriodicSync
+  signInRemote, signUpRemote, signOut, appStore, syncEverything, startPeriodicSync
 } from "./store.js";
 import { renderAuthView, bindAuth } from "./views/auth.js";
+import { renderAdminApp, bindAdmin } from "./views/admin.js";
+import { isAdminUser, fetchApplications, setApplicationStatus } from "./domain/approvals.js";
 import {
   renderOnboarding, bindOnboarding, readOnboardingFields,
   finishDoctorOnboarding, finishHospitalOnboarding
@@ -20,12 +22,22 @@ const state = {
   error: null,
   loading: false,
   onb: { step: 0, role: "Doctor", specialties: [], verified: false, codeVerified: false },
-  ui: { tab: "home", sheet: false, daySheet: null, calendarMonth: new Date().toISOString() }
+  ui: { tab: "home", sheet: false, daySheet: null, calendarMonth: new Date().toISOString() },
+  admin: emptyAdminState()
 };
+
+function emptyAdminState() {
+  return {
+    loading: true, error: null, items: [], email: "",
+    filter: "review", kind: "all", search: "",
+    busyKey: null, confirmKey: null, toast: null, menuOpen: false
+  };
+}
 
 function merge(path, patch) {
   if (path === "ui") Object.assign(state.ui, patch);
   else if (path === "onb") Object.assign(state.onb, patch);
+  else if (path === "admin") Object.assign(state.admin, patch);
   else Object.assign(state, patch);
 }
 
@@ -33,6 +45,7 @@ function update(patch) {
   if (patch.route) state.route = patch.route;
   if (patch.ui) merge("ui", patch.ui);
   if (patch.onb) merge("onb", patch.onb);
+  if (patch.admin) merge("admin", patch.admin);
 
   const uiKeys = [
     "tab", "sheet", "daySheet", "tradeSheet", "calendarMonth", "selectedDate",
@@ -56,19 +69,77 @@ function update(patch) {
   render();
 }
 
+// Re-rendering on every keystroke drops focus, so put the caret back.
+let restoreSearchCaret = false;
+
+/** Routes admins straight to the approvals queue. Returns false for everyone else. */
+async function enterAdminIfPermitted(userId, email) {
+  if (!userId || !(await isAdminUser(userId))) return false;
+  state.route = "admin";
+  state.loading = false;
+  state.admin = { ...emptyAdminState(), email: email || "" };
+  render();
+  await loadApplications();
+  return true;
+}
+
+async function loadApplications() {
+  update({ admin: { loading: true, error: null, toast: null } });
+  try {
+    const items = await fetchApplications();
+    update({ admin: { items, loading: false, error: null } });
+  } catch (err) {
+    update({ admin: { loading: false, error: err.message || "Could not reach Supabase." } });
+  }
+}
+
+function decisionLabel(status) {
+  return {
+    verified: "approved",
+    waitlisted: "moved to the waitlist",
+    rejected: "rejected",
+    pending: "moved back to review"
+  }[status] || "updated";
+}
+
+async function decideApplication(key, status) {
+  const application = state.admin.items.find((a) => a.key === key);
+  if (!application) return;
+
+  update({ admin: { busyKey: key, confirmKey: null, toast: null, error: null } });
+  try {
+    await setApplicationStatus(application, status);
+    const reviewedAt = new Date().toISOString();
+    const items = state.admin.items.map((a) => (
+      a.key === key ? { ...a, status, reviewedAt } : a
+    ));
+    update({
+      admin: { items, busyKey: null, toast: `${application.name} ${decisionLabel(status)}.` }
+    });
+  } catch (err) {
+    update({ admin: { busyKey: null, error: err.message || "Could not save that decision." } });
+  }
+}
+
 async function boot() {
   if (isConfigured()) {
+    let sessionUser = null;
     try {
       const supabase = getSupabase();
       const { data } = await supabase.auth.getSession();
       if (data.session?.user) {
+        sessionUser = data.session.user;
         beginSession({
-          userID: data.session.user.id,
-          email: data.session.user.email,
+          userID: sessionUser.id,
+          email: sessionUser.email,
           role: appStore.savedRole || "Doctor"
         });
       }
     } catch { /* local */ }
+
+    // Admins never reach a doctor or hospital workspace, so skip the shift sync.
+    if (await enterAdminIfPermitted(sessionUser?.id, sessionUser?.email)) return;
+
     await syncEverything();
   }
 
@@ -116,6 +187,34 @@ function render() {
       el.addEventListener("change", () => Object.assign(state.onb, readOnboardingFields(root)));
       el.addEventListener("input", () => Object.assign(state.onb, readOnboardingFields(root)));
     });
+    return;
+  }
+
+  if (state.route === "admin") {
+    root.innerHTML = renderAdminApp(state.admin);
+    bindAdmin(root, state.admin, {
+      onPatch: (patch) => {
+        const { keepFocus, ...rest } = patch;
+        if (keepFocus) restoreSearchCaret = true;
+        update({ admin: rest });
+      },
+      onDecide: decideApplication,
+      onRefresh: loadApplications,
+      onSignOut: () => {
+        signOut();
+        state.route = "auth";
+        state.admin = emptyAdminState();
+        update({ email: "", error: null });
+      }
+    });
+    if (restoreSearchCaret) {
+      const input = root.querySelector("[data-approvals-search]");
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+      restoreSearchCaret = false;
+    }
     return;
   }
 
@@ -170,6 +269,7 @@ async function handleAuthSubmit({ email, password, confirm }) {
       try {
         const res = await signInRemote(email, password);
         beginSession({ userID: res.userID, email: res.email, role: res.role });
+        if (await enterAdminIfPermitted(res.userID, res.email)) return;
         const auth = authState();
         state.route = auth.kind === "needsOnboarding" ? "onboarding" : (res.role === "Hospital" ? "hospital" : "doctor");
         if (auth.kind === "needsOnboarding") state.onb.role = res.role;
