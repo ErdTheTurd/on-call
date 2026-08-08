@@ -7,6 +7,7 @@ import { renderAuthView, bindAuth } from "./views/auth.js";
 import { renderAdminApp, bindAdmin } from "./views/admin.js";
 import { isAdminUser, fetchApplications, setApplicationStatus } from "./domain/approvals.js";
 import { startDemo, isDemoSession, clearDemoFlag } from "./domain/demo.js";
+import { renderLanding, bindLanding } from "./views/landing.js";
 import {
   renderOnboarding, bindOnboarding, readOnboardingFields,
   finishDoctorOnboarding, finishHospitalOnboarding
@@ -43,7 +44,7 @@ function merge(path, patch) {
 }
 
 function update(patch) {
-  if (patch.route === "auth") clearDemoFlag();
+  if (patch.route === "auth" || patch.route === "landing") clearDemoFlag();
   if (patch.route) state.route = patch.route;
   if (patch.ui) merge("ui", patch.ui);
   if (patch.onb) merge("onb", patch.onb);
@@ -161,7 +162,7 @@ async function boot() {
   }
 
   const auth = authState();
-  if (auth.kind === "loggedOut") state.route = "auth";
+  if (auth.kind === "loggedOut") state.route = "landing";
   else if (auth.kind === "needsOnboarding") {
     state.route = "onboarding";
     state.onb.role = auth.role;
@@ -183,13 +184,26 @@ function render() {
   const root = document.getElementById("app");
   if (!root) return;
 
+  if (state.route === "landing") {
+    root.innerHTML = renderLanding();
+    bindLanding(root, {
+      onSignIn: () => {
+        window.scrollTo(0, 0);
+        update({ route: "auth", error: null });
+      },
+      onDemo: enterDemo
+    });
+    return;
+  }
+
   if (state.route === "auth") {
     root.innerHTML = renderAuthView(state, {});
     bindAuth(root, {
       onMode: (mode) => update({ authMode: mode, error: null }),
       onRole: (role) => update({ role }),
       onSubmit: handleAuthSubmit,
-      onDemo: enterDemo
+      onDemo: enterDemo,
+      onBack: () => update({ route: "landing", error: null })
     });
     return;
   }
@@ -274,7 +288,8 @@ function demoRibbon() {
 function bindDemoRibbon(root) {
   root.querySelector("[data-exit-demo]")?.addEventListener("click", () => {
     signOut();
-    update({ route: "auth" });
+    window.scrollTo(0, 0);
+    update({ route: "landing" });
   });
 }
 

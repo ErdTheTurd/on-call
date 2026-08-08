@@ -7,6 +7,7 @@ export function renderAuthView(state, handlers) {
   return `
     <div class="auth-screen auth-bg">
       <div class="mesh-blob"></div><div class="mesh-blob"></div><div class="mesh-blob"></div>
+      <button type="button" class="auth-back" data-back-to-landing>‹ Back</button>
       <div class="auth-brand">
         <div class="auth-brand-row">
           <span class="auth-brand-icon">${icon("wand")}</span>
@@ -62,10 +63,11 @@ export function renderAuthView(state, handlers) {
     </div>`;
 }
 
-export function bindAuth(root, { onSubmit, onMode, onRole, onDemo }) {
+export function bindAuth(root, { onSubmit, onMode, onRole, onDemo, onBack }) {
   root.querySelectorAll("[data-demo]").forEach((btn) => {
     btn.addEventListener("click", () => onDemo?.(btn.dataset.demo));
   });
+  root.querySelector("[data-back-to-landing]")?.addEventListener("click", () => onBack?.());
   root.querySelector("#auth-form")?.addEventListener("submit", (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
