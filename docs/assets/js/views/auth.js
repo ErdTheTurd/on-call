@@ -42,22 +42,30 @@ export function renderAuthView(state, handlers) {
         </form>
         ${state.error ? `<p class="error-text" style="padding:12px 24px 0">${escapeHtml(state.error)}</p>` : ""}
         ${!isConfigured() ? `<p class="error-text" style="padding:8px 24px 0;font-size:12px">Supabase not configured — using local offline auth.</p>` : ""}
-        ${mode === "signin" ? `<div style="padding:8px 24px 0;text-align:right"><button type="button" class="btn-ghost">Forgot password?</button></div>` : ""}
         <div class="auth-actions">
           <button type="submit" form="auth-form" class="btn-primary" ${state.loading ? "disabled" : ""}>
             ${state.loading ? `<span class="spinner"></span>` : (mode === "signin" ? "Sign in" : "Create account")}
           </button>
         </div>
-        <div class="auth-divider">OR</div>
-        <div style="padding:0 24px 32px">
-          <button type="button" class="btn-secondary" disabled>${icon("globe")} Continue with Google</button>
+        <div class="auth-divider">OR LOOK AROUND FIRST</div>
+        <div class="demo-entry">
+          <button type="button" class="btn-secondary" data-demo="Doctor">
+            ${icon("stethoscope")} Explore as a doctor
+          </button>
+          <button type="button" class="btn-secondary" data-demo="Hospital">
+            ${icon("hospital")} Explore as a hospital
+          </button>
+          <p class="demo-note">Sample data, no account needed.</p>
         </div>
       </div>
       <p class="auth-footer">By continuing you agree to our Terms of Service and Privacy Policy.</p>
     </div>`;
 }
 
-export function bindAuth(root, { onSubmit, onMode, onRole }) {
+export function bindAuth(root, { onSubmit, onMode, onRole, onDemo }) {
+  root.querySelectorAll("[data-demo]").forEach((btn) => {
+    btn.addEventListener("click", () => onDemo?.(btn.dataset.demo));
+  });
   root.querySelector("#auth-form")?.addEventListener("submit", (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);

@@ -106,14 +106,26 @@ function renderMyShifts(state, profile) {
         <section class="card stack">
           ${sectionHeader("Incoming Trades", "shifts")}
           <div class="roster-grid">
-            ${trades.map((t) => `
+            ${trades.map((t) => {
+              const from = t.fromDoctorName || "A colleague";
+              const theirs = t.offeredDate ? formatShiftDate(t.offeredDate) : null;
+              const yours = t.requestedDate ? formatShiftDate(t.requestedDate) : null;
+              const pay = Number(t.compensationAmount) || 0;
+              return `
               <div class="trade-card">
-                <div class="subtitle">Shift trade from colleague</div>
+                <div class="trade-from">${escapeHtml(from)} wants to swap</div>
+                ${theirs && yours ? `
+                  <div class="trade-swap">
+                    <span>They cover <strong>${escapeHtml(yours)}</strong></span>
+                    <span>You cover <strong>${escapeHtml(theirs)}</strong></span>
+                  </div>` : `<div class="subtitle">Shift trade request</div>`}
+                ${pay > 0 ? `<div class="trade-pay">They pay you $${pay.toLocaleString()}</div>` : ""}
                 <div class="trade-actions">
                   <button type="button" class="approve" data-respond-trade="${t.id}" data-accept="1">Accept</button>
                   <button type="button" class="deny" data-respond-trade="${t.id}" data-accept="0">Decline</button>
                 </div>
-              </div>`).join("")}
+              </div>`;
+            }).join("")}
           </div>
         </section>` : ""}
       ${active.length ? `<div class="roster-grid">${active.map((a) => {

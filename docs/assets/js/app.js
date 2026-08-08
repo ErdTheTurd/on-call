@@ -6,6 +6,7 @@ import {
 import { renderAuthView, bindAuth } from "./views/auth.js";
 import { renderAdminApp, bindAdmin } from "./views/admin.js";
 import { isAdminUser, fetchApplications, setApplicationStatus } from "./domain/approvals.js";
+import { startDemo, isDemoSession, clearDemoFlag } from "./domain/demo.js";
 import {
   renderOnboarding, bindOnboarding, readOnboardingFields,
   finishDoctorOnboarding, finishHospitalOnboarding
@@ -42,6 +43,7 @@ function merge(path, patch) {
 }
 
 function update(patch) {
+  if (patch.route === "auth") clearDemoFlag();
   if (patch.route) state.route = patch.route;
   if (patch.ui) merge("ui", patch.ui);
   if (patch.onb) merge("onb", patch.onb);
@@ -71,6 +73,20 @@ function update(patch) {
 
 // Re-rendering on every keystroke drops focus, so put the caret back.
 let restoreSearchCaret = false;
+
+/** Loads a fully populated sample account so the product can be seen at a glance. */
+function enterDemo(role) {
+  startDemo(role);
+  const hospital = role === "Hospital";
+  state.ui = {
+    tab: hospital ? "dashboard" : "home",
+    sheet: false,
+    daySheet: null,
+    calendarMonth: new Date().toISOString()
+  };
+  state.route = hospital ? "hospital" : "doctor";
+  update({ error: null, loading: false });
+}
 
 /** Routes admins straight to the approvals queue. Returns false for everyone else. */
 async function enterAdminIfPermitted(userId, email) {
@@ -122,7 +138,8 @@ async function decideApplication(key, status) {
 }
 
 async function boot() {
-  if (isConfigured()) {
+  // A demo runs entirely on local sample data — never sync it to the real project.
+  if (isConfigured() && !isDemoSession()) {
     let sessionUser = null;
     try {
       const supabase = getSupabase();
@@ -157,6 +174,11 @@ async function boot() {
   startPeriodicSync(20000);
 }
 
+// The two workspaces name their tabs differently, so a role switch can leave a
+// tab id the other side does not recognise — which renders an empty page.
+const DOCTOR_TABS = ["home", "shifts", "credentials"];
+const HOSPITAL_TABS = ["dashboard", "alter", "doctors"];
+
 function render() {
   const root = document.getElementById("app");
   if (!root) return;
@@ -166,7 +188,8 @@ function render() {
     bindAuth(root, {
       onMode: (mode) => update({ authMode: mode, error: null }),
       onRole: (role) => update({ role }),
-      onSubmit: handleAuthSubmit
+      onSubmit: handleAuthSubmit,
+      onDemo: enterDemo
     });
     return;
   }
@@ -219,7 +242,9 @@ function render() {
   }
 
   if (state.route === "doctor") {
-    root.innerHTML = renderDoctorApp(state.ui);
+    if (!DOCTOR_TABS.includes(state.ui.tab)) state.ui.tab = "home";
+    root.innerHTML = demoRibbon() + renderDoctorApp(state.ui);
+    bindDemoRibbon(root);
     bindDoctor(root, state.ui, (p) => {
       if (p.route) state.route = p.route;
       update(p);
@@ -228,12 +253,29 @@ function render() {
   }
 
   if (state.route === "hospital") {
-    root.innerHTML = renderHospitalApp(state.ui);
+    if (!HOSPITAL_TABS.includes(state.ui.tab)) state.ui.tab = "dashboard";
+    root.innerHTML = demoRibbon() + renderHospitalApp(state.ui);
+    bindDemoRibbon(root);
     bindHospital(root, state.ui, (p) => {
       if (p.route) state.route = p.route;
       update(p);
     });
   }
+}
+
+function demoRibbon() {
+  if (!isDemoSession()) return "";
+  return `<div class="demo-ribbon">
+    <span>Demo — sample data</span>
+    <button type="button" data-exit-demo>Exit</button>
+  </div>`;
+}
+
+function bindDemoRibbon(root) {
+  root.querySelector("[data-exit-demo]")?.addEventListener("click", () => {
+    signOut();
+    update({ route: "auth" });
+  });
 }
 
 async function handleAuthSubmit({ email, password, confirm }) {
