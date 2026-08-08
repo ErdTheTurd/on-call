@@ -38,47 +38,6 @@ export function shiftRow(shift, opts = {}) {
     </article>`;
 }
 
-export function pointsCard(points) {
-  const progress = points.nextLevel
-    ? Math.min(1, (points.totalPoints - (points.level.minPoints || 0)) / (points.nextLevel.minPoints - (points.level.minPoints || 0)))
-    : 1;
-  return `
-    <section class="card points-card">
-      <div class="level-row">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:1.05rem">
-            <span>${points.level.icon || "🩺"}</span><span>${escapeHtml(points.level.name)}</span>
-          </div>
-          <div class="points-value">${points.totalPoints} pts</div>
-        </div>
-        ${points.currentStreak >= 2 ? `
-          <div class="streak-box">
-            <div style="font-size:1.4rem">${icon("flame")}</div>
-            <div style="font-weight:700">${points.currentStreak}</div>
-            <div class="tertiary" style="font-size:11px">streak</div>
-          </div>` : ""}
-      </div>
-      ${points.nextLevel ? `
-        <div style="margin-top:12px">
-          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);margin-bottom:4px">
-            <span>Next: ${escapeHtml(points.nextLevel.name)}</span>
-            <span>${Math.max(0, points.nextLevel.minPoints - points.totalPoints)} pts away</span>
-          </div>
-          <div class="progress-track"><div class="progress-fill" style="width:${progress * 100}%"></div></div>
-        </div>` : ""}
-      ${points.recentEvents?.length ? `
-        <div class="divider" style="margin:14px 0"></div>
-        <div class="tertiary" style="font-size:12px;font-weight:600;margin-bottom:6px">Recent</div>
-        ${points.recentEvents.slice(0, 3).map(({ event }) => `
-          <div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:4px">
-            <span style="width:18px;color:var(--accent)">${event.icon || "★"}</span>
-            <span style="flex:1">${escapeHtml(event.label)}</span>
-            <span style="color:var(--success);font-weight:700">+${event.points}</span>
-          </div>`).join("")}
-      ` : ""}
-    </section>`;
-}
-
 export function tokenBadge(tokens) {
   const dots = Array.from({ length: tokens.dailyLimit }, (_, i) =>
     `<span class="token-dot ${i < tokens.tokensRemaining ? "" : "empty"}"></span>`

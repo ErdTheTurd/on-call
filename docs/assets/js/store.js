@@ -14,7 +14,6 @@ export const KEYS = {
   hospitalShifts: "hospital_shifts_v1",
   assignments: "assigned_shifts_v1",
   tokens: "doctor_tokens_v2",
-  points: "doctor_points_v1",
   roster: "doctor_roster_v1",
   policies: "hospital_scheduling_policy_v1",
   unavailable: "unavailable_days_v1",
@@ -51,10 +50,6 @@ function migrateLegacyKeys() {
   if (legacyHospital && !localStorage.getItem(KEYS.hospitalProfile)) {
     write(KEYS.hospitalProfile, legacyHospital);
   }
-  const legacyPoints = read("points_store_v1", null);
-  if (legacyPoints && !localStorage.getItem(KEYS.points)) {
-    write(KEYS.points, legacyPoints);
-  }
 }
 
 migrateLegacyKeys();
@@ -65,17 +60,6 @@ function defaultTokens() {
     dailyLimit: 3,
     lastResetDate: startOfDay(new Date()).toISOString(),
     requestedDays: []
-  };
-}
-
-function defaultPoints() {
-  return {
-    totalPoints: 0,
-    currentStreak: 0,
-    lastShiftDate: null,
-    level: { name: "Resident Level", minPoints: 0, icon: "🩺" },
-    nextLevel: { name: "Attending Level", minPoints: 500 },
-    recentEvents: []
   };
 }
 
@@ -94,27 +78,6 @@ function refreshTokenDailyReset(tokens) {
   const today = startOfDay(new Date()).toISOString();
   if (tokens.lastResetDate && sameDay(tokens.lastResetDate, today)) return tokens;
   return { ...tokens, tokensRemaining: tokens.dailyLimit, lastResetDate: today };
-}
-
-function levelForPoints(total) {
-  const levels = [
-    { name: "Resident Level", minPoints: 0, icon: "🩺" },
-    { name: "Attending Level", minPoints: 500, icon: "⭐" },
-    { name: "Fellow Level", minPoints: 1500, icon: "🏅" },
-    { name: "Hospitalist Level", minPoints: 3000, icon: "🏥" },
-    { name: "Chief Level", minPoints: 6000, icon: "👑" },
-    { name: "Department Head Level", minPoints: 12000, icon: "🌟" }
-  ];
-  let current = levels[0];
-  let next = levels[1] || null;
-  for (let i = levels.length - 1; i >= 0; i--) {
-    if (total >= levels[i].minPoints) {
-      current = levels[i];
-      next = levels[i + 1] || null;
-      break;
-    }
-  }
-  return { level: current, nextLevel: next };
 }
 
 export const appStore = {
@@ -158,12 +121,6 @@ export const appStore = {
   },
   saveTokens(state) { write(KEYS.tokens, state); this.emit(); },
 
-  get points() {
-    const p = read(KEYS.points, defaultPoints());
-    const { level, nextLevel } = levelForPoints(p.totalPoints);
-    return { ...p, level, nextLevel };
-  },
-  savePoints(state) { write(KEYS.points, state); this.emit(); },
 
   get roster() { return read(KEYS.roster, []); },
   saveRoster(list) { write(KEYS.roster, list); this.emit(); },
@@ -744,9 +701,6 @@ export async function requestToken(date, hospitalID, hospitalName, specialty, do
   tokens.requestedDays = [...(tokens.requestedDays || []), req];
   appStore.saveTokens(tokens);
 
-  // Mirror iOS: applying awards acceptance points when the request succeeds.
-  awardPointsEvent("shiftAccepted");
-
   await afterMutation(() => sync.submitTokenRequest(req));
   return { ok: true, request: req };
 }
@@ -788,65 +742,6 @@ export async function cancelTokenRequest(id) {
 
 // ── Assignments ──────────────────────────────────────────────────────
 
-const POINTS_EVENTS = {
-  shiftAccepted: { points: 50, label: "Shift Accepted", icon: "✓" },
-  shiftCompleted: { points: 200, label: "Shift Completed", icon: "★" },
-  fastResponse: { points: 75, label: "Lightning Response", icon: "⚡" }
-};
-
-function streakBonusPoints(days) {
-  if (days >= 30) return 1500;
-  if (days >= 14) return 600;
-  if (days >= 7) return 250;
-  if (days >= 3) return 100;
-  return 0;
-}
-
-export function awardPointsEvent(kind, extra = {}) {
-  const def = POINTS_EVENTS[kind];
-  if (!def) return awardPoints(extra.points || 0, extra.label || kind, extra.icon || "★");
-  awardPoints(def.points, def.label, def.icon);
-
-  if (kind === "shiftCompleted") {
-    const pts = { ...appStore.points };
-    const cal = new Date();
-    const last = pts.lastShiftDate ? new Date(pts.lastShiftDate) : null;
-    const yesterday = new Date(cal);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (last && sameDay(last, yesterday)) {
-      pts.currentStreak = (pts.currentStreak || 0) + 1;
-      const bonus = streakBonusPoints(pts.currentStreak);
-      if (bonus > 0) {
-        pts.totalPoints += bonus;
-        pts.recentEvents = [{
-          event: { label: `${pts.currentStreak}-Day Streak!`, points: bonus, icon: "🔥" },
-          date: new Date().toISOString()
-        }, ...(pts.recentEvents || [])].slice(0, 20);
-      }
-    } else if (!last || !sameDay(last, cal)) {
-      pts.currentStreak = 1;
-    }
-    pts.lastShiftDate = cal.toISOString();
-    const { level, nextLevel } = levelForPoints(pts.totalPoints);
-    pts.level = level;
-    pts.nextLevel = nextLevel;
-    appStore.savePoints(pts);
-  }
-}
-
-export function awardPoints(amount, label, icon = "★") {
-  const pts = { ...appStore.points };
-  pts.totalPoints += amount;
-  pts.recentEvents = [{
-    event: { label, points: amount, icon },
-    date: new Date().toISOString()
-  }, ...(pts.recentEvents || [])].slice(0, 20);
-  const { level, nextLevel } = levelForPoints(pts.totalPoints);
-  pts.level = level;
-  pts.nextLevel = nextLevel;
-  appStore.savePoints(pts);
-}
-
 export async function acceptShift(shift, doctor) {
   if (isShiftFilled(shift.id)) return { ok: false, error: "Shift already filled." };
   if (!canAcceptOnDay(shift.start, shift.hospitalID, doctor.id)) {
@@ -865,12 +760,6 @@ export async function acceptShift(shift, doctor) {
 
   appStore.saveAssignments([...appStore.assignments, assignment]);
 
-  // Fast-response bonus if accepting within 2h of a fresh request window.
-  const posted = new Date(shift.start);
-  // Use assigned timing relative to "now" vs shift creation isn't stored; skip unless shift has createdAt.
-  if (shift.createdAt && (Date.now() - new Date(shift.createdAt).getTime()) < 2 * 3600000) {
-    awardPointsEvent("fastResponse");
-  }
 
   await afterMutation(async () => {
     await sync.createAssignment(shift.id, doctor.id, {

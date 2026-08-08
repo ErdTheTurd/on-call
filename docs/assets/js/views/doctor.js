@@ -1,6 +1,6 @@
 import { escapeHtml, formatShiftDate, SPECIALTIES } from "../brand.js";
 import {
-  navBar, tabBar, shiftRow, pointsCard, tokenBadge, pendingBanner,
+  navBar, tabBar, shiftRow, tokenBadge, pendingBanner,
   credentialStatusCard, sectionHeader, emptyState, sheet, verificationBadge, icon
 } from "../components.js";
 import { renderCalendar, doctorDayData, addMonths } from "../calendar.js";
@@ -50,7 +50,6 @@ function renderDoctorHome(state, profile) {
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
       <div class="content-grid two-col">
         <div class="stack">
-          ${pointsCard(appStore.points)}
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
             ${tokenBadge(appStore.tokens)}
             <button type="button" class="btn-ghost" data-open-sheet="dashboard">Dashboard ›</button>
@@ -233,16 +232,16 @@ function renderDoctorMenuSheet(sheetKind) {
   if (sheetKind === "requested") return renderRequestedSheet(requested);
   if (sheetKind === "earnings") return renderEarningsSheet(earnings);
   if (sheetKind === "history") return renderHistorySheet(earnings.history || []);
-  if (sheetKind === "points") return renderPointsSheet();
 
   const body = `
     <div class="menu-profile">
       <div class="avatar">${escapeHtml((profile?.firstName?.[0] || "") + (profile?.lastName?.[0] || ""))}</div>
-      <div>
+      <div style="min-width:0;flex:1">
         <div style="font-weight:600">${escapeHtml(profile?.firstName || "")} ${escapeHtml(profile?.lastName || "")}${profile ? `, ${profile.credential}` : ""}</div>
-        <div class="subtitle">${escapeHtml(profile?.specialties?.[0] || "")}</div>
+        <div class="subtitle">${escapeHtml(appStore.session?.email || profile?.specialties?.[0] || "")}</div>
         ${profile ? verificationBadge(profile.verificationStatus) : ""}
       </div>
+      <button type="button" class="menu-signout" data-sign-out>Sign out</button>
     </div>
     <ul class="menu-list">
       <section><div class="section-label">Earnings</div>
@@ -258,18 +257,12 @@ function renderDoctorMenuSheet(sheetKind) {
         </div>
         <button class="menu-item" type="button" data-open-sheet="earnings">${icon("dollar")}<span>Earnings detail</span></button>
       </section>
-      <section><div class="section-label">Rewards</div>
-        <button class="menu-item" type="button" data-open-sheet="points">${icon("sparkles")}<span>Points · ${appStore.points.totalPoints} pts</span></button>
-      </section>
       <section><div class="section-label">Schedule</div>
         <button class="menu-item" type="button" data-nav-tab="shifts">${icon("calendar")}<span>My Shifts</span></button>
         <button class="menu-item" type="button" data-open-sheet="requested">${icon("clock")}<span>Requested Days (${requested.length})</span></button>
         <button class="menu-item" type="button" data-open-sheet="history">${icon("shifts")}<span>History</span></button>
         <button class="menu-item" type="button" data-open-sheet="preferences">${icon("credentials")}<span>Preferences</span></button>
         <button class="menu-item" type="button" data-nav-tab="credentials">${icon("stethoscope")}<span>My Info</span></button>
-      </section>
-      <section><div class="section-label">Account</div>
-        <button class="menu-item danger" type="button" data-sign-out>${icon("lock")}<span>Sign Out</span></button>
       </section>
     </ul>`;
   return sheet("Dashboard", body);
@@ -352,24 +345,6 @@ function renderHistorySheet(history) {
         </section>`).join("") : emptyState("No history", "Completed and canceled shifts appear here.")}
     </main>`;
   return sheet("Shift History", body);
-}
-
-function renderPointsSheet() {
-  const pts = appStore.points;
-  const body = `
-    <main class="main-scroll stack" style="padding:16px">
-      ${pointsCard(pts)}
-      <section class="card stack">
-        ${sectionHeader("All recent events")}
-        ${(pts.recentEvents || []).length ? pts.recentEvents.map(({ event }) => `
-          <div style="display:flex;align-items:center;gap:8px;font-size:14px">
-            <span style="width:20px;color:var(--accent)">${event.icon || "★"}</span>
-            <span style="flex:1">${escapeHtml(event.label)}</span>
-            <span style="color:var(--success);font-weight:700">+${event.points}</span>
-          </div>`).join("") : `<p class="subtitle">Earn points by requesting and completing shifts.</p>`}
-      </section>
-    </main>`;
-  return sheet("Points", body);
 }
 
 function renderDaySheet(dateISO, profile) {
@@ -462,7 +437,9 @@ export function bindDoctor(root, state, update) {
   root.querySelectorAll("[data-sheet-panel]").forEach((panel) => {
     panel.addEventListener("click", (e) => e.stopPropagation());
   });
-  root.querySelector("[data-sign-out]")?.addEventListener("click", () => { signOut(); update({ route: "auth" }); });
+  root.querySelectorAll("[data-sign-out]").forEach((btn) => {
+    btn.addEventListener("click", () => { signOut(); update({ route: "landing" }); });
+  });
   root.querySelectorAll("[data-open-sheet]").forEach((btn) => {
     btn.addEventListener("click", () => update({ sheet: btn.dataset.openSheet || true }));
   });

@@ -52,7 +52,7 @@ export function renderLanding() {
           ${feature("calendar", "One calendar", "Every hospital you work with in a single month view. No more cross-checking three portals.")}
           ${feature("dollar", "Rates you can see", "The rate is on the card before you claim it, and it is locked the moment you do.")}
           ${feature("shifts", "Trade without the favour economy", "Offer a swap, name your compensation, and settle it in the app.")}
-          ${feature("flame", "Credit for showing up", "Streaks and levels that recognise the people covering the hard nights.")}
+          ${feature("dashboard", "Earnings in one place", "Projected pay across every hospital you work with, updated as you claim.")}
         </div>
       </section>
 

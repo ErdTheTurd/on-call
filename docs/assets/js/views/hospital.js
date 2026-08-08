@@ -368,11 +368,12 @@ function renderHospitalSheet(state, profile) {
     ${profile ? `
       <div class="menu-profile">
         <div class="avatar square">${icon("hospital")}</div>
-        <div>
+        <div style="min-width:0;flex:1">
           <div style="font-weight:600">${escapeHtml(profile.name)}</div>
-          <div class="subtitle">NPI: ${escapeHtml(profile.npi)}</div>
+          <div class="subtitle">${escapeHtml(appStore.session?.email || `NPI: ${profile.npi}`)}</div>
           ${verificationBadge(profile.verificationStatus)}
         </div>
+        <button type="button" class="menu-signout" data-sign-out>Sign out</button>
       </div>` : ""}
     <ul class="menu-list">
       <section><div class="section-label">Management</div>
@@ -388,7 +389,6 @@ function renderHospitalSheet(state, profile) {
           <input type="checkbox" data-hospital-flag="priorityPosting" ${profile?.priorityPosting ? "checked" : ""} /></label>
         <label class="menu-item" style="cursor:default"><span>Auto-pay filled shifts</span>
           <input type="checkbox" data-hospital-flag="autoPay" ${profile?.autoPay ? "checked" : ""} /></label>
-        <button class="menu-item danger" type="button" data-sign-out>${icon("lock")}<span>Sign Out</span></button>
       </section>
     </ul>`;
   return sheet("Menu", body);
@@ -712,7 +712,9 @@ export function bindHospital(root, state, update) {
   root.querySelectorAll("[data-sheet-panel]").forEach((panel) => {
     panel.addEventListener("click", (e) => e.stopPropagation());
   });
-  root.querySelector("[data-sign-out]")?.addEventListener("click", () => { signOut(); update({ route: "auth" }); });
+  root.querySelectorAll("[data-sign-out]").forEach((btn) => {
+    btn.addEventListener("click", () => { signOut(); update({ route: "landing" }); });
+  });
 
   root.querySelectorAll("[data-cal-nav]").forEach((btn) => {
     btn.addEventListener("click", () => {

@@ -81,10 +81,7 @@ function demoDoctorProfile() {
   };
 }
 
-/**
- * A doctor mid-career: a few shifts booked, one trade waiting on them, and
- * enough points that the level system has something to show.
- */
+/** A doctor mid-career: a few shifts booked and one trade waiting on them. */
 function seedDoctor() {
   const profile = demoDoctorProfile();
   appStore.saveDoctorProfile(profile);
@@ -168,18 +165,6 @@ function seedDoctor() {
     }]
   });
 
-  appStore.savePoints({
-    totalPoints: 1850,
-    currentStreak: 4,
-    lastShiftDate: new Date(Date.now() - 86400000).toISOString(),
-    level: { name: "Fellow Level", minPoints: 1500, icon: "🏅" },
-    nextLevel: { name: "Hospitalist Level", minPoints: 3000, icon: "🏥" },
-    recentEvents: [
-      { event: { label: "4-Day Streak!", points: 100, icon: "🔥" }, date: new Date(Date.now() - 86400000).toISOString() },
-      { event: { label: "Shift completed", points: 250, icon: "✅" }, date: new Date(Date.now() - 2 * 86400000).toISOString() },
-      { event: { label: "Covered a critical gap", points: 400, icon: "⚡️" }, date: new Date(Date.now() - 5 * 86400000).toISOString() }
-    ]
-  });
 }
 
 /** A hospital with a live rota: open days, a roster, and approvals waiting. */
