@@ -30,6 +30,7 @@ export const VERIFICATION = {
   pending: { label: "Pending Review", icon: "⏱" },
   verified: { label: "Verified", icon: "✓" },
   flagged: { label: "Needs Review", icon: "!" },
+  waitlisted: { label: "Waitlisted", icon: "❋" },
   rejected: { label: "Rejected", icon: "✕" }
 };
 
