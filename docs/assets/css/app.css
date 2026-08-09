@@ -1387,6 +1387,67 @@ a { color: var(--accent); text-decoration: none; }
 
 .menu-signout:hover { background: rgba(248,113,113,0.18); }
 
+/* Per-doctor daily token allowance */
+.token-allowance {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.token-allowance > .tertiary { font-size: 11px; }
+
+.token-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.token-stepper button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-high);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.token-stepper button:hover:not(:disabled) { background: var(--accent); }
+.token-stepper button:disabled { opacity: 0.32; cursor: not-allowed; }
+
+.token-stepper strong {
+  min-width: 20px;
+  text-align: center;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.token-allowance.custom .token-stepper {
+  border-color: rgba(79, 142, 247, 0.5);
+  background: var(--accent-soft);
+}
+
+.token-default { font-size: 10.5px; }
+
+.token-reset {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.token-reset:hover { text-decoration: underline; }
+
 /* ══ Marketing site ═══════════════════════════════════════════════════
    Scoped to .site so restyling the public pages cannot disturb the
    signed-in app, which still runs on the tokens declared in :root.      */

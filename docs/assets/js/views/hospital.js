@@ -11,7 +11,8 @@ import {
   autoApprovedCount, tokenRequestsForHospital, approveToken, denyToken,
   toggleUnavailable, getPolicy, savePolicy, defaultPolicy,
   getProposedRate, setProposedRate, resetProposedRate, toggleRosterAutoApprove,
-  seedMockDoctors, getRateBreakdown, saveAlterShift, findShiftForDay
+  seedMockDoctors, getRateBreakdown, saveAlterShift, findShiftForDay,
+  tokenLimitForDoctor, setDoctorTokenLimit
 } from "../store.js";
 
 function alterDraftKey(date, specialty) {
@@ -309,6 +310,34 @@ function renderAlterShifts(state, profile) {
     </main>`;
 }
 
+/**
+ * Per-doctor daily token allowance. Shows the hospital default until someone
+ * changes it, so an untouched roster reads as one consistent rule rather than
+ * a wall of identical overrides.
+ */
+function tokenStepper(hospitalID, doctor) {
+  if (!hospitalID) return "";
+  const policy = getPolicy(hospitalID);
+  const override = policy.doctorTokenLimits?.[doctor.id];
+  const isCustom = Number.isFinite(override);
+  const value = isCustom ? override : (policy.defaultDailyTokens ?? 3);
+
+  return `
+    <div class="token-allowance ${isCustom ? "custom" : ""}">
+      <span class="tertiary">Tokens/day</span>
+      <div class="token-stepper">
+        <button type="button" data-token-limit="${doctor.id}" data-delta="-1"
+                aria-label="Fewer tokens for ${escapeHtml(doctor.name)}" ${value <= 0 ? "disabled" : ""}>−</button>
+        <strong>${value}</strong>
+        <button type="button" data-token-limit="${doctor.id}" data-delta="1"
+                aria-label="More tokens for ${escapeHtml(doctor.name)}" ${value >= 20 ? "disabled" : ""}>+</button>
+      </div>
+      ${isCustom
+        ? `<button type="button" class="token-reset" data-token-reset="${doctor.id}">Use default</button>`
+        : `<span class="tertiary token-default">Default</span>`}
+    </div>`;
+}
+
 function renderDoctors(state, profile) {
   const roster = appStore.roster;
   const filter = state.doctorFilter || "All";
@@ -346,6 +375,7 @@ function renderDoctors(state, profile) {
             <div class="subtitle">${escapeHtml(d.specialty)} · NPI ${escapeHtml(d.npi)}</div>
             ${verificationBadge(d.verificationStatus, true)}
           </button>
+          ${tokenStepper(profile?.id, d)}
           <label class="toggle-row" style="flex-direction:column;align-items:flex-end;gap:4px">
             <span style="font-size:11px" class="tertiary">Auto-approve</span>
             <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />
@@ -362,7 +392,7 @@ function renderHospitalSheet(state, profile) {
   if (kind === "billing") return renderBillingSheet(profile);
   if (kind === "schedule") return renderScheduleAdminSheet(profile, state);
   if (kind === "openshifts") return renderOpenShiftsSheet(profile);
-  if (kind === "doctor-detail") return renderDoctorDetailSheet(state.doctorDetailId);
+  if (kind === "doctor-detail") return renderDoctorDetailSheet(state.doctorDetailId, profile);
 
   const body = `
     ${profile ? `
@@ -473,6 +503,7 @@ function renderPolicySheet(profile, state) {
         <button type="button" class="chip ${tab === "general" ? "active" : ""}" data-policy-tab="general">General</button>
         <button type="button" class="chip ${tab === "cancel" ? "active" : ""}" data-policy-tab="cancel">Cancellation</button>
         <button type="button" class="chip ${tab === "rates" ? "active" : ""}" data-policy-tab="rates">Pay Rates</button>
+        <button type="button" class="chip ${tab === "tokens" ? "active" : ""}" data-policy-tab="tokens">Tokens</button>
       </div>
       ${tab === "general" ? `
         <section class="card stack">
@@ -532,6 +563,24 @@ function renderPolicySheet(profile, state) {
           ${appStore.roster.length ? appStore.roster.map((d) => `
             <div class="form-field"><label>${escapeHtml(d.name)}</label>
               <input type="number" data-doctor-rate="${d.id}" value="${policy.doctorBaseRates?.[d.id] ?? ""}" placeholder="Specialty default" /></div>
+          `).join("") : `<p class="subtitle">No doctors on roster yet.</p>`}
+        </section>` : ""}
+      ${tab === "tokens" ? `
+        <section class="card stack">
+          ${sectionHeader("Daily request tokens")}
+          <p class="subtitle">A token is spent when a physician requests a call day.
+            Everyone gets the roster default unless you set an exception below.</p>
+          <div class="form-field"><label>Roster default (per day)</label>
+            <input type="number" min="0" max="20" data-policy="defaultDailyTokens"
+                   value="${policy.defaultDailyTokens ?? 3}" /></div>
+        </section>
+        <section class="card stack">
+          ${sectionHeader("Per-doctor exceptions")}
+          ${appStore.roster.length ? appStore.roster.map((d) => `
+            <div class="form-field"><label>${escapeHtml(d.name)}<span class="tertiary"> · ${escapeHtml(d.specialty)}</span></label>
+              <input type="number" min="0" max="20" data-doctor-tokens="${d.id}"
+                     value="${Number.isFinite(policy.doctorTokenLimits?.[d.id]) ? policy.doctorTokenLimits[d.id] : ""}"
+                     placeholder="Roster default (${policy.defaultDailyTokens ?? 3})" /></div>
           `).join("") : `<p class="subtitle">No doctors on roster yet.</p>`}
         </section>` : ""}
       <button type="button" class="btn-primary" data-save-policy>Save Policy</button>
@@ -644,7 +693,7 @@ function renderOpenShiftsSheet(profile) {
   return sheet("Open Shifts", body);
 }
 
-function renderDoctorDetailSheet(doctorId) {
+function renderDoctorDetailSheet(doctorId, profile) {
   const d = appStore.roster.find((x) => x.id === doctorId);
   if (!d) return sheet("Doctor", emptyState("Not found"));
   const body = `
@@ -659,6 +708,12 @@ function renderDoctorDetailSheet(doctorId) {
           <span>Auto-approve token requests</span>
           <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />
         </label>
+      </section>
+      <section class="card stack">
+        ${sectionHeader("Daily request tokens")}
+        <p class="subtitle">How many call days ${escapeHtml(d.name)} can request per day.
+          Give your most reliable physicians more, and new ones fewer.</p>
+        ${tokenStepper(profile?.id, d)}
       </section>
     </main>`;
   return sheet(d.name, body);
@@ -770,6 +825,22 @@ export function bindHospital(root, state, update) {
   root.querySelectorAll("[data-roster-auto]").forEach((el) => {
     el.addEventListener("change", async () => {
       await toggleRosterAutoApprove(el.dataset.rosterAuto);
+    });
+  });
+
+  root.querySelectorAll("[data-token-limit]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!profile) return;
+      const doctorId = btn.dataset.tokenLimit;
+      const current = tokenLimitForDoctor(profile.id, doctorId);
+      await setDoctorTokenLimit(profile.id, doctorId, current + Number(btn.dataset.delta));
+    });
+  });
+
+  root.querySelectorAll("[data-token-reset]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!profile) return;
+      await setDoctorTokenLimit(profile.id, btn.dataset.tokenReset, null);
     });
   });
   root.querySelector("[data-seed-mocks]")?.addEventListener("click", () => {
@@ -960,6 +1031,12 @@ export function bindHospital(root, state, update) {
       const v = el.value;
       if (v === "") delete policy.doctorBaseRates[el.dataset.doctorRate];
       else policy.doctorBaseRates[el.dataset.doctorRate] = Number(v);
+    });
+    policy.doctorTokenLimits = { ...(policy.doctorTokenLimits || {}) };
+    root.querySelectorAll("[data-doctor-tokens]").forEach((el) => {
+      const v = el.value.trim();
+      if (v === "") delete policy.doctorTokenLimits[el.dataset.doctorTokens];
+      else policy.doctorTokenLimits[el.dataset.doctorTokens] = Math.max(0, Math.min(20, Number(v)));
     });
     await savePolicy(profile.id, policy);
     alert("Policy saved.");
