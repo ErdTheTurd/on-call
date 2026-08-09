@@ -268,11 +268,6 @@ struct DoctorDashboardView: View {
 
                     Section("Schedule") {
                         NavigationLink {
-                            MyAssignedShiftsView()
-                        } label: {
-                            Label("My Shifts", systemImage: "calendar.badge.clock")
-                        }
-                        NavigationLink {
                             UpcomingScheduleView()
                         } label: {
                             Label("Requested Days", systemImage: "calendar.badge.plus")
@@ -719,8 +714,6 @@ struct DoctorHomeView: View {
                         if let p = profile, p.verificationStatus != .verified {
                             PendingVerificationBanner(status: p.verificationStatus, flags: p.verificationFlags)
                         }
-
-                        PointsCard(store: PointsStore.shared)
 
                         // Token badge
                         HStack {
