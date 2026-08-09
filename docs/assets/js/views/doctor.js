@@ -1,4 +1,4 @@
-import { escapeHtml, formatShiftDate, SPECIALTIES } from "../brand.js";
+import { escapeHtml, formatShiftDate } from "../brand.js";
 import {
   navBar, tabBar, shiftRow, tokenBadge, pendingBanner,
   credentialStatusCard, sectionHeader, emptyState, sheet, verificationBadge, icon, currency
@@ -9,7 +9,7 @@ import { currentRate } from "../shift-math.js";
 import {
   appStore, recommendedShifts, shiftsForDate, activeAssignments,
   pendingTradeCount, acceptShift, requestToken, cancelTokenRequest, ensureDemoShifts, signOut, demoHospital,
-  cancelShift, requestTrade, respondTrade, penaltyPreview, eligibleTradePartners,
+  cancelShift, requestTrade, respondTrade, counterTrade, penaltyPreview, eligibleTradePartners,
   incomingTrades, earningsSummary, savePreferences, requestStatusForDay, canAcceptOnDay
 } from "../store.js";
 
@@ -120,6 +120,8 @@ function renderMyShifts(state, profile) {
               const theirs = t.offeredDate ? formatShiftDate(t.offeredDate) : null;
               const yours = t.requestedDate ? formatShiftDate(t.requestedDate) : null;
               const pay = Number(t.compensationAmount) || 0;
+              const counterOpen = state.counterTradeId === t.id;
+              const counterComp = Number(state.counterComp ?? pay);
               return `
               <div class="trade-card">
                 <div class="trade-from">${escapeHtml(from)} wants to swap</div>
@@ -128,11 +130,33 @@ function renderMyShifts(state, profile) {
                     <span>They cover <strong>${escapeHtml(yours)}</strong></span>
                     <span>You cover <strong>${escapeHtml(theirs)}</strong></span>
                   </div>` : `<div class="subtitle">Shift trade request</div>`}
-                ${pay > 0 ? `<div class="trade-pay">They pay you $${pay.toLocaleString()}</div>` : ""}
+                ${pay > 0 ? `<div class="trade-pay">They offer you $${pay.toLocaleString()}</div>` : ""}
                 <div class="trade-actions">
                   <button type="button" class="approve" data-respond-trade="${t.id}" data-accept="1">Accept</button>
+                  <button type="button" class="counter" data-open-counter="${t.id}">Counter</button>
                   <button type="button" class="deny" data-respond-trade="${t.id}" data-accept="0">Decline</button>
                 </div>
+                ${counterOpen ? `
+                  <div class="trade-counter-panel">
+                    <div class="counter-row">
+                      <span class="subtitle" style="font-weight:600">Ask them for</span>
+                      <strong style="color:var(--accent)">$${Math.round(counterComp).toLocaleString()}</strong>
+                    </div>
+                    <input type="range" min="0" max="1000" step="25"
+                           value="${Math.round(counterComp)}"
+                           data-counter-comp="${t.id}" />
+                    <p class="subtitle" style="font-size:12px;margin:0">${
+                      counterComp === pay
+                        ? `Same as their $${pay.toLocaleString()} offer`
+                        : counterComp > pay
+                          ? `$${Math.round(counterComp - pay).toLocaleString()} more than they offered`
+                          : `$${Math.round(pay - counterComp).toLocaleString()} less than they offered`
+                    }</p>
+                    <div class="trade-actions">
+                      <button type="button" class="counter" data-send-counter="${t.id}">Send counter</button>
+                      <button type="button" class="deny" data-close-counter="${t.id}">Cancel</button>
+                    </div>
+                  </div>` : ""}
               </div>`;
             }).join("")}
           </div>
@@ -184,8 +208,8 @@ function renderCredentials(profile) {
                 <div class="divider"></div>
                 <div><span class="tertiary">License</span><div>${escapeHtml(profile.licenseNumber)} · ${escapeHtml(profile.licenseState)}</div></div>
                 <div class="divider"></div>
-                <div><span class="tertiary">Specialties</span>
-                  <div class="tag-row">${(profile.specialties || []).map((sp) => `<span class="tag">${escapeHtml(sp)}</span>`).join("")}</div>
+                <div><span class="tertiary">Specialty</span>
+                  <div class="tag-row"><span class="tag">${escapeHtml((profile.specialties || [])[0] || "—")}</span></div>
                 </div>
               </div>
             </section>
@@ -202,8 +226,8 @@ function renderCredentials(profile) {
           </div>
           <section class="card stack">
             ${sectionHeader("Preferences")}
+            <p class="subtitle" style="margin:0">Home only shows shifts in <strong>${escapeHtml((profile.specialties || [])[0] || "your specialty")}</strong>.</p>
             ${[
-              ["showOnlyMySpecialties", "Only my specialties"],
               ["notifyNewShifts", "New matching shifts"],
               ["notifyTradeRequests", "Incoming trade requests"],
               ["notifyApprovals", "Approvals & status updates"]
@@ -213,18 +237,12 @@ function renderCredentials(profile) {
                 <input type="checkbox" data-pref="${key}" ${prefs[key] ? "checked" : ""} />
                 <span class="switch"></span>
               </label>`).join("")}
-            <div class="divider"></div>
-            <div class="subtitle" style="font-weight:600">Hidden specialties</div>
-            <div class="chip-grid">
-              ${SPECIALTIES.map((sp) => `
-                <button type="button" class="chip ${(prefs.hiddenSpecialties || []).includes(sp) ? "active" : ""}" data-hide-specialty="${escapeHtml(sp)}">${escapeHtml(sp)}</button>
-              `).join("")}
-            </div>
             ${uniqueHospitals.length ? `
-              <div class="subtitle" style="font-weight:600;margin-top:8px">Hidden hospitals</div>
+              <div class="divider"></div>
+              <div class="subtitle" style="font-weight:600">Hidden hospitals</div>
               <div class="chip-grid">
                 ${uniqueHospitals.map((h) => `
-                  <button type="button" class="chip ${(prefs.hiddenHospitalIDs || []).includes(h.id) ? "active" : ""}" data-hide-hospital="${escapeHtml(h.id)}">${escapeHtml(h.name)}</button>
+                  <button type="button" class="chip ${(prefs.hiddenHospitalIDs || []).includes(h.id) ? "active" : ""}" data-hide-hospital="${h.id}">${escapeHtml(h.name)}</button>
                 `).join("")}
               </div>` : ""}
           </section>
@@ -288,8 +306,9 @@ function renderPreferencesSheet() {
     <main class="main-scroll stack" style="padding:16px">
       <section class="card stack">
         ${sectionHeader("Shift Filters")}
-        <label class="toggle-row"><span>Show only my specialties</span>
-          <input type="checkbox" data-pref="showOnlyMySpecialties" ${prefs.showOnlyMySpecialties ? "checked" : ""} /></label>
+        <label class="toggle-row"><span>Show only my specialty</span>
+          <input type="checkbox" data-pref="showOnlyMySpecialties" checked disabled />
+        </label>
       </section>
       <section class="card stack">
         ${sectionHeader("Notifications")}
@@ -582,6 +601,35 @@ export function bindDoctor(root, state, update) {
       if (!trade) return;
       const accept = btn.dataset.accept === "1";
       await respondTrade(trade, accept);
+      update({ counterTradeId: null, counterComp: null });
+    });
+  });
+  root.querySelectorAll("[data-open-counter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const trade = incomingTrades().find((t) => t.id === btn.dataset.openCounter);
+      if (!trade) return;
+      update({
+        counterTradeId: trade.id,
+        counterComp: Number(trade.compensationAmount) || 0
+      });
+    });
+  });
+  root.querySelectorAll("[data-close-counter]").forEach((btn) => {
+    btn.addEventListener("click", () => update({ counterTradeId: null, counterComp: null }));
+  });
+  root.querySelectorAll("[data-counter-comp]").forEach((el) => {
+    el.addEventListener("input", () => {
+      update({ counterComp: Number(el.value) || 0 });
+    });
+  });
+  root.querySelectorAll("[data-send-counter]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const trade = incomingTrades().find((t) => t.id === btn.dataset.sendCounter);
+      if (!trade) return;
+      const amount = Number(state.counterComp ?? trade.compensationAmount) || 0;
+      const res = await counterTrade(trade, amount);
+      if (!res.ok) alert(res.error || "Could not send counter");
+      else update({ counterTradeId: null, counterComp: null });
     });
   });
 }

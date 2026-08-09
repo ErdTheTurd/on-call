@@ -16,6 +16,7 @@ public enum VerificationStatus: String, Codable, Equatable {
     case verified   = "verified"
     case flagged    = "flagged"
     case rejected   = "rejected"
+    case waitlisted = "waitlisted"
 
     public var label: String {
         switch self {
@@ -24,6 +25,7 @@ public enum VerificationStatus: String, Codable, Equatable {
         case .verified:   return "Verified"
         case .flagged:    return "Needs Review"
         case .rejected:   return "Rejected"
+        case .waitlisted: return "Waitlisted"
         }
     }
 
@@ -34,6 +36,7 @@ public enum VerificationStatus: String, Codable, Equatable {
         case .verified:   return "checkmark.seal.fill"
         case .flagged:    return "exclamationmark.triangle.fill"
         case .rejected:   return "xmark.seal.fill"
+        case .waitlisted: return "hourglass"
         }
     }
 }

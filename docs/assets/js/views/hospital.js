@@ -94,18 +94,16 @@ function renderHospitalDashboard(state, profile) {
   const month = state.calendarMonth ? new Date(state.calendarMonth) : new Date();
   const days = profile ? hospitalDayData(month, profile.id) : [];
   const selected = state.selectedDate ? new Date(state.selectedDate) : null;
-  const summary = selected && profile ? hospitalDaySummary(selected, profile.id) : null;
-
   const focusOpen = Boolean(state.focusOpenDays);
   const openDayCount = days.filter((d) => d.level !== "all" && d.level !== null && !d.isPast).length;
 
   // The detail panel would otherwise sit empty until a day is picked, so it
   // opens on today — the day a scheduler cares about most.
   const insightDate = selected || startOfDay(new Date());
-  const insight = summary || (profile ? hospitalDaySummary(insightDate, profile.id) : null);
+  const insight = profile ? hospitalDaySummary(insightDate, profile.id) : null;
 
   return `
-    ${navBar(profile?.name || "Dashboard")}
+    ${navBar(profile?.name || "Home")}
     <main class="main-scroll stack">
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
       <section class="card stack">

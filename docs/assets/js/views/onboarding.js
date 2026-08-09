@@ -5,7 +5,7 @@ const DOCTOR_STEPS = [
   { icon: "👤", title: "Who are you?", subtitle: "Enter your name and credential type." },
   { icon: "📄", title: "Verify Credentials", subtitle: "We check NPI, DEA#, license, and malpractice with federal registries." },
   { icon: "✉", title: "Confirm Email", subtitle: "Enter the 6-digit code we sent to your email." },
-  { icon: "🏥", title: "Your Specialties", subtitle: "Select all specialties you're qualified to cover." }
+  { icon: "🏥", title: "Your Specialty", subtitle: "Choose the one specialty you cover on call." }
 ];
 
 const HOSPITAL_STEPS = [
@@ -77,9 +77,10 @@ function doctorStepBody(state) {
         </div>`;
     default:
       return `
+        <p class="subtitle" style="text-align:center;margin-bottom:16px">You can change this later with support — one specialty keeps the marketplace focused.</p>
         <div class="chip-grid">
           ${SPECIALTIES.map((sp) => `
-            <button type="button" class="chip ${state.specialties?.includes(sp) ? "active" : ""}" data-specialty="${escapeHtml(sp)}">${escapeHtml(sp)}</button>
+            <button type="button" class="chip ${state.specialties?.[0] === sp ? "active" : ""}" data-specialty="${escapeHtml(sp)}">${escapeHtml(sp)}</button>
           `).join("")}
         </div>`;
   }
@@ -150,7 +151,7 @@ export async function finishDoctorOnboarding(state) {
     deaNumber: state.deaNumber || "",
     licenseNumber: state.licenseNumber,
     licenseState: (state.licenseState || "").toUpperCase(),
-    specialties: state.specialties || [],
+    specialties: state.specialties?.length ? [state.specialties[0]] : [],
     email: state.email || appStore.session?.email,
     verificationStatus: state.verificationStatus || (state.verified ? "pending" : "unverified"),
     verificationFlags: state.verificationFlags || [],

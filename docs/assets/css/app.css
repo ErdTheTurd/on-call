@@ -1062,6 +1062,85 @@ a { color: var(--accent); text-decoration: none; }
   margin-top: 4px;
 }
 
+.stat-badge .stat-hint {
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  margin-top: 6px;
+  opacity: 0.85;
+}
+
+.doctor-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.doctor-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.doctor-card .avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: rgba(79,142,247,0.15);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.doctor-lines { min-width: 0; display: grid; gap: 4px; }
+
+.doctor-name {
+  font-weight: 600;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.doctor-meta {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.pill-solid {
+  background: var(--success);
+  color: #04231a;
+}
+
+.switch-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 /* Verification */
 .verify-banner {
   display: flex;
@@ -1669,19 +1748,47 @@ a { color: var(--accent); text-decoration: none; }
 
 .trade-card { display: grid; gap: 10px; }
 
-.trade-actions { display: flex; gap: 8px; }
+.trade-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .trade-actions button {
   flex: 1;
-  padding: 10px;
+  min-width: 96px;
+  padding: 11px 12px;
   border-radius: 10px;
   border: 0;
   font-weight: 600;
   cursor: pointer;
+  font-size: 14px;
 }
 
-.trade-actions .approve { background: rgba(52,211,153,0.15); color: var(--success); }
-.trade-actions .deny { background: rgba(248,113,113,0.15); color: var(--danger); }
+.trade-actions .approve { background: rgba(52,211,153,0.18); color: var(--success); }
+.trade-actions .deny { background: rgba(248,113,113,0.18); color: var(--danger); }
+.trade-actions .counter {
+  background: rgba(79,142,247,0.18);
+  color: var(--accent);
+  border: 1px solid rgba(79,142,247,0.35);
+}
+
+.trade-counter-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(79,142,247,0.08);
+  border: 1px solid rgba(79,142,247,0.2);
+}
+
+.trade-counter-panel .counter-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.trade-counter-panel input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
 
 .toggle-row {
   display: flex;
