@@ -1401,18 +1401,31 @@ a { color: var(--accent); text-decoration: none; }
   --body: #94a3b8;
   --body-dim: #64748b;
 
+  position: relative;
   min-height: 100dvh;
   background: var(--ink);
   color: #fff;
   font-family: var(--font);
 }
 
-/* Dot grid, faded out below the hero so it reads as texture and not noise. */
-.site .hero,
-.site .site-header {
-  background-image: radial-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+/* Dot grid over the opening screen only, fading out before the stat band.
+   Kept on a layer of its own rather than on the sticky header, which would
+   otherwise carry the dots down over every section as the page scrolls. */
+.site::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 760px;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
   background-size: 24px 24px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
 }
+
+.site .hero,
+.site .stat-band { position: relative; z-index: 1; }
 
 /* Header */
 .site-header {
@@ -1445,7 +1458,7 @@ a { color: var(--accent); text-decoration: none; }
   color: #fff;
 }
 
-.logo svg { width: 24px; height: 24px; color: var(--blue-bright); }
+.logo svg { width: 27px; height: 27px; }
 
 .site-nav { display: flex; gap: 26px; }
 

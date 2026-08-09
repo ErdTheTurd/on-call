@@ -21,10 +21,10 @@ export function renderLanding() {
 function logo() {
   return `
     <span class="logo">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="6.5" cy="17.5" r="2.6" fill="currentColor"/>
-        <path d="M11.5 20A11 11 0 0 0 4 8.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
-        <path d="M17 20A16.5 16.5 0 0 0 4 3.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+      <svg viewBox="0 0 28 28" fill="none" aria-hidden="true">
+        <rect width="28" height="28" rx="8" fill="var(--blue)"/>
+        <path d="M5.5 14.5h3.2l2.1-4.6 3.4 9.2 2.2-4.6h6.1"
+              stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span>On Call</span>
     </span>`;
