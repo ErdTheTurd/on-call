@@ -4,6 +4,7 @@ import { getSupabase, isConfigured, upsertProfile } from "./supabase-client.js";
 import { defaultPolicy, previewPenalty, normalizeCancellationScale, bracketLabel } from "./domain/policy.js";
 import { algorithmRate, computeRate, rateBreakdown, groupPricingComponents } from "./domain/pricing.js";
 import * as sync from "./domain/sync.js";
+import { hydrateLocalProfiles } from "./domain/sync.js";
 
 export const KEYS = {
   accounts: "accounts_v2",
@@ -265,6 +266,23 @@ export async function signInRemote(email, password) {
   const user = data.user;
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   const role = profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : "Doctor";
+
+  // Bring server profiles into localStorage before routing, otherwise a
+  // returning hospital/doctor looks brand-new and lands in onboarding.
+  try {
+    const hydrated = await hydrateLocalProfiles({ userID: user.id, role, email: user.email });
+    if (hydrated?.kind === "hospital") {
+      appStore.saveHospitalProfile(hydrated.profile);
+      ensureDemoShifts(hydrated.profile.id, hydrated.profile.name);
+      seedMockDoctors();
+    } else if (hydrated?.kind === "doctor") {
+      appStore.saveDoctorProfile(hydrated.profile);
+      registerDoctorOnRoster(hydrated.profile);
+    }
+  } catch {
+    /* offline / RLS — route from whatever is already local */
+  }
+
   return { userID: user.id, email: user.email, role };
 }
 

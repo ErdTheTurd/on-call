@@ -4,6 +4,7 @@ import {
   signInRemote, signUpRemote, signOut, appStore, syncEverything, startPeriodicSync,
   normalizeEmail
 } from "./store.js";
+import { hydrateLocalProfiles } from "./domain/sync.js";
 import { renderAuthView, bindAuth } from "./views/auth.js";
 import { renderAdminApp, bindAdmin } from "./views/admin.js";
 import { isAdminUser, fetchApplications, setApplicationStatus } from "./domain/approvals.js";
@@ -143,16 +144,43 @@ async function boot() {
   // A demo runs entirely on local sample data — never sync it to the real project.
   if (isConfigured() && !isDemoSession()) {
     let sessionUser = null;
+    let sessionRole = appStore.savedRole || "Doctor";
     try {
       const supabase = getSupabase();
       const { data } = await supabase.auth.getSession();
       if (data.session?.user) {
         sessionUser = data.session.user;
+        // Prefer the role stored on the server profile over a stale local savedRole.
+        try {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", sessionUser.id)
+            .maybeSingle();
+          if (profile?.role) {
+            sessionRole = profile.role.charAt(0).toUpperCase() + profile.role.slice(1);
+          }
+        } catch { /* keep savedRole */ }
+
         beginSession({
           userID: sessionUser.id,
           email: sessionUser.email,
-          role: appStore.savedRole || "Doctor"
+          role: sessionRole
         });
+
+        // Returning sessions need the same profile hydrate as a fresh sign-in.
+        try {
+          const hydrated = await hydrateLocalProfiles({
+            userID: sessionUser.id,
+            role: sessionRole,
+            email: sessionUser.email
+          });
+          if (hydrated?.kind === "hospital") {
+            appStore.saveHospitalProfile(hydrated.profile);
+          } else if (hydrated?.kind === "doctor") {
+            appStore.saveDoctorProfile(hydrated.profile);
+          }
+        } catch { /* offline / RLS */ }
       }
     } catch { /* local */ }
 
