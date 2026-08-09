@@ -223,15 +223,19 @@ async function afterMutation(fn) {
 export function normalizeEmail(raw) {
   const value = String(raw || "").trim().toLowerCase();
   if (!value) return "";
-  // Allow short investor logins like "erdunn" without typing the full address.
-  if (!value.includes("@")) {
-    const aliases = {
-      erdunn: "erdunn706@gmail.com",
-      admin: "info@erdanimates.shop",
-      info: "info@erdanimates.shop"
-    };
-    return aliases[value] || `${value}@gmail.com`;
-  }
+
+  const aliases = {
+    erdunn: "erdunn706@gmail.com",
+    "erdunn706": "erdunn706@gmail.com",
+    jdunn: "jdunn@eporthospine.com",
+    "jdunn@eporthospine": "jdunn@eporthospine.com",
+    admin: "info@erdanimates.shop",
+    info: "info@erdanimates.shop"
+  };
+  if (aliases[value]) return aliases[value];
+  if (!value.includes("@")) return `${value}@gmail.com`;
+  // Incomplete domains like jdunn@eporthospine → .com
+  if (value.endsWith("@eporthospine")) return `${value}.com`;
   return value;
 }
 
