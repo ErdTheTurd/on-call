@@ -4,6 +4,7 @@ import { getSupabase, isConfigured, upsertProfile } from "./supabase-client.js";
 import { defaultPolicy, previewPenalty, normalizeCancellationScale, bracketLabel } from "./domain/policy.js";
 import { algorithmRate, computeRate, rateBreakdown, groupPricingComponents } from "./domain/pricing.js";
 import * as sync from "./domain/sync.js";
+import { hydrateLocalProfiles } from "./domain/sync.js";
 
 export const KEYS = {
   accounts: "accounts_v2",
@@ -220,6 +221,25 @@ async function afterMutation(fn) {
 
 // ── Auth ─────────────────────────────────────────────────────────────
 
+export function normalizeEmail(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value) return "";
+
+  const aliases = {
+    erdunn: "erdunn706@gmail.com",
+    "erdunn706": "erdunn706@gmail.com",
+    jdunn: "jdunn@eporthospine.com",
+    "jdunn@eporthospine": "jdunn@eporthospine.com",
+    admin: "info@erdanimates.shop",
+    info: "info@erdanimates.shop"
+  };
+  if (aliases[value]) return aliases[value];
+  if (!value.includes("@")) return `${value}@gmail.com`;
+  // Incomplete domains like jdunn@eporthospine → .com
+  if (value.endsWith("@eporthospine")) return `${value}.com`;
+  return value;
+}
+
 export function accountExists(email) {
   return appStore.accounts.some((a) => a.email === email.toLowerCase());
 }
@@ -246,6 +266,23 @@ export async function signInRemote(email, password) {
   const user = data.user;
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   const role = profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : "Doctor";
+
+  // Bring server profiles into localStorage before routing, otherwise a
+  // returning hospital/doctor looks brand-new and lands in onboarding.
+  try {
+    const hydrated = await hydrateLocalProfiles({ userID: user.id, role, email: user.email });
+    if (hydrated?.kind === "hospital") {
+      appStore.saveHospitalProfile(hydrated.profile);
+      ensureDemoShifts(hydrated.profile.id, hydrated.profile.name);
+      seedMockDoctors();
+    } else if (hydrated?.kind === "doctor") {
+      appStore.saveDoctorProfile(hydrated.profile);
+      registerDoctorOnRoster(hydrated.profile);
+    }
+  } catch {
+    /* offline / RLS — route from whatever is already local */
+  }
+
   return { userID: user.id, email: user.email, role };
 }
 

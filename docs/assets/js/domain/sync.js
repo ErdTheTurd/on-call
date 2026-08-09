@@ -98,6 +98,70 @@ export async function upsertHospitalProfile(profile) {
   return { ...profile, id: data.id };
 }
 
+/**
+ * After a remote sign-in, pull the role profile into localStorage so the app
+ * does not dump a returning user back into onboarding.
+ */
+export async function hydrateLocalProfiles({ userID, role, email }) {
+  if (!isConfigured() || !userID) return null;
+  const supabase = getSupabase();
+  const kind = String(role || "").toLowerCase();
+
+  if (kind === "hospital") {
+    const { data, error } = await supabase
+      .from("hospital_profiles")
+      .select("*")
+      .eq("profile_id", userID)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    return {
+      kind: "hospital",
+      profile: {
+        id: data.id,
+        userID: data.profile_id,
+        name: data.name,
+        npi: data.npi,
+        email: data.email || email || "",
+        verificationStatus: data.verification_status || "pending",
+        verificationFlags: data.verification_flags || [],
+        npiRegistryName: data.npi_registry_name || null,
+        priorityPosting: false,
+        autoPay: false
+      }
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("doctor_profiles")
+    .select("*")
+    .eq("profile_id", userID)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    kind: "doctor",
+    profile: {
+      id: data.profile_id,
+      userID: data.profile_id,
+      firstName: data.first_name,
+      lastName: data.last_name,
+      credential: data.credential,
+      npi: data.npi,
+      specialties: data.specialties?.length ? [data.specialties[0]] : [],
+      deaNumber: data.dea_number || "",
+      licenseNumber: data.license_number || "",
+      licenseState: data.license_state || "",
+      email: data.email || email || "",
+      verificationStatus: data.verification_status || "pending",
+      verificationFlags: data.verification_flags || [],
+      npiRegistryName: data.npi_registry_name || null,
+      npiTaxonomy: data.npi_taxonomy || null,
+      documents: []
+    }
+  };
+}
+
 export async function fetchAllShifts(hospitalID) {
   if (!isConfigured()) return [];
   const supabase = getSupabase();

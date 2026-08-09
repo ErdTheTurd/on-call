@@ -199,22 +199,47 @@ struct AuthView: View {
     }
 
     #if DEBUG
-    private let devEmail    = "erdunn706@gmail.com"
-    private let devPassword = "123467890"
+    /// Short aliases for investor demos. Real auth still goes through Supabase.
+    private let demoAccounts: [String: (email: String, role: UserRole)] = [
+        "erdunn": ("erdunn706@gmail.com", .hospital),
+        "erdunn706@gmail.com": ("erdunn706@gmail.com", .hospital),
+        "jdunn": ("jdunn@eporthospine.com", .doctor),
+        "jdunn@eporthospine": ("jdunn@eporthospine.com", .doctor),
+        "jdunn@eporthospine.com": ("jdunn@eporthospine.com", .doctor)
+    ]
+    private let demoPassword = "1234567890"
     #endif
+
+    private func normalizeEmail(_ raw: String) -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        #if DEBUG
+        if let mapped = demoAccounts[value]?.email { return mapped }
+        #endif
+        if value == "erdunn" { return "erdunn706@gmail.com" }
+        if value == "jdunn" || value == "jdunn@eporthospine" { return "jdunn@eporthospine.com" }
+        if value.hasSuffix("@eporthospine") { return value + ".com" }
+        return value
+    }
 
     private func handleSubmit() {
         errorMessage = nil
-        let trimmedEmail = email.trimmingCharacters(in: .whitespaces).lowercased()
+        let trimmedEmail = normalizeEmail(email)
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
         #if DEBUG
-        if trimmedEmail == devEmail && password == devPassword {
+        // Keep the old role-picker only for the exact demo password on known accounts.
+        if let demo = demoAccounts[trimmedEmail], password == demoPassword,
+           !SupabaseAuthService.shared.isConfigured {
             isLoading = true
             Task {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                await MainActor.run { isLoading = false; showDevRolePicker = true }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                await MainActor.run {
+                    isLoading = false
+                    SessionStore.shared.beginSession(userID: UUID(), email: demo.email, role: demo.role)
+                    let hasProfile = demo.role == .doctor ? DoctorProfile.load() != nil : HospitalProfile.load() != nil
+                    if hasProfile { auth.completeOnboarding(role: demo.role) } else { auth.selectRole(demo.role) }
+                }
             }
             return
         }

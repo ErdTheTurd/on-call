@@ -1,8 +1,10 @@
 import { isConfigured, getSupabase } from "./supabase-client.js";
 import {
   authState, beginSession, registerAccount, signInLocal,
-  signInRemote, signUpRemote, signOut, appStore, syncEverything, startPeriodicSync
+  signInRemote, signUpRemote, signOut, appStore, syncEverything, startPeriodicSync,
+  normalizeEmail
 } from "./store.js";
+import { hydrateLocalProfiles } from "./domain/sync.js";
 import { renderAuthView, bindAuth } from "./views/auth.js";
 import { renderAdminApp, bindAdmin } from "./views/admin.js";
 import { isAdminUser, fetchApplications, setApplicationStatus } from "./domain/approvals.js";
@@ -142,16 +144,43 @@ async function boot() {
   // A demo runs entirely on local sample data — never sync it to the real project.
   if (isConfigured() && !isDemoSession()) {
     let sessionUser = null;
+    let sessionRole = appStore.savedRole || "Doctor";
     try {
       const supabase = getSupabase();
       const { data } = await supabase.auth.getSession();
       if (data.session?.user) {
         sessionUser = data.session.user;
+        // Prefer the role stored on the server profile over a stale local savedRole.
+        try {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", sessionUser.id)
+            .maybeSingle();
+          if (profile?.role) {
+            sessionRole = profile.role.charAt(0).toUpperCase() + profile.role.slice(1);
+          }
+        } catch { /* keep savedRole */ }
+
         beginSession({
           userID: sessionUser.id,
           email: sessionUser.email,
-          role: appStore.savedRole || "Doctor"
+          role: sessionRole
         });
+
+        // Returning sessions need the same profile hydrate as a fresh sign-in.
+        try {
+          const hydrated = await hydrateLocalProfiles({
+            userID: sessionUser.id,
+            role: sessionRole,
+            email: sessionUser.email
+          });
+          if (hydrated?.kind === "hospital") {
+            appStore.saveHospitalProfile(hydrated.profile);
+          } else if (hydrated?.kind === "doctor") {
+            appStore.saveDoctorProfile(hydrated.profile);
+          }
+        } catch { /* offline / RLS */ }
       }
     } catch { /* local */ }
 
@@ -294,36 +323,37 @@ function bindDemoRibbon(root) {
 
 async function handleAuthSubmit({ email, password, confirm }) {
   state.error = null;
-  if (!email) { update({ error: "Please enter your email." }); return; }
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) { update({ error: "Please enter your email." }); return; }
   if (password.length < 6) { update({ error: "Password must be at least 6 characters." }); return; }
   if (state.authMode === "signup" && password !== confirm) {
     update({ error: "Passwords don't match." }); return;
   }
 
-  update({ loading: true, email });
+  update({ loading: true, email: normalizedEmail });
 
   try {
     if (state.authMode === "signup") {
       if (isConfigured()) {
-        const res = await signUpRemote(email, password, state.role);
+        const res = await signUpRemote(normalizedEmail, password, state.role);
         beginSession({ userID: res.userID, email: res.email, role: state.role });
       } else {
-        if (signInLocal(email, password)) {
+        if (signInLocal(normalizedEmail, password)) {
           update({ error: "Account already exists. Sign in instead.", loading: false });
           return;
         }
-        const userID = registerAccount(email, password, state.role);
-        beginSession({ userID, email, role: state.role });
+        const userID = registerAccount(normalizedEmail, password, state.role);
+        beginSession({ userID, email: normalizedEmail, role: state.role });
       }
       state.route = "onboarding";
-      state.onb = { step: 0, role: state.role, specialties: [], verified: false, codeVerified: false, email };
+      state.onb = { step: 0, role: state.role, specialties: [], verified: false, codeVerified: false, email: normalizedEmail };
       update({ loading: false });
       return;
     }
 
     if (isConfigured()) {
       try {
-        const res = await signInRemote(email, password);
+        const res = await signInRemote(normalizedEmail, password);
         beginSession({ userID: res.userID, email: res.email, role: res.role });
         if (await enterAdminIfPermitted(res.userID, res.email)) return;
         const auth = authState();
@@ -331,18 +361,20 @@ async function handleAuthSubmit({ email, password, confirm }) {
         if (auth.kind === "needsOnboarding") state.onb.role = res.role;
         update({ loading: false });
         return;
-      } catch (net) {
-        /* fall through to local */
+      } catch (err) {
+        // When Supabase is configured, never invent a local account — show the real reason.
+        const message = err?.message || "Could not sign in.";
+        const friendly = /invalid login credentials/i.test(message)
+          ? "Wrong email or password. Try erdunn706@gmail.com, or create an account."
+          : message;
+        update({ error: friendly, loading: false });
+        return;
       }
     }
 
-    let acct = signInLocal(email, password);
+    let acct = signInLocal(normalizedEmail, password);
     if (!acct) {
-      const userID = registerAccount(email, password, "Doctor");
-      beginSession({ userID, email, role: "Doctor" });
-      state.route = "onboarding";
-      state.onb = { step: 0, role: "Doctor", specialties: [], email };
-      update({ loading: false });
+      update({ error: "Wrong email or password. Create an account if you are new.", loading: false });
       return;
     }
     beginSession({ userID: acct.id, email: acct.email, role: acct.role });
