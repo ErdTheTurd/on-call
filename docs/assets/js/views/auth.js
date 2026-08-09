@@ -29,7 +29,7 @@ export function renderAuthView(state, handlers) {
         <form class="auth-fields" id="auth-form">
           <label class="auth-field">
             <span class="field-icon">${icon("envelope")}</span>
-            <input name="email" type="email" placeholder="Email address" autocomplete="email" required value="${escapeHtml(state.email || "")}" />
+            <input name="email" type="text" inputmode="email" placeholder="Email or erdunn" autocomplete="username" required value="${escapeHtml(state.email || "")}" />
           </label>
           <label class="auth-field">
             <span class="field-icon">${icon("lock")}</span>

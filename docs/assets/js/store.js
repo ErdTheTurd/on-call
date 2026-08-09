@@ -220,6 +220,21 @@ async function afterMutation(fn) {
 
 // ── Auth ─────────────────────────────────────────────────────────────
 
+export function normalizeEmail(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value) return "";
+  // Allow short investor logins like "erdunn" without typing the full address.
+  if (!value.includes("@")) {
+    const aliases = {
+      erdunn: "erdunn706@gmail.com",
+      admin: "info@erdanimates.shop",
+      info: "info@erdanimates.shop"
+    };
+    return aliases[value] || `${value}@gmail.com`;
+  }
+  return value;
+}
+
 export function accountExists(email) {
   return appStore.accounts.some((a) => a.email === email.toLowerCase());
 }
