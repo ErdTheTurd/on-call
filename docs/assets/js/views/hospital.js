@@ -2,6 +2,20 @@ import { escapeHtml, SPECIALTIES, startOfDay, formatShiftDate } from "../brand.j
 import {
   navBar, tabBar, shiftRow, pendingBanner, sectionHeader, emptyState, sheet, verificationBadge, icon
 } from "../components.js";
+
+function currency(n) {
+  const v = Math.round(Number(n) || 0);
+  return `$${v.toLocaleString()}`;
+}
+
+function statTile({ value, label, hint, attrs = "" }) {
+  return `
+    <button type="button" class="stat-badge" ${attrs}>
+      <div class="value">${escapeHtml(String(value))}</div>
+      <div class="label">${escapeHtml(label)}</div>
+      ${hint ? `<div class="stat-hint">${escapeHtml(hint)}</div>` : ""}
+    </button>`;
+}
 import { renderCalendar, hospitalDayData, addMonths } from "../calendar.js";
 import { hospitalDaySummary, hospitalAnalytics, billingSummary } from "../domain/insights.js";
 import { bracketLabel } from "../domain/policy.js";
@@ -79,7 +93,7 @@ export function renderHospitalApp(state) {
       ${tab === "alter" ? renderAlterShifts(state, profile) : ""}
       ${tab === "doctors" ? renderDoctors(state, profile) : ""}
       ${tabBar([
-        { id: "dashboard", label: "Dashboard", icon: "dashboard" },
+        { id: "dashboard", label: "Home", icon: "dashboard" },
         { id: "alter", label: "Alter Shifts", icon: "calendar" },
         { id: "doctors", label: "Doctors", icon: "doctors" }
       ], tab)}
@@ -92,43 +106,47 @@ function renderHospitalDashboard(state, profile) {
   const month = state.calendarMonth ? new Date(state.calendarMonth) : new Date();
   const days = profile ? hospitalDayData(month, profile.id) : [];
   const selected = state.selectedDate ? new Date(state.selectedDate) : null;
-  const summary = selected && profile ? hospitalDaySummary(selected, profile.id) : null;
+  const insightDate = selected || startOfDay(new Date());
+  const summary = profile ? hospitalDaySummary(insightDate, profile.id) : null;
+  const openDays = days.filter((d) => d.level !== "all" && d.level !== null && !d.isPast).length;
 
   return `
-    ${navBar(profile?.name || "Dashboard")}
+    ${navBar(profile?.name || "Home")}
     <main class="main-scroll stack">
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
+      <section class="card stack">
+        ${sectionHeader("At a glance")}
+        <div class="stat-row">
+          ${statTile({
+            value: `${profile ? fillRatePercent(profile.id) : 0}%`,
+            label: "Fill rate",
+            hint: "Last 30 days",
+            attrs: 'data-open-sheet="analytics"'
+          })}
+          ${statTile({
+            value: autoApprovedCount(),
+            label: "Auto‑approved",
+            hint: "Ready doctors",
+            attrs: 'data-nav-tab="doctors"'
+          })}
+          ${statTile({
+            value: openDays,
+            label: "Open days",
+            hint: "This month",
+            attrs: 'data-nav-tab="alter"'
+          })}
+        </div>
+      </section>
       <div class="content-grid two-col">
         <div class="stack">
           ${profile ? renderCalendar({ month, days, selectedDate: selected, mode: "hospital" }) : ""}
-          ${summary ? renderDayInsight(summary, profile, selected) : ""}
         </div>
         <div class="stack">
-          <section class="card stat-row">
-            <button type="button" class="stat-badge" data-open-sheet="openshifts">
-              <div class="value">${profile ? openShiftCount(profile.id) : 0}</div>
-              <div class="label">Open\nShifts</div>
-            </button>
-            <button type="button" class="stat-badge" data-open-sheet="analytics">
-              <div class="value">${profile ? fillRatePercent(profile.id) : 0}%</div>
-              <div class="label">Fill Rate\n30 days</div>
-            </button>
-            <button type="button" class="stat-badge" data-nav-tab="doctors">
-              <div class="value">${autoApprovedCount()}</div>
-              <div class="label">Auto‑Approved\nDoctors</div>
-            </button>
-          </section>
-          <section class="card stack">
-            ${sectionHeader("Quick actions")}
-            <button type="button" class="btn-secondary" data-open-sheet="schedule">Schedule admin</button>
-            <button type="button" class="btn-secondary" data-nav-tab="alter">Alter shift rates</button>
-            <button type="button" class="btn-secondary" data-open-sheet="policy">Scheduling policy</button>
-            <button type="button" class="btn-secondary" data-open-sheet="analytics">Analytics</button>
-            <button type="button" class="btn-secondary" data-open-sheet="billing">Billing</button>
-          </section>
+          ${summary ? renderDayInsight(summary, profile, insightDate) : ""}
           ${summary && summary.pendingRequestCount ? `
             <section class="card stack">
               ${sectionHeader(`Pending tokens (${summary.pendingRequestCount})`)}
+              <p class="subtitle">Doctors are waiting on a decision for this day.</p>
               <button type="button" class="btn-primary" data-open-sheet="schedule">Review in Schedule Admin</button>
             </section>` : ""}
         </div>
@@ -156,7 +174,7 @@ function renderDayInsight(summary, profile, date) {
           ${summary.isBlocked ? "Unavailable" : "Mark unavailable"}
         </button>
       </div>
-      ${summary.totalPaid ? `<div class="subtitle">Committed payouts this day: <strong style="color:var(--accent)">$${Math.round(summary.totalPaid)}</strong></div>` : ""}
+      ${summary.totalPaid ? `<div class="subtitle">Committed payouts this day: <strong style="color:var(--accent)">${currency(summary.totalPaid)}</strong></div>` : ""}
       <div class="specialty-day-list">
         ${rows.filter((r) => r.hasShiftPosted || r.tokenRequests.length || r.proposedRate != null).slice(0, 12).map((r) => `
           <div class="specialty-day-row">
@@ -164,10 +182,10 @@ function renderDayInsight(summary, profile, date) {
               <div style="font-weight:600">${escapeHtml(r.specialty)}</div>
               <div class="subtitle">
                 ${r.isFilled
-                  ? `On call: ${escapeHtml(r.onCallDoctorName || "Doctor")}${r.onCallCredential ? `, ${escapeHtml(r.onCallCredential)}` : ""} · $${Math.round(r.paymentAmount)}${escapeHtml(r.rateUnitLabel)}`
+                  ? `On call: ${escapeHtml(r.onCallDoctorName || "Doctor")}${r.onCallCredential ? `, ${escapeHtml(r.onCallCredential)}` : ""} · ${currency(r.paymentAmount)}${escapeHtml(r.rateUnitLabel)}`
                   : r.hasShiftPosted
-                    ? `Open · $${Math.round(r.goingRate || 0)}${escapeHtml(r.rateUnitLabel)}`
-                    : `Proposed · $${Math.round(r.proposedRate || 0)}${escapeHtml(r.rateUnitLabel)}${r.isProposedRateCustom ? " (custom)" : ""}`}
+                    ? `Open · ${currency(r.goingRate || 0)}${escapeHtml(r.rateUnitLabel)}`
+                    : `Proposed · ${currency(r.proposedRate || 0)}${escapeHtml(r.rateUnitLabel)}${r.isProposedRateCustom ? " (custom)" : ""}`}
               </div>
               ${r.tokenRequests.filter((t) => t.status === "pending").map((t) => `
                 <div class="token-mini">
@@ -340,14 +358,20 @@ function renderDoctors(state, profile) {
         </div>
       </section>
       ${filtered.length ? `<div class="roster-grid">${filtered.map((d) => `
-        <section class="card" style="display:flex;align-items:center;gap:14px">
-          <button type="button" class="btn-ghost" style="flex:1;min-width:0;text-align:left;padding:0" data-doctor-detail="${d.id}">
-            <div style="font-weight:600;font-size:1.05rem">${escapeHtml(d.name)}</div>
-            <div class="subtitle">${escapeHtml(d.specialty)} · NPI ${escapeHtml(d.npi)}</div>
-            ${verificationBadge(d.verificationStatus, true)}
+        <section class="card doctor-card">
+          <button type="button" class="doctor-identity" data-doctor-detail="${d.id}">
+            <div class="avatar">${escapeHtml((d.name || "?").replace(/^Dr\.\s*/, "").charAt(0) || "?")}</div>
+            <div class="doctor-lines">
+              <div class="doctor-name">
+                ${escapeHtml(d.name)}
+                ${d.isAutoApproved ? `<span class="pill pill-solid">AUTO</span>` : ""}
+              </div>
+              <div class="doctor-meta">${escapeHtml(d.specialty)} · NPI ${escapeHtml(d.npi)}</div>
+              ${verificationBadge(d.verificationStatus, true)}
+            </div>
           </button>
-          <label class="toggle-row" style="flex-direction:column;align-items:flex-end;gap:4px">
-            <span style="font-size:11px" class="tertiary">Auto-approve</span>
+          <label class="switch-row">
+            <span class="tertiary">Auto-approve</span>
             <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />
           </label>
         </section>`).join("")}</div>` : emptyState("Doctor roster", "No doctors match filters.", "doctors")}

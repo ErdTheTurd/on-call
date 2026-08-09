@@ -215,9 +215,8 @@ function render() {
       onNext: handleOnboardingNext,
       onVerify: handleNpiVerify,
       onToggleSpecialty: (sp) => {
-        const set = new Set(state.onb.specialties || []);
-        set.has(sp) ? set.delete(sp) : set.add(sp);
-        update({ onb: { ...state.onb, specialties: [...set] } });
+        const current = state.onb.specialties?.[0];
+        update({ onb: { ...state.onb, specialties: current === sp ? [] : [sp] } });
       }
     });
     root.querySelectorAll("[data-field]").forEach((el) => {
@@ -426,7 +425,7 @@ function handleOnboardingNext() {
       update({ onb: { ...state.onb, error: "Incorrect or expired code. Try 123456 in demo mode." } }); return;
     }
     if (state.onb.step === 3 && !(state.onb.specialties?.length)) {
-      update({ onb: { ...state.onb, error: "Select at least one specialty." } }); return;
+      update({ onb: { ...state.onb, error: "Choose your specialty." } }); return;
     }
   } else {
     if (state.onb.step === 0 && (!state.onb.name?.trim() || !state.onb.npi)) {

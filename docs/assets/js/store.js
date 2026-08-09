@@ -99,8 +99,24 @@ export const appStore = {
   get accounts() { return read(KEYS.accounts, []); },
   saveAccounts(list) { write(KEYS.accounts, list); },
 
-  get doctorProfile() { return read(KEYS.doctorProfile, null); },
-  saveDoctorProfile(p) { write(KEYS.doctorProfile, p); this.emit(); },
+  get doctorProfile() {
+    const p = read(KEYS.doctorProfile, null);
+    if (!p) return null;
+    // One specialty per doctor — keep the first if older profiles stored several.
+    if (Array.isArray(p.specialties) && p.specialties.length > 1) {
+      const trimmed = { ...p, specialties: [p.specialties[0]] };
+      write(KEYS.doctorProfile, trimmed);
+      return trimmed;
+    }
+    return p;
+  },
+  saveDoctorProfile(p) {
+    const next = p && Array.isArray(p.specialties) && p.specialties.length
+      ? { ...p, specialties: [p.specialties[0]] }
+      : p;
+    write(KEYS.doctorProfile, next);
+    this.emit();
+  },
 
   get hospitalProfile() { return read(KEYS.hospitalProfile, null); },
   saveHospitalProfile(p) { write(KEYS.hospitalProfile, p); this.emit(); },
@@ -548,15 +564,14 @@ export function findShiftForDay(hospitalID, specialty, date) {
 
 export function openShifts(profile) {
   const prefs = appStore.doctorPrefs;
+  const mySpecialty = profile?.specialties?.[0];
   return appStore.shifts
     .filter((s) => !isPastShift(s) && !isShiftFilled(s.id))
     .filter((s) => !isDayUnavailable(s.start, s.hospitalID))
     .filter((s) => {
       if (prefs.hiddenHospitalIDs.includes(s.hospitalID)) return false;
-      if (prefs.hiddenSpecialties.includes(s.specialty)) return false;
-      if (prefs.showOnlyMySpecialties && profile?.specialties?.length) {
-        return profile.specialties.includes(s.specialty);
-      }
+      // Doctors only ever see their one assigned specialty.
+      if (mySpecialty) return s.specialty === mySpecialty;
       return true;
     });
 }
@@ -878,8 +893,41 @@ export async function respondTrade(trade, accept) {
   const trades = appStore.trades;
   trades.incoming = (trades.incoming || []).filter((t) => t.id !== trade.id);
   appStore.saveTrades(trades);
-
   return { ok: true, penalty };
+}
+
+/** Counter an incoming trade by changing the compensation asked. */
+export async function counterTrade(trade, compensationAmount) {
+  const amount = Math.max(0, Math.min(1000, Math.round(Number(compensationAmount) || 0)));
+  const trades = appStore.trades;
+  const incoming = (trades.incoming || []).map((t) =>
+    t.id === trade.id
+      ? {
+          ...t,
+          compensationAmount: amount,
+          state: "countered",
+          counteredAt: new Date().toISOString()
+        }
+      : t
+  );
+  // After countering, it leaves the inbox — the other party sees the revised ask.
+  trades.incoming = incoming.filter((t) => t.id !== trade.id);
+  trades.outgoing = [
+    ...(trades.outgoing || []),
+    {
+      ...trade,
+      compensationAmount: amount,
+      state: "countered",
+      counteredAt: new Date().toISOString(),
+      fromDoctorID: trade.toDoctorID,
+      toDoctorID: trade.fromDoctorID,
+      fromDoctorName: trade.toDoctorName,
+      toDoctorName: trade.fromDoctorName
+    }
+  ];
+  appStore.saveTrades(trades);
+  await afterMutation(() => sync.respondTrade?.(trade.id, false));
+  return { ok: true, amount };
 }
 
 function recordPenalty(entry) {

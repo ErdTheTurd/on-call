@@ -73,7 +73,7 @@ function demoDoctorProfile() {
     deaNumber: "",
     licenseNumber: "A48219",
     licenseState: "CA",
-    specialties: ["Emergency Medicine", "Internal Medicine"],
+    specialties: ["Emergency Medicine"],
     email: "m.ellison@riversidegeneral.org",
     verificationStatus: "verified",
     verificationFlags: [],
