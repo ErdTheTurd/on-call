@@ -54,10 +54,12 @@ function migrateLegacyKeys() {
 
 migrateLegacyKeys();
 
+export const DEFAULT_DAILY_TOKENS = 3;
+
 function defaultTokens() {
   return {
-    tokensRemaining: 3,
-    dailyLimit: 3,
+    tokensRemaining: DEFAULT_DAILY_TOKENS,
+    dailyLimit: DEFAULT_DAILY_TOKENS,
     lastResetDate: startOfDay(new Date()).toISOString(),
     requestedDays: []
   };
@@ -78,6 +80,21 @@ function refreshTokenDailyReset(tokens) {
   const today = startOfDay(new Date()).toISOString();
   if (tokens.lastResetDate && sameDay(tokens.lastResetDate, today)) return tokens;
   return { ...tokens, tokensRemaining: tokens.dailyLimit, lastResetDate: today };
+}
+
+/**
+ * Applies a change to the doctor's allowance without refunding or revoking
+ * tokens they already spent today: what they have left is the new allowance
+ * minus today's usage, floored at zero.
+ */
+function applyTokenLimit(tokens, limit) {
+  if (!Number.isFinite(limit) || limit === tokens.dailyLimit) return tokens;
+  const usedToday = Math.max(0, (tokens.dailyLimit ?? limit) - (tokens.tokensRemaining ?? 0));
+  return {
+    ...tokens,
+    dailyLimit: limit,
+    tokensRemaining: Math.max(0, limit - usedToday)
+  };
 }
 
 export const appStore = {
@@ -115,7 +132,11 @@ export const appStore = {
   saveAssignments(list) { write(KEYS.assignments, { shifts: list }); this.emit(); },
 
   get tokens() {
-    const t = refreshTokenDailyReset(read(KEYS.tokens, defaultTokens()));
+    const stored = refreshTokenDailyReset(read(KEYS.tokens, defaultTokens()));
+    // The hospital owns the allowance, so pick it up here rather than waiting
+    // for the next daily reset. Written without emitting: this getter runs
+    // during render, and emitting would loop.
+    const t = applyTokenLimit(stored, effectiveDailyTokenLimit(this.doctorProfile?.id));
     write(KEYS.tokens, t);
     return t;
   },
@@ -283,6 +304,49 @@ export function getPolicy(hospitalID) {
     return { ...defaultPolicy(), ...hp.schedulingPolicy };
   }
   return defaultPolicy();
+}
+
+// ── Daily token allowances ───────────────────────────────────────────
+
+/** What one hospital allows a given doctor per day. */
+export function tokenLimitForDoctor(hospitalID, doctorID) {
+  const policy = getPolicy(hospitalID);
+  const override = policy.doctorTokenLimits?.[doctorID];
+  if (Number.isFinite(override)) return override;
+  const fallback = policy.defaultDailyTokens;
+  return Number.isFinite(fallback) ? fallback : DEFAULT_DAILY_TOKENS;
+}
+
+/**
+ * A doctor holds one pool of tokens but may sit on several rosters, so the
+ * most generous hospital wins. Anything else would let one hospital throttle
+ * a doctor's requests to another.
+ */
+export function effectiveDailyTokenLimit(doctorID) {
+  if (!doctorID) return DEFAULT_DAILY_TOKENS;
+  const policies = appStore.policies || {};
+  let limit = null;
+
+  for (const [hospitalID, stored] of Object.entries(policies)) {
+    if (!stored) continue;
+    const candidate = tokenLimitForDoctor(hospitalID, doctorID);
+    if (!Number.isFinite(candidate)) continue;
+    limit = limit == null ? candidate : Math.max(limit, candidate);
+  }
+
+  return limit == null ? DEFAULT_DAILY_TOKENS : limit;
+}
+
+/** Sets one doctor's allowance at one hospital. Passing null clears it. */
+export async function setDoctorTokenLimit(hospitalID, doctorID, limit) {
+  const policy = { ...getPolicy(hospitalID) };
+  const limits = { ...(policy.doctorTokenLimits || {}) };
+
+  if (limit == null) delete limits[doctorID];
+  else limits[doctorID] = Math.max(0, Math.min(20, Math.round(limit)));
+
+  policy.doctorTokenLimits = limits;
+  await savePolicy(hospitalID, policy);
 }
 
 export async function savePolicy(hospitalID, policy) {
