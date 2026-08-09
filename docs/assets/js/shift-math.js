@@ -66,13 +66,23 @@ export function urgencyColor(tier) {
   }
 }
 
+/** Icon name for `icons.js`, matching the SF Symbol the iOS shift row uses. */
 export function urgencyIcon(tier) {
   switch (tier) {
-    case "critical": return "⚡";
-    case "high": return "🔥";
-    case "moderate": return "⏱";
-    case "low": return "◦";
-    default: return "·";
+    case "critical": return "bolt";
+    case "high": return "flame";
+    case "moderate": return "clock";
+    case "low": return "crossCase";
+    default: return "clock";
+  }
+}
+
+/** Only the two most urgent tiers earn a badge, so the label carries weight. */
+export function urgencyBadge(tier) {
+  switch (tier) {
+    case "critical": return "URGENT";
+    case "high": return "HIGH PAY";
+    default: return null;
   }
 }
 

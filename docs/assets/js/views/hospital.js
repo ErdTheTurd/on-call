@@ -1,6 +1,7 @@
 import { escapeHtml, SPECIALTIES, startOfDay, formatShiftDate } from "../brand.js";
 import {
-  navBar, tabBar, shiftRow, pendingBanner, sectionHeader, emptyState, sheet, verificationBadge, icon
+  navBar, tabBar, shiftRow, pendingBanner, sectionHeader, emptyState, sheet,
+  verificationBadge, icon, statBadge, adBanner, currency
 } from "../components.js";
 import { renderCalendar, hospitalDayData, addMonths } from "../calendar.js";
 import { hospitalDaySummary, hospitalAnalytics, billingSummary } from "../domain/insights.js";
@@ -80,7 +81,7 @@ export function renderHospitalApp(state) {
       ${tab === "alter" ? renderAlterShifts(state, profile) : ""}
       ${tab === "doctors" ? renderDoctors(state, profile) : ""}
       ${tabBar([
-        { id: "dashboard", label: "Dashboard", icon: "dashboard" },
+        { id: "dashboard", label: "Home", icon: "dashboard" },
         { id: "alter", label: "Alter Shifts", icon: "calendar" },
         { id: "doctors", label: "Doctors", icon: "doctors" }
       ], tab)}
@@ -95,43 +96,61 @@ function renderHospitalDashboard(state, profile) {
   const selected = state.selectedDate ? new Date(state.selectedDate) : null;
   const summary = selected && profile ? hospitalDaySummary(selected, profile.id) : null;
 
+  const focusOpen = Boolean(state.focusOpenDays);
+  const openDayCount = days.filter((d) => d.level !== "all" && d.level !== null && !d.isPast).length;
+
+  // The detail panel would otherwise sit empty until a day is picked, so it
+  // opens on today — the day a scheduler cares about most.
+  const insightDate = selected || startOfDay(new Date());
+  const insight = summary || (profile ? hospitalDaySummary(insightDate, profile.id) : null);
+
   return `
     ${navBar(profile?.name || "Dashboard")}
     <main class="main-scroll stack">
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
+      <section class="card stack">
+        ${sectionHeader("At a glance")}
+        <div class="stat-row">
+          ${statBadge({
+            value: `${profile ? fillRatePercent(profile.id) : 0}%`,
+            label: "Fill rate",
+            hint: "Last 30 days",
+            attrs: 'data-open-sheet="analytics"'
+          })}
+          ${statBadge({
+            value: autoApprovedCount(),
+            label: "Auto‑approved",
+            hint: "Ready doctors",
+            attrs: 'data-nav-tab="doctors"'
+          })}
+          ${statBadge({
+            value: openDayCount,
+            label: "Open days",
+            hint: focusOpen ? "In focus" : "This month",
+            attrs: 'data-nav-tab="alter"'
+          })}
+        </div>
+      </section>
       <div class="content-grid two-col">
         <div class="stack">
-          ${profile ? renderCalendar({ month, days, selectedDate: selected, mode: "hospital" }) : ""}
-          ${summary ? renderDayInsight(summary, profile, selected) : ""}
+          ${profile ? renderCalendar({
+            month, days, selectedDate: selected, mode: "hospital", focusOpen,
+            title: "Coverage calendar",
+            subtitle: focusOpen
+              ? "Open days only — filled coverage pops away so gaps stay obvious."
+              : "See what's filled, then open a day to set rates or approve coverage.",
+            hint: focusOpen ? "Open coverage gaps" : "Select a day for details"
+          }) : ""}
         </div>
         <div class="stack">
-          <section class="card stat-row">
-            <button type="button" class="stat-badge" data-open-sheet="openshifts">
-              <div class="value">${profile ? openShiftCount(profile.id) : 0}</div>
-              <div class="label">Open\nShifts</div>
-            </button>
-            <button type="button" class="stat-badge" data-open-sheet="analytics">
-              <div class="value">${profile ? fillRatePercent(profile.id) : 0}%</div>
-              <div class="label">Fill Rate\n30 days</div>
-            </button>
-            <button type="button" class="stat-badge" data-nav-tab="doctors">
-              <div class="value">${autoApprovedCount()}</div>
-              <div class="label">Auto‑Approved\nDoctors</div>
-            </button>
-          </section>
-          <section class="card stack">
-            ${sectionHeader("Quick actions")}
-            <button type="button" class="btn-secondary" data-open-sheet="schedule">Schedule admin</button>
-            <button type="button" class="btn-secondary" data-nav-tab="alter">Alter shift rates</button>
-            <button type="button" class="btn-secondary" data-open-sheet="policy">Scheduling policy</button>
-            <button type="button" class="btn-secondary" data-open-sheet="analytics">Analytics</button>
-            <button type="button" class="btn-secondary" data-open-sheet="billing">Billing</button>
-          </section>
-          ${summary && summary.pendingRequestCount ? `
+          ${insight ? renderDayInsight(insight, profile, insightDate) : ""}
+          ${insight && insight.pendingRequestCount ? `
             <section class="card stack">
-              ${sectionHeader(`Pending tokens (${summary.pendingRequestCount})`)}
+              ${sectionHeader(`Pending tokens (${insight.pendingRequestCount})`)}
+              <p class="subtitle">Doctors are waiting on a decision for this day.</p>
               <button type="button" class="btn-primary" data-open-sheet="schedule">Review in Schedule Admin</button>
             </section>` : ""}
+          ${adBanner("dashboard")}
         </div>
       </div>
     </main>`;
@@ -157,7 +176,7 @@ function renderDayInsight(summary, profile, date) {
           ${summary.isBlocked ? "Unavailable" : "Mark unavailable"}
         </button>
       </div>
-      ${summary.totalPaid ? `<div class="subtitle">Committed payouts this day: <strong style="color:var(--accent)">$${Math.round(summary.totalPaid)}</strong></div>` : ""}
+      ${summary.totalPaid ? `<div class="subtitle">Committed payouts this day: <strong style="color:var(--accent)">${currency(summary.totalPaid)}</strong></div>` : ""}
       <div class="specialty-day-list">
         ${rows.filter((r) => r.hasShiftPosted || r.tokenRequests.length || r.proposedRate != null).slice(0, 12).map((r) => `
           <div class="specialty-day-row">
@@ -165,10 +184,10 @@ function renderDayInsight(summary, profile, date) {
               <div style="font-weight:600">${escapeHtml(r.specialty)}</div>
               <div class="subtitle">
                 ${r.isFilled
-                  ? `On call: ${escapeHtml(r.onCallDoctorName || "Doctor")}${r.onCallCredential ? `, ${escapeHtml(r.onCallCredential)}` : ""} · $${Math.round(r.paymentAmount)}${escapeHtml(r.rateUnitLabel)}`
+                  ? `On call: ${escapeHtml(r.onCallDoctorName || "Doctor")}${r.onCallCredential ? `, ${escapeHtml(r.onCallCredential)}` : ""} · ${currency(r.paymentAmount)}${escapeHtml(r.rateUnitLabel)}`
                   : r.hasShiftPosted
-                    ? `Open · $${Math.round(r.goingRate || 0)}${escapeHtml(r.rateUnitLabel)}`
-                    : `Proposed · $${Math.round(r.proposedRate || 0)}${escapeHtml(r.rateUnitLabel)}${r.isProposedRateCustom ? " (custom)" : ""}`}
+                    ? `Open · ${currency(r.goingRate || 0)}${escapeHtml(r.rateUnitLabel)}`
+                    : `Proposed · ${currency(r.proposedRate || 0)}${escapeHtml(r.rateUnitLabel)}${r.isProposedRateCustom ? " (custom)" : ""}`}
               </div>
               ${r.tokenRequests.filter((t) => t.status === "pending").map((t) => `
                 <div class="token-mini">
@@ -249,14 +268,14 @@ function renderAlterShifts(state, profile) {
 
           <div class="alter-rate-row">
             <span class="subtitle">${useAlgorithm ? "Algorithm rate floor" : "Manual rate floor"}</span>
-            <strong class="alter-rate-value">$${Math.round(rateFloor)}${unit}</strong>
+            <strong class="alter-rate-value">${currency(rateFloor)}${unit}</strong>
           </div>
 
           ${useAlgorithm ? `
             <p class="tertiary" style="font-size:12px;margin:0">
               ${breakdown.variableCount || breakdown.components?.length || 0} pricing variables · ${Math.round((breakdown.confidence || 0) * 100)}% confidence
             </p>
-            ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px;margin:0">Floor capped at base rate: $${Math.round(baseRate)}${unit}</p>` : ""}
+            ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px;margin:0">Floor capped at base rate: ${currency(baseRate)}${unit}</p>` : ""}
             <button type="button" class="btn-ghost" style="justify-self:start;padding-left:0" data-recalc-rate>↻ Recalculate</button>
 
             <div class="algo-breakdown">
@@ -278,7 +297,7 @@ function renderAlterShifts(state, profile) {
                 <input type="number" data-alter-floor value="${Math.round(rateFloor)}" step="${isHourly ? 5 : 50}" min="${minRate}" max="${isHourly ? 400 : 5000}" />
                 <button type="button" class="icon-btn" data-step-floor="1">+</button>
               </div>
-              ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px">Minimum: $${Math.round(minRate)}${unit} (specialty base rate)</p>` : ""}
+              ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px">Minimum: ${currency(minRate)}${unit} (specialty base rate)</p>` : ""}
             </div>
           `}
 
@@ -291,7 +310,7 @@ function renderAlterShifts(state, profile) {
           ${useFlat ? `
             <div class="alter-rate-row">
               <span class="subtitle">Flat rate</span>
-              <strong class="alter-rate-value">$${Math.round(flatRate)}${unit}</strong>
+              <strong class="alter-rate-value">${currency(flatRate)}${unit}</strong>
             </div>
             <div class="form-field">
               <div class="stepper-row">
@@ -357,10 +376,12 @@ function renderDoctors(state, profile) {
         </div>
         <button type="button" class="btn-secondary" style="width:auto;min-width:180px" data-seed-mocks>Seed demo doctors</button>
       </div>
+      ${adBanner("doctors")}
       <section class="card stack">
-        <label class="toggle-row">
+        <label class="switch-row spread">
           <span>Auto-approved only</span>
           <input type="checkbox" data-doctor-auto-only ${autoOnly ? "checked" : ""} />
+          <span class="switch"></span>
         </label>
         <div class="chip-grid">
           ${specialties.map((sp) => `
@@ -369,18 +390,34 @@ function renderDoctors(state, profile) {
         </div>
       </section>
       ${filtered.length ? `<div class="roster-grid">${filtered.map((d) => `
-        <section class="card" style="display:flex;align-items:center;gap:14px">
-          <button type="button" class="btn-ghost" style="flex:1;min-width:0;text-align:left;padding:0" data-doctor-detail="${d.id}">
-            <div style="font-weight:600;font-size:1.05rem">${escapeHtml(d.name)}</div>
-            <div class="subtitle">${escapeHtml(d.specialty)} · NPI ${escapeHtml(d.npi)}</div>
-            ${verificationBadge(d.verificationStatus, true)}
+        <section class="card doctor-card">
+          <button type="button" class="doctor-identity" data-doctor-detail="${d.id}">
+            <span class="avatar">${escapeHtml((d.name.replace(/^Dr\.?\s*/i, "")[0] || "D").toUpperCase())}</span>
+            <span class="doctor-lines">
+              <span class="doctor-name">
+                ${escapeHtml(d.name)}
+                ${d.isAutoApproved ? `<span class="pill pill-solid" style="background:var(--success)">AUTO</span>` : ""}
+              </span>
+              <span class="doctor-meta">${escapeHtml(d.specialty)} · NPI ${escapeHtml(d.npi)}</span>
+              ${verificationBadge(d.verificationStatus, true)}
+            </span>
           </button>
-          ${tokenStepper(profile?.id, d)}
-          <label class="toggle-row" style="flex-direction:column;align-items:flex-end;gap:4px">
-            <span style="font-size:11px" class="tertiary">Auto-approve</span>
-            <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />
-          </label>
-        </section>`).join("")}</div>` : emptyState("Doctor roster", "No doctors match filters.", "doctors")}
+          <div class="doctor-controls">
+            ${tokenStepper(profile?.id, d)}
+            <label class="switch-row">
+              <span class="tertiary">Auto-approve</span>
+              <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />
+              <span class="switch"></span>
+            </label>
+          </div>
+        </section>`).join("")}</div>`
+        : emptyState(
+            roster.length ? "No doctors match filters" : "No doctors on roster yet",
+            roster.length
+              ? "Clear filters or switch specialty to see more of your roster."
+              : "Approved doctors appear here once they request coverage. Auto-approve trusted specialists to fill faster.",
+            "stethoscope"
+          )}
     </main>`;
 }
 
@@ -408,17 +445,22 @@ function renderHospitalSheet(state, profile) {
     <ul class="menu-list">
       <section><div class="section-label">Management</div>
         <button class="menu-item" type="button" data-open-sheet="openshifts">${icon("calendar")}<span>Open Shifts</span></button>
-        <button class="menu-item" type="button" data-nav-tab="alter">${icon("calendar")}<span>Alter Shifts</span></button>
-        <button class="menu-item" type="button" data-open-sheet="schedule">${icon("dashboard")}<span>Schedule Admin</span></button>
-        <button class="menu-item" type="button" data-open-sheet="policy">${icon("credentials")}<span>Policy Settings</span></button>
-        <button class="menu-item" type="button" data-open-sheet="analytics">${icon("sparkles")}<span>Analytics</span></button>
-        <button class="menu-item" type="button" data-open-sheet="billing">${icon("dollar")}<span>Billing</span></button>
+        <button class="menu-item" type="button" data-nav-tab="alter">${icon("clock")}<span>Alter Shifts</span></button>
+        <button class="menu-item" type="button" data-open-sheet="schedule">${icon("checkCircle")}<span>Schedule Admin</span></button>
+        <button class="menu-item" type="button" data-open-sheet="policy">${icon("slider")}<span>Policy Settings</span></button>
+        <button class="menu-item" type="button" data-open-sheet="analytics">${icon("chart")}<span>Analytics</span></button>
+        <button class="menu-item" type="button" data-open-sheet="billing">${icon("card")}<span>Billing</span></button>
       </section>
       <section><div class="section-label">Account</div>
-        <label class="menu-item" style="cursor:default"><span>Priority posting</span>
+        <label class="menu-item toggle-row"><span>Priority posting</span>
           <input type="checkbox" data-hospital-flag="priorityPosting" ${profile?.priorityPosting ? "checked" : ""} /></label>
-        <label class="menu-item" style="cursor:default"><span>Auto-pay filled shifts</span>
+        <label class="menu-item toggle-row"><span>Auto-pay filled shifts</span>
           <input type="checkbox" data-hospital-flag="autoPay" ${profile?.autoPay ? "checked" : ""} /></label>
+      </section>
+      <section><div class="section-label">Support</div>
+        <a class="menu-item" href="mailto:erdunn706@gmail.com">${icon("envelope")}
+          <span>Contact support<span class="menu-item-sub">erdunn706@gmail.com</span></span>
+        </a>
       </section>
     </ul>`;
   return sheet("Menu", body);
@@ -477,7 +519,7 @@ function renderScheduleAdminSheet(profile, state) {
               <div class="tertiary" style="font-size:11px">Requested ${new Date(r.requestedAt).toLocaleString()}</div>
             </div>
             <div style="text-align:right">
-              <div style="font-weight:700;color:var(--accent)">$${Math.round(r.shiftRate || 0)}/day</div>
+              <div style="font-weight:700;color:var(--accent)">${currency(r.shiftRate || 0)}/day</div>
               <span class="verify-badge ${escapeHtml(r.status)}">${escapeHtml(r.status.replace("_", " "))}</span>
               ${r.status === "pending" ? `
                 <div class="trade-actions" style="margin-top:8px">
@@ -629,14 +671,14 @@ function renderAnalyticsSheet(profile) {
           <div style="font-weight:600">Amount Saved per Day</div>
           <div class="subtitle">Penalty revenue recovered overall</div>
         </div>
-        <div style="font-size:1.6rem;font-weight:700;color:var(--success)">$${Math.round(a.savingsPerDay)}</div>
+        <div style="font-size:1.6rem;font-weight:700;color:var(--success)">${currency(a.savingsPerDay)}</div>
       </section>
       <section class="card stack">
         ${sectionHeader("By Specialty")}
         ${a.specialtyRevenues.map(([sp, amt]) => `
           <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
             <span>${escapeHtml(sp)}</span>
-            <strong style="color:var(--success)">$${Math.round(amt)}/day</strong>
+            <strong style="color:var(--success)">${currency(amt)}/day</strong>
           </div>`).join("")}
       </section>
       <section class="card stat-row">
@@ -670,7 +712,7 @@ function renderBillingSheet(profile) {
               <div style="font-weight:600">${formatShiftDate(s.start)}</div>
               <div class="subtitle">${escapeHtml(s.specialty)}</div>
             </div>
-            <span style="font-weight:700;color:var(--accent)">$${Math.round(s.rateUnit === "per hour" ? (s.rateFloor || 0) * (s.durationHours || 8) : (s.rateFloor || 0))}</span>
+            <span style="font-weight:700;color:var(--accent)">${currency(s.rateUnit === "per hour" ? (s.rateFloor || 0) * (s.durationHours || 8) : (s.rateFloor || 0))}</span>
           </div>`).join('<div class="divider"></div>') : `<p class="subtitle">No filled shifts yet.</p>`}
       </section>
       <section class="card">
@@ -732,7 +774,7 @@ function renderHospitalDaySheet(dateISO, profile, state) {
       ${editSpecialty && proposed ? `
         <section class="card stack">
           ${sectionHeader(`Edit rate · ${escapeHtml(editSpecialty)}`)}
-          <div class="subtitle">Algorithm $${Math.round(proposed.algorithmRate)} · Current $${Math.round(proposed.rate)}</div>
+          <div class="subtitle">Algorithm ${currency(proposed.algorithmRate)} · Current ${currency(proposed.rate)}</div>
           <div class="form-field"><label>Proposed rate</label>
             <input type="number" step="25" data-day-rate-value value="${Math.round(proposed.rate)}" /></div>
           <div style="display:flex;gap:8px">
@@ -783,6 +825,9 @@ export function bindHospital(root, state, update) {
         update({ calendarMonth: next });
       }
     });
+  });
+  root.querySelectorAll("[data-focus-toggle]").forEach((el) => {
+    el.addEventListener("change", () => update({ focusOpenDays: el.checked }));
   });
   root.querySelectorAll("[data-cal-date]").forEach((btn) => {
     btn.addEventListener("click", () => {
