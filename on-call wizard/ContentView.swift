@@ -3777,6 +3777,8 @@ struct CandidatesView: View {
     @State private var filterSpecialty = "All"
     @State private var showAutoOnly = false
 
+    private var hospitalID: UUID? { HospitalProfile.load()?.id }
+
     private var filtered: [DoctorSummary] {
         store.doctors.filter {
             (filterSpecialty == "All" || $0.specialty == filterSpecialty) &&
@@ -3811,8 +3813,8 @@ struct CandidatesView: View {
                         } else {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(filtered) { doc in
-                                    NavigationLink(destination: DoctorDetailView(doctor: doc, onToggleApprove: { store.toggleAutoApprove(id: doc.id) })) {
-                                        DoctorRow(doctor: doc) { store.toggleAutoApprove(id: doc.id) }
+                                    NavigationLink(destination: DoctorDetailView(doctor: doc, hospitalID: hospitalID, onToggleApprove: { store.toggleAutoApprove(id: doc.id) })) {
+                                        DoctorRow(doctor: doc, hospitalID: hospitalID) { store.toggleAutoApprove(id: doc.id) }
                                     }
                                     .buttonStyle(.plain)
                                     if doc != filtered.last { Divider() }
@@ -3862,6 +3864,7 @@ struct CandidatesView: View {
 
 struct DoctorDetailView: View {
     let doctor: DoctorSummary
+    var hospitalID: UUID? = HospitalProfile.load()?.id
     let onToggleApprove: () -> Void
     @State private var calendarMonth = Date()
     @ObservedObject private var assignedStore = AssignedShiftsStore.shared
@@ -3923,6 +3926,10 @@ struct DoctorDetailView: View {
                             }
                         }
                         Divider().opacity(0.4)
+                        if let hospitalID {
+                            DoctorTokenAllowanceStepper(hospitalID: hospitalID, doctorID: doctor.id)
+                            Divider().opacity(0.4)
+                        }
                         Button {
                             withAnimation(.spring(response: 0.3)) { onToggleApprove() }
                         } label: {
@@ -4033,24 +4040,48 @@ private struct DoctorScheduleCalendar: View {
 // MARK: - Doctor Row
 
 private struct DoctorRow: View {
-    let doctor: DoctorSummary; let onToggleApprove: () -> Void
+    let doctor: DoctorSummary
+    var hospitalID: UUID? = nil
+    let onToggleApprove: () -> Void
+
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack { Circle().fill(Color.accentColor.opacity(0.12)).frame(width: 42, height: 42); Text(String(doctor.name.prefix(1))).font(.headline).foregroundStyle(Color.accentColor) }
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text("\(doctor.name), \(doctor.credential)").font(.headline)
-                    if doctor.isAutoApproved { Label("Auto", systemImage: "bolt.fill").font(.caption2.weight(.bold)).foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 2).background(Color.green, in: Capsule()) }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(Color.accentColor.opacity(0.12)).frame(width: 42, height: 42)
+                    Text(String(doctor.name.prefix(1))).font(.headline).foregroundStyle(Color.accentColor)
                 }
-                HStack(spacing: 6) { Text(doctor.specialty).font(.subheadline).foregroundStyle(.secondary); VerificationBadge(status: doctor.verificationStatus, compact: true) }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text("\(doctor.name), \(doctor.credential)").font(.headline)
+                        if doctor.isAutoApproved {
+                            Label("Auto", systemImage: "bolt.fill")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.green, in: Capsule())
+                        }
+                    }
+                    HStack(spacing: 6) {
+                        Text(doctor.specialty).font(.subheadline).foregroundStyle(.secondary)
+                        VerificationBadge(status: doctor.verificationStatus, compact: true)
+                    }
+                }
+                Spacer()
+                Button { withAnimation(.spring(response: 0.3)) { onToggleApprove() } } label: {
+                    Image(systemName: doctor.isAutoApproved ? "star.fill" : "star")
+                        .foregroundStyle(doctor.isAutoApproved ? Color.yellow : Color.secondary)
+                        .font(.title3)
+                }
+                .buttonStyle(.plain)
             }
-            Spacer()
-            Button { withAnimation(.spring(response: 0.3)) { onToggleApprove() } } label: {
-                Image(systemName: doctor.isAutoApproved ? "star.fill" : "star").foregroundStyle(doctor.isAutoApproved ? Color.yellow : Color.secondary).font(.title3)
+            if let hospitalID {
+                DoctorTokenAllowanceStepper(hospitalID: hospitalID, doctorID: doctor.id, compact: true)
             }
-            .buttonStyle(.plain)
         }
-        .padding(.vertical, 8).font(Brand.brandFont)
+        .padding(.vertical, 8)
+        .font(Brand.brandFont)
     }
 }
 

@@ -53,6 +53,14 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
     /// When true, Recalculate overwrites `caseVolumeRewardScale` from the algo.
     public var caseVolumeRewardAuto: Bool = true
 
+    /// Default daily request tokens for the whole roster (0…20).
+    public var defaultDailyTokens: Int = 3
+    /// Per-doctor token exceptions keyed by doctorID.uuidString. Missing → `defaultDailyTokens`.
+    public var doctorTokenLimits: [String: Int] = [:]
+
+    public static let minDailyTokens = 0
+    public static let maxDailyTokens = 20
+
     private enum CodingKeys: String, CodingKey {
         case granularity, administratorApproveShifts
         case cancellationPenaltyScale, tradePenaltyScale
@@ -62,6 +70,7 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
         case useAlgorithmPricingByDefault, specialtyUsesAlgorithm
         case disabledPricingVariables, caseVolumeRewardEnabled
         case caseVolumeRewardScale, caseVolumeRewardAuto
+        case defaultDailyTokens, doctorTokenLimits
     }
 
     public init(
@@ -88,7 +97,9 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
         disabledPricingVariables: [String] = [],
         caseVolumeRewardEnabled: Bool = true,
         caseVolumeRewardScale: Int = 40,
-        caseVolumeRewardAuto: Bool = true
+        caseVolumeRewardAuto: Bool = true,
+        defaultDailyTokens: Int = 3,
+        doctorTokenLimits: [String: Int] = [:]
     ) {
         self.granularity = granularity
         self.administratorApproveShifts = administratorApproveShifts
@@ -108,6 +119,8 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
         self.caseVolumeRewardEnabled = caseVolumeRewardEnabled
         self.caseVolumeRewardScale = Self.clampCaseVolumeScale(caseVolumeRewardScale)
         self.caseVolumeRewardAuto = caseVolumeRewardAuto
+        self.defaultDailyTokens = min(20, max(0, defaultDailyTokens))
+        self.doctorTokenLimits = doctorTokenLimits.mapValues { min(20, max(0, $0)) }
     }
 
     public init(from decoder: Decoder) throws {
@@ -133,11 +146,39 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
             try c.decodeIfPresent(Int.self, forKey: .caseVolumeRewardScale) ?? 40
         )
         caseVolumeRewardAuto = try c.decodeIfPresent(Bool.self, forKey: .caseVolumeRewardAuto) ?? true
+        defaultDailyTokens = min(20, max(0, try c.decodeIfPresent(Int.self, forKey: .defaultDailyTokens) ?? 3))
+        doctorTokenLimits = (try c.decodeIfPresent([String: Int].self, forKey: .doctorTokenLimits) ?? [:])
+            .mapValues { min(20, max(0, $0)) }
     }
 
     public static func clampCaseVolumeScale(_ value: Int) -> Int {
         let stepped = Int((Double(value) / 10.0).rounded()) * 10
         return min(100, max(10, stepped))
+    }
+
+    nonisolated public static func clampDailyTokens(_ value: Int) -> Int {
+        min(20, max(0, value))
+    }
+
+    /// Tokens/day for one doctor at this hospital (override or roster default).
+    public func dailyTokenLimit(forDoctorID doctorID: UUID) -> Int {
+        if let override = doctorTokenLimits[doctorID.uuidString] {
+            return Self.clampDailyTokens(override)
+        }
+        return Self.clampDailyTokens(defaultDailyTokens)
+    }
+
+    public func hasCustomTokenLimit(forDoctorID doctorID: UUID) -> Bool {
+        doctorTokenLimits[doctorID.uuidString] != nil
+    }
+
+    public mutating func setDailyTokenLimit(_ limit: Int?, forDoctorID doctorID: UUID) {
+        let key = doctorID.uuidString
+        if let limit {
+            doctorTokenLimits[key] = Self.clampDailyTokens(limit)
+        } else {
+            doctorTokenLimits.removeValue(forKey: key)
+        }
     }
 
     public func usesAlgorithmPricing(for specialty: String) -> Bool {
@@ -194,6 +235,8 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
         try c.encode(caseVolumeRewardEnabled, forKey: .caseVolumeRewardEnabled)
         try c.encode(caseVolumeRewardScale, forKey: .caseVolumeRewardScale)
         try c.encode(caseVolumeRewardAuto, forKey: .caseVolumeRewardAuto)
+        try c.encode(defaultDailyTokens, forKey: .defaultDailyTokens)
+        try c.encode(doctorTokenLimits, forKey: .doctorTokenLimits)
     }
 
     public static func bracketLabel(for bracket: PenaltyBracket, previousHours: Int?) -> String {
