@@ -1,21 +1,8 @@
 import { escapeHtml, SPECIALTIES, startOfDay, formatShiftDate } from "../brand.js";
 import {
-  navBar, tabBar, shiftRow, pendingBanner, sectionHeader, emptyState, sheet, verificationBadge, icon
+  navBar, tabBar, shiftRow, pendingBanner, sectionHeader, emptyState, sheet,
+  verificationBadge, icon, statBadge, adBanner, currency
 } from "../components.js";
-
-function currency(n) {
-  const v = Math.round(Number(n) || 0);
-  return `$${v.toLocaleString()}`;
-}
-
-function statTile({ value, label, hint, attrs = "" }) {
-  return `
-    <button type="button" class="stat-badge" ${attrs}>
-      <div class="value">${escapeHtml(String(value))}</div>
-      <div class="label">${escapeHtml(label)}</div>
-      ${hint ? `<div class="stat-hint">${escapeHtml(hint)}</div>` : ""}
-    </button>`;
-}
 import { renderCalendar, hospitalDayData, addMonths } from "../calendar.js";
 import { hospitalDaySummary, hospitalAnalytics, billingSummary } from "../domain/insights.js";
 import { bracketLabel } from "../domain/policy.js";
@@ -25,7 +12,8 @@ import {
   autoApprovedCount, tokenRequestsForHospital, approveToken, denyToken,
   toggleUnavailable, getPolicy, savePolicy, defaultPolicy,
   getProposedRate, setProposedRate, resetProposedRate, toggleRosterAutoApprove,
-  seedMockDoctors, getRateBreakdown, saveAlterShift, findShiftForDay
+  seedMockDoctors, getRateBreakdown, saveAlterShift, findShiftForDay,
+  tokenLimitForDoctor, setDoctorTokenLimit
 } from "../store.js";
 
 function alterDraftKey(date, specialty) {
@@ -106,9 +94,13 @@ function renderHospitalDashboard(state, profile) {
   const month = state.calendarMonth ? new Date(state.calendarMonth) : new Date();
   const days = profile ? hospitalDayData(month, profile.id) : [];
   const selected = state.selectedDate ? new Date(state.selectedDate) : null;
+  const focusOpen = Boolean(state.focusOpenDays);
+  const openDayCount = days.filter((d) => d.level !== "all" && d.level !== null && !d.isPast).length;
+
+  // The detail panel would otherwise sit empty until a day is picked, so it
+  // opens on today — the day a scheduler cares about most.
   const insightDate = selected || startOfDay(new Date());
-  const summary = profile ? hospitalDaySummary(insightDate, profile.id) : null;
-  const openDays = days.filter((d) => d.level !== "all" && d.level !== null && !d.isPast).length;
+  const insight = profile ? hospitalDaySummary(insightDate, profile.id) : null;
 
   return `
     ${navBar(profile?.name || "Home")}
@@ -117,38 +109,46 @@ function renderHospitalDashboard(state, profile) {
       <section class="card stack">
         ${sectionHeader("At a glance")}
         <div class="stat-row">
-          ${statTile({
+          ${statBadge({
             value: `${profile ? fillRatePercent(profile.id) : 0}%`,
             label: "Fill rate",
             hint: "Last 30 days",
             attrs: 'data-open-sheet="analytics"'
           })}
-          ${statTile({
+          ${statBadge({
             value: autoApprovedCount(),
             label: "Auto‑approved",
             hint: "Ready doctors",
             attrs: 'data-nav-tab="doctors"'
           })}
-          ${statTile({
-            value: openDays,
+          ${statBadge({
+            value: openDayCount,
             label: "Open days",
-            hint: "This month",
+            hint: focusOpen ? "In focus" : "This month",
             attrs: 'data-nav-tab="alter"'
           })}
         </div>
       </section>
       <div class="content-grid two-col">
         <div class="stack">
-          ${profile ? renderCalendar({ month, days, selectedDate: selected, mode: "hospital" }) : ""}
+          ${profile ? renderCalendar({
+            month, days, selectedDate: selected, mode: "hospital", focusOpen,
+            title: "Coverage calendar",
+            subtitle: focusOpen
+              ? "Open days only — filled coverage pops away so gaps stay obvious."
+              : "See what's filled, then open a day to set rates or approve coverage.",
+            hint: focusOpen ? "Open coverage gaps" : "Select a day for details"
+          }) : ""}
         </div>
         <div class="stack">
-          ${summary ? renderDayInsight(summary, profile, insightDate) : ""}
-          ${summary && summary.pendingRequestCount ? `
+          ${insight ? renderDayInsight(insight, profile, insightDate) : ""}
+          ${insight && insight.pendingRequestCount ? `
             <section class="card stack">
-              ${sectionHeader(`Pending tokens (${summary.pendingRequestCount})`)}
+              ${sectionHeader(`Pending tokens (${insight.pendingRequestCount})`)}
               <p class="subtitle">Doctors are waiting on a decision for this day.</p>
               <button type="button" class="btn-primary" data-open-sheet="schedule">Review in Schedule Admin</button>
             </section>` : ""}
+          ${adBanner("dashboard")}
         </div>
       </div>
     </main>`;
@@ -266,14 +266,14 @@ function renderAlterShifts(state, profile) {
 
           <div class="alter-rate-row">
             <span class="subtitle">${useAlgorithm ? "Algorithm rate floor" : "Manual rate floor"}</span>
-            <strong class="alter-rate-value">$${Math.round(rateFloor)}${unit}</strong>
+            <strong class="alter-rate-value">${currency(rateFloor)}${unit}</strong>
           </div>
 
           ${useAlgorithm ? `
             <p class="tertiary" style="font-size:12px;margin:0">
               ${breakdown.variableCount || breakdown.components?.length || 0} pricing variables · ${Math.round((breakdown.confidence || 0) * 100)}% confidence
             </p>
-            ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px;margin:0">Floor capped at base rate: $${Math.round(baseRate)}${unit}</p>` : ""}
+            ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px;margin:0">Floor capped at base rate: ${currency(baseRate)}${unit}</p>` : ""}
             <button type="button" class="btn-ghost" style="justify-self:start;padding-left:0" data-recalc-rate>↻ Recalculate</button>
 
             <div class="algo-breakdown">
@@ -295,7 +295,7 @@ function renderAlterShifts(state, profile) {
                 <input type="number" data-alter-floor value="${Math.round(rateFloor)}" step="${isHourly ? 5 : 50}" min="${minRate}" max="${isHourly ? 400 : 5000}" />
                 <button type="button" class="icon-btn" data-step-floor="1">+</button>
               </div>
-              ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px">Minimum: $${Math.round(minRate)}${unit} (specialty base rate)</p>` : ""}
+              ${baseRate > 0 ? `<p class="tertiary" style="font-size:12px">Minimum: ${currency(minRate)}${unit} (specialty base rate)</p>` : ""}
             </div>
           `}
 
@@ -308,7 +308,7 @@ function renderAlterShifts(state, profile) {
           ${useFlat ? `
             <div class="alter-rate-row">
               <span class="subtitle">Flat rate</span>
-              <strong class="alter-rate-value">$${Math.round(flatRate)}${unit}</strong>
+              <strong class="alter-rate-value">${currency(flatRate)}${unit}</strong>
             </div>
             <div class="form-field">
               <div class="stepper-row">
@@ -325,6 +325,34 @@ function renderAlterShifts(state, profile) {
         </section>
       </div>
     </main>`;
+}
+
+/**
+ * Per-doctor daily token allowance. Shows the hospital default until someone
+ * changes it, so an untouched roster reads as one consistent rule rather than
+ * a wall of identical overrides.
+ */
+function tokenStepper(hospitalID, doctor) {
+  if (!hospitalID) return "";
+  const policy = getPolicy(hospitalID);
+  const override = policy.doctorTokenLimits?.[doctor.id];
+  const isCustom = Number.isFinite(override);
+  const value = isCustom ? override : (policy.defaultDailyTokens ?? 3);
+
+  return `
+    <div class="token-allowance ${isCustom ? "custom" : ""}">
+      <span class="tertiary">Tokens/day</span>
+      <div class="token-stepper">
+        <button type="button" data-token-limit="${doctor.id}" data-delta="-1"
+                aria-label="Fewer tokens for ${escapeHtml(doctor.name)}" ${value <= 0 ? "disabled" : ""}>−</button>
+        <strong>${value}</strong>
+        <button type="button" data-token-limit="${doctor.id}" data-delta="1"
+                aria-label="More tokens for ${escapeHtml(doctor.name)}" ${value >= 20 ? "disabled" : ""}>+</button>
+      </div>
+      ${isCustom
+        ? `<button type="button" class="token-reset" data-token-reset="${doctor.id}">Use default</button>`
+        : `<span class="tertiary token-default">Default</span>`}
+    </div>`;
 }
 
 function renderDoctors(state, profile) {
@@ -346,10 +374,12 @@ function renderDoctors(state, profile) {
         </div>
         <button type="button" class="btn-secondary" style="width:auto;min-width:180px" data-seed-mocks>Seed demo doctors</button>
       </div>
+      ${adBanner("doctors")}
       <section class="card stack">
-        <label class="toggle-row">
+        <label class="switch-row spread">
           <span>Auto-approved only</span>
           <input type="checkbox" data-doctor-auto-only ${autoOnly ? "checked" : ""} />
+          <span class="switch"></span>
         </label>
         <div class="chip-grid">
           ${specialties.map((sp) => `
@@ -360,21 +390,32 @@ function renderDoctors(state, profile) {
       ${filtered.length ? `<div class="roster-grid">${filtered.map((d) => `
         <section class="card doctor-card">
           <button type="button" class="doctor-identity" data-doctor-detail="${d.id}">
-            <div class="avatar">${escapeHtml((d.name || "?").replace(/^Dr\.\s*/, "").charAt(0) || "?")}</div>
-            <div class="doctor-lines">
-              <div class="doctor-name">
+            <span class="avatar">${escapeHtml((d.name.replace(/^Dr\.?\s*/i, "")[0] || "D").toUpperCase())}</span>
+            <span class="doctor-lines">
+              <span class="doctor-name">
                 ${escapeHtml(d.name)}
-                ${d.isAutoApproved ? `<span class="pill pill-solid">AUTO</span>` : ""}
-              </div>
-              <div class="doctor-meta">${escapeHtml(d.specialty)} · NPI ${escapeHtml(d.npi)}</div>
+                ${d.isAutoApproved ? `<span class="pill pill-solid" style="background:var(--success)">AUTO</span>` : ""}
+              </span>
+              <span class="doctor-meta">${escapeHtml(d.specialty)} · NPI ${escapeHtml(d.npi)}</span>
               ${verificationBadge(d.verificationStatus, true)}
-            </div>
+            </span>
           </button>
-          <label class="switch-row">
-            <span class="tertiary">Auto-approve</span>
-            <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />
-          </label>
-        </section>`).join("")}</div>` : emptyState("Doctor roster", "No doctors match filters.", "doctors")}
+          <div class="doctor-controls">
+            ${tokenStepper(profile?.id, d)}
+            <label class="switch-row">
+              <span class="tertiary">Auto-approve</span>
+              <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />
+              <span class="switch"></span>
+            </label>
+          </div>
+        </section>`).join("")}</div>`
+        : emptyState(
+            roster.length ? "No doctors match filters" : "No doctors on roster yet",
+            roster.length
+              ? "Clear filters or switch specialty to see more of your roster."
+              : "Approved doctors appear here once they request coverage. Auto-approve trusted specialists to fill faster.",
+            "stethoscope"
+          )}
     </main>`;
 }
 
@@ -386,7 +427,7 @@ function renderHospitalSheet(state, profile) {
   if (kind === "billing") return renderBillingSheet(profile);
   if (kind === "schedule") return renderScheduleAdminSheet(profile, state);
   if (kind === "openshifts") return renderOpenShiftsSheet(profile);
-  if (kind === "doctor-detail") return renderDoctorDetailSheet(state.doctorDetailId);
+  if (kind === "doctor-detail") return renderDoctorDetailSheet(state.doctorDetailId, profile);
 
   const body = `
     ${profile ? `
@@ -402,17 +443,22 @@ function renderHospitalSheet(state, profile) {
     <ul class="menu-list">
       <section><div class="section-label">Management</div>
         <button class="menu-item" type="button" data-open-sheet="openshifts">${icon("calendar")}<span>Open Shifts</span></button>
-        <button class="menu-item" type="button" data-nav-tab="alter">${icon("calendar")}<span>Alter Shifts</span></button>
-        <button class="menu-item" type="button" data-open-sheet="schedule">${icon("dashboard")}<span>Schedule Admin</span></button>
-        <button class="menu-item" type="button" data-open-sheet="policy">${icon("credentials")}<span>Policy Settings</span></button>
-        <button class="menu-item" type="button" data-open-sheet="analytics">${icon("sparkles")}<span>Analytics</span></button>
-        <button class="menu-item" type="button" data-open-sheet="billing">${icon("dollar")}<span>Billing</span></button>
+        <button class="menu-item" type="button" data-nav-tab="alter">${icon("clock")}<span>Alter Shifts</span></button>
+        <button class="menu-item" type="button" data-open-sheet="schedule">${icon("checkCircle")}<span>Schedule Admin</span></button>
+        <button class="menu-item" type="button" data-open-sheet="policy">${icon("slider")}<span>Policy Settings</span></button>
+        <button class="menu-item" type="button" data-open-sheet="analytics">${icon("chart")}<span>Analytics</span></button>
+        <button class="menu-item" type="button" data-open-sheet="billing">${icon("card")}<span>Billing</span></button>
       </section>
       <section><div class="section-label">Account</div>
-        <label class="menu-item" style="cursor:default"><span>Priority posting</span>
+        <label class="menu-item toggle-row"><span>Priority posting</span>
           <input type="checkbox" data-hospital-flag="priorityPosting" ${profile?.priorityPosting ? "checked" : ""} /></label>
-        <label class="menu-item" style="cursor:default"><span>Auto-pay filled shifts</span>
+        <label class="menu-item toggle-row"><span>Auto-pay filled shifts</span>
           <input type="checkbox" data-hospital-flag="autoPay" ${profile?.autoPay ? "checked" : ""} /></label>
+      </section>
+      <section><div class="section-label">Support</div>
+        <a class="menu-item" href="mailto:erdunn706@gmail.com">${icon("envelope")}
+          <span>Contact support<span class="menu-item-sub">erdunn706@gmail.com</span></span>
+        </a>
       </section>
     </ul>`;
   return sheet("Menu", body);
@@ -471,7 +517,7 @@ function renderScheduleAdminSheet(profile, state) {
               <div class="tertiary" style="font-size:11px">Requested ${new Date(r.requestedAt).toLocaleString()}</div>
             </div>
             <div style="text-align:right">
-              <div style="font-weight:700;color:var(--accent)">$${Math.round(r.shiftRate || 0)}/day</div>
+              <div style="font-weight:700;color:var(--accent)">${currency(r.shiftRate || 0)}/day</div>
               <span class="verify-badge ${escapeHtml(r.status)}">${escapeHtml(r.status.replace("_", " "))}</span>
               ${r.status === "pending" ? `
                 <div class="trade-actions" style="margin-top:8px">
@@ -497,6 +543,7 @@ function renderPolicySheet(profile, state) {
         <button type="button" class="chip ${tab === "general" ? "active" : ""}" data-policy-tab="general">General</button>
         <button type="button" class="chip ${tab === "cancel" ? "active" : ""}" data-policy-tab="cancel">Cancellation</button>
         <button type="button" class="chip ${tab === "rates" ? "active" : ""}" data-policy-tab="rates">Pay Rates</button>
+        <button type="button" class="chip ${tab === "tokens" ? "active" : ""}" data-policy-tab="tokens">Tokens</button>
       </div>
       ${tab === "general" ? `
         <section class="card stack">
@@ -558,6 +605,24 @@ function renderPolicySheet(profile, state) {
               <input type="number" data-doctor-rate="${d.id}" value="${policy.doctorBaseRates?.[d.id] ?? ""}" placeholder="Specialty default" /></div>
           `).join("") : `<p class="subtitle">No doctors on roster yet.</p>`}
         </section>` : ""}
+      ${tab === "tokens" ? `
+        <section class="card stack">
+          ${sectionHeader("Daily request tokens")}
+          <p class="subtitle">A token is spent when a physician requests a call day.
+            Everyone gets the roster default unless you set an exception below.</p>
+          <div class="form-field"><label>Roster default (per day)</label>
+            <input type="number" min="0" max="20" data-policy="defaultDailyTokens"
+                   value="${policy.defaultDailyTokens ?? 3}" /></div>
+        </section>
+        <section class="card stack">
+          ${sectionHeader("Per-doctor exceptions")}
+          ${appStore.roster.length ? appStore.roster.map((d) => `
+            <div class="form-field"><label>${escapeHtml(d.name)}<span class="tertiary"> · ${escapeHtml(d.specialty)}</span></label>
+              <input type="number" min="0" max="20" data-doctor-tokens="${d.id}"
+                     value="${Number.isFinite(policy.doctorTokenLimits?.[d.id]) ? policy.doctorTokenLimits[d.id] : ""}"
+                     placeholder="Roster default (${policy.defaultDailyTokens ?? 3})" /></div>
+          `).join("") : `<p class="subtitle">No doctors on roster yet.</p>`}
+        </section>` : ""}
       <button type="button" class="btn-primary" data-save-policy>Save Policy</button>
     </main>`;
   return sheet("Policy Settings", body);
@@ -604,14 +669,14 @@ function renderAnalyticsSheet(profile) {
           <div style="font-weight:600">Amount Saved per Day</div>
           <div class="subtitle">Penalty revenue recovered overall</div>
         </div>
-        <div style="font-size:1.6rem;font-weight:700;color:var(--success)">$${Math.round(a.savingsPerDay)}</div>
+        <div style="font-size:1.6rem;font-weight:700;color:var(--success)">${currency(a.savingsPerDay)}</div>
       </section>
       <section class="card stack">
         ${sectionHeader("By Specialty")}
         ${a.specialtyRevenues.map(([sp, amt]) => `
           <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
             <span>${escapeHtml(sp)}</span>
-            <strong style="color:var(--success)">$${Math.round(amt)}/day</strong>
+            <strong style="color:var(--success)">${currency(amt)}/day</strong>
           </div>`).join("")}
       </section>
       <section class="card stat-row">
@@ -645,7 +710,7 @@ function renderBillingSheet(profile) {
               <div style="font-weight:600">${formatShiftDate(s.start)}</div>
               <div class="subtitle">${escapeHtml(s.specialty)}</div>
             </div>
-            <span style="font-weight:700;color:var(--accent)">$${Math.round(s.rateUnit === "per hour" ? (s.rateFloor || 0) * (s.durationHours || 8) : (s.rateFloor || 0))}</span>
+            <span style="font-weight:700;color:var(--accent)">${currency(s.rateUnit === "per hour" ? (s.rateFloor || 0) * (s.durationHours || 8) : (s.rateFloor || 0))}</span>
           </div>`).join('<div class="divider"></div>') : `<p class="subtitle">No filled shifts yet.</p>`}
       </section>
       <section class="card">
@@ -668,7 +733,7 @@ function renderOpenShiftsSheet(profile) {
   return sheet("Open Shifts", body);
 }
 
-function renderDoctorDetailSheet(doctorId) {
+function renderDoctorDetailSheet(doctorId, profile) {
   const d = appStore.roster.find((x) => x.id === doctorId);
   if (!d) return sheet("Doctor", emptyState("Not found"));
   const body = `
@@ -683,6 +748,12 @@ function renderDoctorDetailSheet(doctorId) {
           <span>Auto-approve token requests</span>
           <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />
         </label>
+      </section>
+      <section class="card stack">
+        ${sectionHeader("Daily request tokens")}
+        <p class="subtitle">How many call days ${escapeHtml(d.name)} can request per day.
+          Give your most reliable physicians more, and new ones fewer.</p>
+        ${tokenStepper(profile?.id, d)}
       </section>
     </main>`;
   return sheet(d.name, body);
@@ -701,7 +772,7 @@ function renderHospitalDaySheet(dateISO, profile, state) {
       ${editSpecialty && proposed ? `
         <section class="card stack">
           ${sectionHeader(`Edit rate · ${escapeHtml(editSpecialty)}`)}
-          <div class="subtitle">Algorithm $${Math.round(proposed.algorithmRate)} · Current $${Math.round(proposed.rate)}</div>
+          <div class="subtitle">Algorithm ${currency(proposed.algorithmRate)} · Current ${currency(proposed.rate)}</div>
           <div class="form-field"><label>Proposed rate</label>
             <input type="number" step="25" data-day-rate-value value="${Math.round(proposed.rate)}" /></div>
           <div style="display:flex;gap:8px">
@@ -753,6 +824,9 @@ export function bindHospital(root, state, update) {
       }
     });
   });
+  root.querySelectorAll("[data-focus-toggle]").forEach((el) => {
+    el.addEventListener("change", () => update({ focusOpenDays: el.checked }));
+  });
   root.querySelectorAll("[data-cal-date]").forEach((btn) => {
     btn.addEventListener("click", () => {
       if ((state.tab || "dashboard") === "alter") {
@@ -794,6 +868,22 @@ export function bindHospital(root, state, update) {
   root.querySelectorAll("[data-roster-auto]").forEach((el) => {
     el.addEventListener("change", async () => {
       await toggleRosterAutoApprove(el.dataset.rosterAuto);
+    });
+  });
+
+  root.querySelectorAll("[data-token-limit]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!profile) return;
+      const doctorId = btn.dataset.tokenLimit;
+      const current = tokenLimitForDoctor(profile.id, doctorId);
+      await setDoctorTokenLimit(profile.id, doctorId, current + Number(btn.dataset.delta));
+    });
+  });
+
+  root.querySelectorAll("[data-token-reset]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!profile) return;
+      await setDoctorTokenLimit(profile.id, btn.dataset.tokenReset, null);
     });
   });
   root.querySelector("[data-seed-mocks]")?.addEventListener("click", () => {
@@ -984,6 +1074,12 @@ export function bindHospital(root, state, update) {
       const v = el.value;
       if (v === "") delete policy.doctorBaseRates[el.dataset.doctorRate];
       else policy.doctorBaseRates[el.dataset.doctorRate] = Number(v);
+    });
+    policy.doctorTokenLimits = { ...(policy.doctorTokenLimits || {}) };
+    root.querySelectorAll("[data-doctor-tokens]").forEach((el) => {
+      const v = el.value.trim();
+      if (v === "") delete policy.doctorTokenLimits[el.dataset.doctorTokens];
+      else policy.doctorTokenLimits[el.dataset.doctorTokens] = Math.max(0, Math.min(20, Number(v)));
     });
     await savePolicy(profile.id, policy);
     alert("Policy saved.");

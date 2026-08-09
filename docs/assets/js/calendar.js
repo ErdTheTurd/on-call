@@ -1,6 +1,7 @@
 import { startOfDay, sameDay } from "./brand.js";
-import { urgencyColor } from "./shift-math.js";
-import { openShifts, isShiftFilled, appStore } from "./store.js";
+import { currentRate } from "./shift-math.js";
+import { openShifts, isShiftFilled, isDayUnavailable, appStore } from "./store.js";
+import { icon } from "./lib/icons.js";
 
 export function monthStart(date) {
   const d = new Date(date);
@@ -14,92 +15,185 @@ export function addMonths(date, n) {
   return d;
 }
 
-export function doctorDayData(month, profile) {
+function daysOfMonth(month) {
   const start = monthStart(month);
-  const year = start.getFullYear();
-  const mon = start.getMonth();
-  const daysInMonth = new Date(year, mon + 1, 0).getDate();
+  const count = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+  return Array.from({ length: count }, (_, i) => new Date(start.getFullYear(), start.getMonth(), i + 1));
+}
+
+export function doctorDayData(month, profile) {
   const today = startOfDay(new Date());
   const shifts = openShifts(profile);
+  const hospitalID = appStore.hospitalProfile?.id;
 
-  return Array.from({ length: daysInMonth }, (_, i) => {
-    const date = new Date(year, mon, i + 1);
+  return daysOfMonth(month).map((date) => {
     const dayShifts = shifts.filter((s) => sameDay(s.start, date));
-    const isPast = date < today;
+    const rates = dayShifts.map((s) => currentRate(s));
+
     return {
       date,
-      isPast,
+      isPast: date < today,
       shiftCount: dayShifts.length,
-      urgency: dayShifts.length ? Math.min(...dayShifts.map((s) => new Date(s.start) - Date.now())) : null
+      // Hours until the soonest open shift decides the heat of the cell.
+      urgencyHours: dayShifts.length
+        ? Math.min(...dayShifts.map((s) => (new Date(s.start) - Date.now()) / 3600000))
+        : null,
+      goingRate: rates.length ? Math.max(...rates) : null,
+      isBlocked: hospitalID ? isDayUnavailable(date, hospitalID) : false
     };
   });
 }
 
 export function hospitalDayData(month, hospitalID) {
-  const start = monthStart(month);
-  const year = start.getFullYear();
-  const mon = start.getMonth();
-  const daysInMonth = new Date(year, mon + 1, 0).getDate();
   const today = startOfDay(new Date());
   const shifts = appStore.shifts.filter((s) => s.hospitalID === hospitalID);
 
-  return Array.from({ length: daysInMonth }, (_, i) => {
-    const date = new Date(year, mon, i + 1);
-    const dayShifts = shifts.filter((s) => sameDay(s.start, date));
-    const open = dayShifts.filter((s) => !isShiftFilled(s.id) && new Date(s.start) >= today);
-    return { date, isPast: date < today, shiftCount: open.length };
+  return daysOfMonth(month).map((date) => {
+    const posted = shifts.filter((s) => sameDay(s.start, date));
+    const filled = posted.filter((s) => isShiftFilled(s.id)).length;
+
+    let level = null;
+    if (posted.length) {
+      if (filled === posted.length) level = "all";
+      else if (filled === 0) level = "none";
+      else level = "partial";
+    }
+
+    return {
+      date,
+      isPast: date < today,
+      shiftCount: posted.length - filled,
+      level,
+      isBlocked: isDayUnavailable(date, hospitalID)
+    };
   });
 }
 
-export function renderCalendar({ month, days, selectedDate, mode, onSelect }) {
+/** "$850", "$1.2k", "$12k" — keeps the rate legible inside a calendar cell. */
+function compactRate(value) {
+  const n = Math.round(Number(value) || 0);
+  if (n <= 0) return null;
+  if (n >= 10000) return `$${Math.round(n / 1000)}k`;
+  if (n >= 1000) {
+    const k = n / 1000;
+    return `$${k % 1 < 0.05 ? Math.round(k) : k.toFixed(1)}k`;
+  }
+  return `$${n}`;
+}
+
+function doctorFill(day) {
+  if (day.isBlocked) return "rgba(255,255,255,0.06)";
+  if (day.isPast) return "rgba(255,255,255,0.04)";
+  if (!day.shiftCount) return "rgba(255,255,255,0.04)";
+
+  const hours = day.urgencyHours ?? 72;
+  if (hours < 12) return "rgba(239,68,68,0.60)";
+  if (hours < 24) return "rgba(249,115,22,0.55)";
+  if (hours < 48) return "rgba(234,179,8,0.45)";
+  return "rgba(34,197,94,0.40)";
+}
+
+function hospitalFill(day) {
+  if (day.isBlocked) return "rgba(255,255,255,0.06)";
+  if (day.isPast) return "rgba(255,255,255,0.04)";
+
+  switch (day.level) {
+    case "all": return "rgba(34,197,94,0.55)";
+    case "partial": return "rgba(234,179,8,0.55)";
+    case "none": return "rgba(239,68,68,0.55)";
+    default: return "rgba(255,255,255,0.04)";
+  }
+}
+
+/** A day survives focus mode only if the reader could still act on it. */
+function isOpenDay(day, mode) {
+  if (day.isPast || day.isBlocked) return false;
+  return mode === "hospital" ? day.level !== "all" && day.level !== null : day.shiftCount > 0;
+}
+
+function dayCell(day, { mode, selectedDate, compact }) {
+  const selected = selectedDate && sameDay(day.date, selectedDate);
+  const fill = mode === "hospital" ? hospitalFill(day) : doctorFill(day);
+  const rate = mode === "doctor" && !day.isPast ? compactRate(day.goingRate) : null;
+
+  return `
+    <button type="button"
+      class="cal-day${day.isPast ? " past" : ""}${selected ? " selected" : ""}${compact ? " compact" : ""}"
+      data-cal-date="${day.date.toISOString()}"
+      style="background:${fill}">
+      <span class="cal-num">${day.date.getDate()}</span>
+      ${rate ? `<span class="cal-rate">${rate}</span>` : ""}
+      ${day.isBlocked ? `<span class="cal-blocked">${icon("close", { size: 9 })}</span>` : ""}
+    </button>`;
+}
+
+function legend(mode) {
+  const items = mode === "hospital"
+    ? [
+        ["rgba(34,197,94,0.55)", "All filled"],
+        ["rgba(234,179,8,0.55)", "Partial"],
+        ["rgba(239,68,68,0.55)", "None filled"],
+        [null, "Blocked"]
+      ]
+    : [
+        ["rgba(34,197,94,0.40)", "Open"],
+        ["rgba(234,179,8,0.45)", "Soon"],
+        ["rgba(239,68,68,0.60)", "Urgent"],
+        [null, "Closed"]
+      ];
+
+  return `<div class="cal-legend">${items.map(([color, label]) => `
+    <span>${color
+      ? `<span class="legend-swatch" style="background:${color}"></span>`
+      : `<span class="legend-swatch blocked">${icon("close", { size: 9 })}</span>`}${label}</span>`).join("")}</div>`;
+}
+
+/**
+ * Month heatmap ported from `CalendarHeatmap.swift`.
+ *
+ * With `focusOpen` on, days that need no attention are dropped and the
+ * survivors reflow into a tighter grid — the same idea as the iOS focus mode,
+ * without the multi-stage pop animation.
+ */
+export function renderCalendar({ month, days, selectedDate, mode, focusOpen = false, title, subtitle, hint }) {
   const start = monthStart(month);
-  const firstDow = start.getDay();
   const monthLabel = start.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  const cells = [];
+  const weekdays = ["S", "M", "T", "W", "T", "F", "S"];
+  const openDays = days.filter((d) => isOpenDay(d, mode));
 
-  for (let i = 0; i < firstDow; i++) cells.push(`<button class="cal-day empty" type="button" tabindex="-1"></button>`);
-
-  days.forEach((day) => {
-    const selected = selectedDate && sameDay(day.date, selectedDate);
-    let bg = "rgba(79,142,247,0.06)";
-    if (!day.isPast && day.shiftCount > 0) {
-      if (mode === "hospital") {
-        // Coverage-style coloring with blue base for open demand
-        if (day.shiftCount >= 4) bg = "rgba(239,68,68,0.45)";
-        else if (day.shiftCount >= 2) bg = "rgba(234,179,8,0.40)";
-        else bg = "rgba(79,142,247,0.38)";
-      } else {
-        const hours = day.urgency != null ? day.urgency / 3600000 : 72;
-        if (hours < 12) bg = "rgba(239,68,68,0.55)";
-        else if (hours < 24) bg = "rgba(249,115,22,0.50)";
-        else if (hours < 48) bg = "rgba(234,179,8,0.42)";
-        else bg = "rgba(79,142,247,0.42)";
-      }
-    }
-    if (day.isPast) bg = "rgba(255,255,255,0.03)";
-    cells.push(`
-      <button type="button" class="cal-day ${day.isPast ? "past" : ""} ${selected ? "selected" : ""}"
-        data-cal-date="${day.date.toISOString()}"
-        style="background:${bg}">
-        ${day.date.getDate()}
-        ${day.shiftCount > 0 && !day.isPast ? `<span class="dot-count"></span>` : ""}
-      </button>`);
-  });
+  let grid;
+  if (focusOpen) {
+    grid = openDays.length
+      ? `<div class="cal-grid compact">${openDays.map((d) => dayCell(d, { mode, selectedDate, compact: true })).join("")}</div>`
+      : `<p class="cal-empty">No open days this month — coverage looks complete.</p>`;
+  } else {
+    const blanks = Array.from({ length: start.getDay() }, () => `<span class="cal-day empty"></span>`);
+    grid = `<div class="cal-grid">${blanks.join("")}${days.map((d) => dayCell(d, { mode, selectedDate, compact: false })).join("")}</div>`;
+  }
 
   return `
     <section class="card calendar-card">
+      ${title ? `<div class="cal-title">
+        <h2>${title}</h2>
+        ${subtitle ? `<p class="subtitle">${subtitle}</p>` : ""}
+      </div>` : ""}
       <div class="cal-header">
-        <button type="button" class="cal-nav" data-cal-nav="-1">‹</button>
-        <div class="month-label">${monthLabel}</div>
-        <button type="button" class="cal-nav" data-cal-nav="1">›</button>
+        <button type="button" class="cal-nav" data-cal-nav="-1" aria-label="Previous month">${icon("chevronLeft", { size: 16 })}</button>
+        <div class="month-label">${monthLabel}${hint ? `<span class="cal-hint">${hint}</span>` : ""}</div>
+        <button type="button" class="cal-nav" data-cal-nav="1" aria-label="Next month">${icon("chevron", { size: 16 })}</button>
       </div>
-      <div class="cal-weekdays">${["S","M","T","W","T","F","S"].map((d) => `<span>${d}</span>`).join("")}</div>
-      <div class="cal-grid">${cells.join("")}</div>
-      <div class="cal-legend">
-        <span><span class="legend-swatch" style="background:${urgencyColor("low")}"></span>Open / later</span>
-        <span><span class="legend-swatch" style="background:${urgencyColor("moderate")}"></span>Soon</span>
-        <span><span class="legend-swatch" style="background:${urgencyColor("high")}"></span>Urgent</span>
-        <span><span class="legend-swatch" style="background:rgba(255,255,255,0.15)"></span>Past</span>
-      </div>
+      ${focusOpen ? "" : `<div class="cal-weekdays">${weekdays.map((d) => `<span>${d}</span>`).join("")}</div>`}
+      ${grid}
+      <label class="focus-toggle">
+        <input type="checkbox" data-focus-toggle ${focusOpen ? "checked" : ""} />
+        <span class="switch"></span>
+        <span class="focus-copy">
+          <span class="focus-title">Show open days only</span>
+          <span class="focus-sub">${focusOpen
+            ? (mode === "hospital" ? "Filled days pop away · gaps stay in view" : "Your booked days pop away · only free days remain")
+            : (mode === "hospital" ? "Turn on to hunt unfilled coverage" : "Hide days you're already scheduled for")}</span>
+        </span>
+      </label>
+      ${focusOpen ? "" : legend(mode)}
     </section>`;
 }

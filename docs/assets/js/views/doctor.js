@@ -1,7 +1,7 @@
 import { escapeHtml, formatShiftDate } from "../brand.js";
 import {
   navBar, tabBar, shiftRow, tokenBadge, pendingBanner,
-  credentialStatusCard, sectionHeader, emptyState, sheet, verificationBadge, icon
+  credentialStatusCard, sectionHeader, emptyState, sheet, verificationBadge, icon, currency
 } from "../components.js";
 import { renderCalendar, doctorDayData, addMonths } from "../calendar.js";
 import { holidayOn, holidayPremiumMultiplier } from "../domain/pricing.js";
@@ -44,22 +44,30 @@ function renderDoctorHome(state, profile) {
   const rec = recommendedShifts();
   const tokenReqs = (appStore.tokens.requestedDays || []).slice(0, 5);
 
+  const specialty = profile?.specialties?.[0] || "Internal Medicine";
+  const focusOpen = Boolean(state.focusOpenDays);
+
   return `
     ${navBar(profile ? `Dr. ${profile.lastName}` : "On‑Call")}
     <main class="main-scroll stack">
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
       <div class="content-grid two-col">
         <div class="stack">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div class="token-row">
             ${tokenBadge(appStore.tokens)}
-            <button type="button" class="btn-ghost" data-open-sheet="dashboard">Dashboard ›</button>
+            <button type="button" class="btn-ghost" data-open-sheet="dashboard">Dashboard ${icon("chevron", { size: 14 })}</button>
           </div>
-          ${renderCalendar({ month, days, selectedDate: selected, mode: "doctor" })}
+          ${renderCalendar({
+            month, days, selectedDate: selected, mode: "doctor", focusOpen,
+            hint: focusOpen ? "Open days only" : "Select a day to request call"
+          })}
           ${selected ? `
-            <section class="card">
-              <div class="subtitle" style="font-weight:600;margin-bottom:10px">${selected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
-              ${dayShifts.length ? dayShifts.map((s, i) => `${shiftRow(s)}${i < dayShifts.length - 1 ? '<div class="divider"></div>' : ""}`).join("") : `<div class="subtitle">${icon("moon")} No open shifts</div>`}
-              <button type="button" class="btn-primary" style="margin-top:12px;width:100%" data-open-day="${selected.toISOString()}">
+            <section class="card stack">
+              ${sectionHeader(selected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }), "calendar")}
+              ${dayShifts.length
+                ? dayShifts.map((s, i) => `${shiftRow(s)}${i < dayShifts.length - 1 ? '<div class="divider"></div>' : ""}`).join("")
+                : `<p class="subtitle">${icon("moon", { size: 16 })} No open ${escapeHtml(specialty)} shifts</p>`}
+              <button type="button" class="btn-primary" data-open-day="${selected.toISOString()}">
                 ${dayShifts.length ? "Apply for this day" : "Request this day"}
               </button>
             </section>` : ""}
@@ -67,7 +75,9 @@ function renderDoctorHome(state, profile) {
         <div class="stack">
           <section class="card stack">
             ${sectionHeader("Recommended", "sparkles")}
-            ${rec.length ? rec.map((s, i) => `${shiftRow(s)}${i < rec.length - 1 ? '<div class="divider"></div>' : ""}`).join("") : `<p class="subtitle">No open shifts right now.</p>`}
+            ${rec.length
+              ? rec.map((s, i) => `${shiftRow(s)}${i < rec.length - 1 ? '<div class="divider"></div>' : ""}`).join("")
+              : `<p class="subtitle">No open shifts in your specialty right now. Check back after hospitals post coverage.</p>`}
           </section>
           ${tokenReqs.length ? `
             <section class="card stack">
@@ -158,10 +168,10 @@ function renderMyShifts(state, profile) {
         <section class="card stack" data-assignment="${a.id}">
           ${shiftRow(a.shift, { showLock: true })}
           <div class="subtitle">${formatShiftDate(a.shift.start)} · ${escapeHtml(a.doctorName)}</div>
-          ${a.status === "traded_pending" ? `<span class="urgency-badge" style="color:var(--warning)">Trade pending</span>` : ""}
+          ${a.status === "traded_pending" ? `<span class="pill pill-quiet" style="color:var(--warning)">Trade pending approval</span>` : ""}
           <div class="trade-actions" style="margin-top:8px">
             <button type="button" class="deny" data-cancel-shift="${a.id}" ${cancelPrev.allowed ? "" : "disabled"}>
-              Cancel${cancelPrev.penaltyAmount > 0 ? ` ($${cancelPrev.penaltyAmount})` : ""}
+              Cancel${cancelPrev.penaltyAmount > 0 ? ` · ${currency(cancelPrev.penaltyAmount)} fee` : ""}
             </button>
             <button type="button" class="approve" data-trade-shift="${a.id}" ${tradePrev.allowed ? "" : "disabled"}>
               Trade
@@ -198,12 +208,16 @@ function renderCredentials(profile) {
                 <div class="divider"></div>
                 <div><span class="tertiary">License</span><div>${escapeHtml(profile.licenseNumber)} · ${escapeHtml(profile.licenseState)}</div></div>
                 <div class="divider"></div>
-                <div><span class="tertiary">Specialty</span><div>${escapeHtml((profile.specialties || [])[0] || "—")}</div></div>
+                <div><span class="tertiary">Specialty</span>
+                  <div class="tag-row"><span class="tag">${escapeHtml((profile.specialties || [])[0] || "—")}</span></div>
+                </div>
               </div>
             </section>
             <section class="card stack">
-              ${sectionHeader("Verification", "credentials")}
-              ${verificationBadge(profile.verificationStatus)}
+              <div class="row-spread">
+                ${sectionHeader("Verification", "credentials")}
+                ${verificationBadge(profile.verificationStatus)}
+              </div>
               <p class="subtitle">Document uploads sync from the iOS app. Web upload support uses the same credential records.</p>
               ${(profile.documents || []).length ? profile.documents.map((d) => `
                 <div class="list-row"><strong>${escapeHtml(d.type || "Document")}</strong><span class="muted">${escapeHtml(d.status || "uploaded")}</span></div>
@@ -213,18 +227,16 @@ function renderCredentials(profile) {
           <section class="card stack">
             ${sectionHeader("Preferences")}
             <p class="subtitle" style="margin:0">Home only shows shifts in <strong>${escapeHtml((profile.specialties || [])[0] || "your specialty")}</strong>.</p>
-            <label class="toggle-row">
-              <span>Notify new shifts</span>
-              <input type="checkbox" data-pref="notifyNewShifts" ${prefs.notifyNewShifts ? "checked" : ""} />
-            </label>
-            <label class="toggle-row">
-              <span>Notify trade requests</span>
-              <input type="checkbox" data-pref="notifyTradeRequests" ${prefs.notifyTradeRequests ? "checked" : ""} />
-            </label>
-            <label class="toggle-row">
-              <span>Notify approvals</span>
-              <input type="checkbox" data-pref="notifyApprovals" ${prefs.notifyApprovals ? "checked" : ""} />
-            </label>
+            ${[
+              ["notifyNewShifts", "New matching shifts"],
+              ["notifyTradeRequests", "Incoming trade requests"],
+              ["notifyApprovals", "Approvals & status updates"]
+            ].map(([key, label]) => `
+              <label class="switch-row spread">
+                <span>${label}</span>
+                <input type="checkbox" data-pref="${key}" ${prefs[key] ? "checked" : ""} />
+                <span class="switch"></span>
+              </label>`).join("")}
             ${uniqueHospitals.length ? `
               <div class="divider"></div>
               <div class="subtitle" style="font-weight:600">Hidden hospitals</div>
@@ -263,7 +275,7 @@ function renderDoctorMenuSheet(sheetKind) {
         <div class="card" style="margin:0 16px 8px;padding:14px">
           <div style="display:flex;justify-content:space-between">
             <span class="tertiary">Projected</span>
-            <span style="font-weight:700;color:var(--success)">$${Math.round(earnings.projected).toLocaleString()}</span>
+            <span style="font-weight:700;color:var(--success)">${currency(earnings.projected)}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px">
             <span class="tertiary">${earnings.activeCount} active shifts</span>
@@ -274,10 +286,15 @@ function renderDoctorMenuSheet(sheetKind) {
       </section>
       <section><div class="section-label">Schedule</div>
         <button class="menu-item" type="button" data-nav-tab="shifts">${icon("calendar")}<span>My Shifts</span></button>
-        <button class="menu-item" type="button" data-open-sheet="requested">${icon("clock")}<span>Requested Days (${requested.length})</span></button>
-        <button class="menu-item" type="button" data-open-sheet="history">${icon("shifts")}<span>History</span></button>
-        <button class="menu-item" type="button" data-open-sheet="preferences">${icon("credentials")}<span>Preferences</span></button>
-        <button class="menu-item" type="button" data-nav-tab="credentials">${icon("stethoscope")}<span>My Info</span></button>
+        <button class="menu-item" type="button" data-open-sheet="requested">${icon("plus")}<span>Requested Days (${requested.length})</span></button>
+        <button class="menu-item" type="button" data-open-sheet="history">${icon("clock")}<span>Shift History</span></button>
+        <button class="menu-item" type="button" data-open-sheet="preferences">${icon("slider")}<span>Preferences</span></button>
+        <button class="menu-item" type="button" data-nav-tab="credentials">${icon("person")}<span>My Info &amp; Documents</span></button>
+      </section>
+      <section><div class="section-label">Support</div>
+        <a class="menu-item" href="mailto:erdunn706@gmail.com">${icon("envelope")}
+          <span>Contact support<span class="menu-item-sub">erdunn706@gmail.com</span></span>
+        </a>
       </section>
     </ul>`;
   return sheet("Dashboard", body);
@@ -332,7 +349,7 @@ function renderEarningsSheet(earnings) {
       </section>
       <section class="card stack">
         ${sectionHeader("Projected")}
-        <div style="font-size:1.6rem;font-weight:700;color:var(--success)">$${Math.round(earnings.projected).toLocaleString()}</div>
+        <div style="font-size:1.6rem;font-weight:700;color:var(--success)">${currency(earnings.projected)}</div>
         <p class="subtitle">${earnings.activeCount} active assignments</p>
       </section>
       ${earnings.completed?.length ? `
@@ -341,7 +358,7 @@ function renderEarningsSheet(earnings) {
           ${earnings.completed.slice(0, 8).map((a) => `
             <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
               <span>${formatShiftDate(a.shift.start)} · ${escapeHtml(a.shift.specialty)}</span>
-              <span style="color:var(--accent);font-weight:700">$${Math.round(currentRate(a.shift))}</span>
+              <span style="color:var(--accent);font-weight:700">${currency(currentRate(a.shift))}</span>
             </div>`).join("")}
         </section>` : ""}
     </main>`;
@@ -401,7 +418,7 @@ function renderDaySheet(dateISO, profile) {
           <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">
             <div>
               <div class="tertiary" style="font-size:12px">Est. earnings</div>
-              <div style="font-size:1.25rem;font-weight:700;color:var(--accent)">$${adjusted}</div>
+              <div class="money-lg">${currency(adjusted)}</div>
               ${premium > 1 ? `<div class="subtitle" style="font-size:11px;color:var(--warning)">Includes ${Math.round((premium - 1) * 100)}% holiday premium</div>` : ""}
             </div>
             ${existing
@@ -412,9 +429,11 @@ function renderDaySheet(dateISO, profile) {
           </div>
         </section>`;
       }).join("") : `
-        <section class="card empty-state">${icon("moon")}<div>No open shifts on this day</div>
+        <section class="card empty-state">
+          <div class="empty-icon">${icon("moon", { size: 28 })}</div>
+          <div class="empty-title">No open shifts on this day</div>
           <p class="subtitle">You can still request call — the hospital may post shifts later.</p>
-          ${!existing ? `<button type="button" class="btn-primary" style="margin-top:12px" data-request-day ${appStore.tokens.tokensRemaining === 0 ? "disabled" : ""}>Request This Day</button>` : ""}
+          ${!existing ? `<button type="button" class="btn-primary" data-request-day ${appStore.tokens.tokensRemaining === 0 ? "disabled" : ""}>Request This Day</button>` : ""}
         </section>`}
     </main>`;
   return sheet("Available Shifts", body);
@@ -470,6 +489,9 @@ export function bindDoctor(root, state, update) {
   });
   root.querySelectorAll("[data-cal-date]").forEach((btn) => {
     btn.addEventListener("click", () => update({ selectedDate: btn.dataset.calDate, daySheet: btn.dataset.calDate }));
+  });
+  root.querySelectorAll("[data-focus-toggle]").forEach((el) => {
+    el.addEventListener("change", () => update({ focusOpenDays: el.checked }));
   });
   root.querySelectorAll("[data-pref]").forEach((el) => {
     el.addEventListener("change", () => {

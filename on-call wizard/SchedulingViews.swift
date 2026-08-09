@@ -109,6 +109,43 @@ struct HospitalPolicySettingsView: View {
                 .pickerStyle(.segmented)
             }
             .cardStyle()
+
+            // Daily request tokens
+            VStack(alignment: .leading, spacing: 14) {
+                SectionHeader(title: "Daily Tokens", systemImage: "ticket.fill")
+                Text("How many coverage requests each physician can make per day. Raise or lower individuals on the Doctors tab.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Brand.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                PolicySliderRow(
+                    label: "Roster default",
+                    value: Binding(
+                        get: { Double(policyStore.policy.defaultDailyTokens) },
+                        set: { policyStore.policy.defaultDailyTokens = SchedulingPolicy.clampDailyTokens(Int($0)) }
+                    ),
+                    range: Double(SchedulingPolicy.minDailyTokens)...Double(SchedulingPolicy.maxDailyTokens),
+                    step: 1,
+                    format: { "\(Int($0)) / day" }
+                )
+                if let hospitalID = hospitalProfile?.id {
+                    Divider().opacity(0.35)
+                    Text("Per-doctor exceptions")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(DoctorRosterStore.shared.doctors) { doc in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(doc.name).font(.subheadline.weight(.medium))
+                                Text(doc.specialty).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            DoctorTokenAllowanceStepper(hospitalID: hospitalID, doctorID: doc.id, compact: true)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .cardStyle()
         }
     }
 

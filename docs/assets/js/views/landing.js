@@ -1,98 +1,241 @@
-import { icon } from "../components.js";
+import { bindReveals, bindCounters, bindStickyHeader } from "../lib/motion.js";
 
 /**
- * Public front door. Everything here is marketing — the product itself sits
- * behind the sign-in button in the header.
+ * Public marketing page. No product state is read here — every figure is
+ * illustrative, so the page renders identically for a first-time visitor.
  */
 export function renderLanding() {
   return `
-    <div class="landing">
-      <header class="landing-nav">
-        <a class="landing-brand" href="#top">
-          <span class="landing-spark">${icon("sparkles")}</span>
-          <span>On Call</span>
-        </a>
-        <nav class="landing-links">
-          <a href="#for-doctors">For doctors</a>
-          <a href="#for-hospitals">For hospitals</a>
-        </nav>
-        <div class="landing-cta">
-          <button type="button" class="landing-signin" data-goto-auth>Sign in</button>
-          <button type="button" class="landing-start" data-goto-auth>Get started</button>
-        </div>
-      </header>
-
-      <section class="landing-hero" id="top">
-        <p class="landing-eyebrow reveal">Built for the people who keep the lights on</p>
-        <h1 class="landing-title reveal">On-call scheduling<br />that fills itself.</h1>
-        <p class="landing-sub reveal">
-          Post a shift, let the rate find the market, and watch verified doctors claim it —
-          without the group chat, the spreadsheet, or the 2am phone tree.
-        </p>
-        <div class="landing-hero-cta reveal">
-          <button type="button" class="landing-start lg" data-demo-role="Hospital">See the hospital view</button>
-          <button type="button" class="landing-ghost lg" data-demo-role="Doctor">See the doctor view</button>
-        </div>
-        <p class="landing-note reveal">Live sample data. No account needed.</p>
-
-        <div class="landing-stats reveal">
-          <div><strong>86%</strong><span>shifts filled</span></div>
-          <div><strong>4 min</strong><span>median claim time</span></div>
-          <div><strong>0</strong><span>phone trees</span></div>
-        </div>
-      </section>
-
-      <section class="landing-section" id="for-doctors">
-        <div class="landing-section-head reveal">
-          <span class="landing-tag">For doctors</span>
-          <h2>Pick up the shifts you actually want.</h2>
-          <p>Your specialties, your hospitals, your calendar — and a rate that rises the closer it gets.</p>
-        </div>
-        <div class="landing-grid">
-          ${feature("calendar", "One calendar", "Every hospital you work with in a single month view. No more cross-checking three portals.")}
-          ${feature("dollar", "Rates you can see", "The rate is on the card before you claim it, and it is locked the moment you do.")}
-          ${feature("shifts", "Trade without the favour economy", "Offer a swap, name your compensation, and settle it in the app.")}
-          ${feature("dashboard", "Earnings in one place", "Projected pay across every hospital you work with, updated as you claim.")}
-        </div>
-      </section>
-
-      <section class="landing-section alt" id="for-hospitals">
-        <div class="landing-section-head reveal">
-          <span class="landing-tag">For hospitals</span>
-          <h2>Stop chasing coverage.</h2>
-          <p>Post the rota once. The algorithm prices the gaps and the roster comes to you.</p>
-        </div>
-        <div class="landing-grid">
-          ${feature("dashboard", "Fill rate at a glance", "Open days, coverage, and the ones about to go critical — on one screen.")}
-          ${feature("clock", "Pricing that reacts", "Rates escalate as a shift approaches, so the hard days clear before they hurt.")}
-          ${feature("check", "Verified before they claim", "NPI and licence checks run up front. Auto-approve the people you trust.")}
-          ${feature("lock", "Policy you control", "Cancellation windows, approval rules, and per-doctor rates stay yours.")}
-        </div>
-      </section>
-
-      <section class="landing-close reveal">
-        <h2>See it with real data.</h2>
-        <p>Open a seeded hospital or doctor account and click through the whole thing.</p>
-        <div class="landing-hero-cta">
-          <button type="button" class="landing-start lg" data-demo-role="Hospital">Explore as a hospital</button>
-          <button type="button" class="landing-ghost lg" data-demo-role="Doctor">Explore as a doctor</button>
-        </div>
-      </section>
-
-      <footer class="landing-foot">
-        <span>© ${new Date().getFullYear()} On Call</span>
-        <button type="button" class="btn-ghost" data-goto-auth>Sign in</button>
-      </footer>
+    <div class="site" id="top">
+      ${header()}
+      ${hero()}
+      ${statBand()}
+      ${bothSides()}
+      ${features()}
+      ${testimonial()}
+      ${closing()}
+      ${footer()}
     </div>`;
 }
 
-function feature(name, title, body) {
+function logo() {
   return `
-    <article class="landing-card reveal">
-      <span class="landing-card-icon">${icon(name)}</span>
-      <h3>${title}</h3>
-      <p>${body}</p>
-    </article>`;
+    <span class="logo">
+      <svg viewBox="0 0 28 28" fill="none" aria-hidden="true">
+        <rect width="28" height="28" rx="8" fill="var(--blue)"/>
+        <path d="M5.5 14.5h3.2l2.1-4.6 3.4 9.2 2.2-4.6h6.1"
+              stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>On Call</span>
+    </span>`;
+}
+
+function header() {
+  return `
+    <header class="site-header">
+      <a class="site-brand" href="#top">${logo()}</a>
+      <nav class="site-nav">
+        <a href="#features">Features</a>
+        <a href="#for-doctors">For doctors</a>
+        <a href="#for-hospitals">For hospitals</a>
+      </nav>
+      <div class="site-actions">
+        <button type="button" class="btn-quiet" data-goto-auth>Log in</button>
+        <button type="button" class="btn-solid" data-goto-auth>Get started</button>
+      </div>
+    </header>`;
+}
+
+function hero() {
+  return `
+    <section class="hero">
+      <span class="pill reveal">Now live for all specialties</span>
+      <h1 class="hero-title reveal">
+        Shift trading.<br /><span class="accent">Perfectly scheduled.</span>
+      </h1>
+      <p class="hero-sub reveal">
+        The platform built for doctors who need flexibility and hospitals that
+        need coverage. No friction. No gaps.
+      </p>
+      <div class="hero-actions reveal">
+        <button type="button" class="btn-solid lg" data-demo-role="Doctor">For doctors ${arrow()}</button>
+        <button type="button" class="btn-outline lg" data-demo-role="Hospital">For hospitals ${arrow()}</button>
+      </div>
+      <p class="hero-note reveal">Opens a live account with sample data. Nothing to sign up for.</p>
+    </section>`;
+}
+
+function arrow() {
+  return `<svg class="arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M3 8h9m0 0L8.5 4.5M12 8l-3.5 3.5" stroke="currentColor" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+function statBand() {
+  const stats = [
+    { to: 10, suffix: "k", label: "Doctors active" },
+    { to: 500, label: "Hospitals onboarded" },
+    { to: 2, decimals: 1, suffix: "M", label: "Shifts traded" }
+  ];
+
+  return `
+    <section class="stat-band">
+      <div class="stat-band-inner">
+        ${stats.map((s) => `
+          <div class="stat reveal">
+            <div class="stat-value">
+              <span data-count-to="${s.to}"
+                    ${s.decimals ? `data-count-decimals="${s.decimals}"` : ""}
+                    ${s.suffix ? `data-count-suffix="${s.suffix}"` : ""}>0</span><span class="plus">+</span>
+            </div>
+            <div class="stat-label">${s.label}</div>
+          </div>`).join("")}
+      </div>
+    </section>`;
+}
+
+function bothSides() {
+  return `
+    <section class="section">
+      <div class="section-head center reveal">
+        <h2>Built for both sides of the schedule.</h2>
+        <p>Whether you're trading a shift or managing an entire department, On Call has you covered.</p>
+      </div>
+
+      <div class="split">
+        <article class="split-card reveal" id="for-doctors">
+          <span class="eyebrow">For doctors</span>
+          <h3>Trade shifts in one tap.</h3>
+          <p>
+            Post a shift, find a match, confirm — done. Set your availability once
+            and let On Call handle the rest.
+          </p>
+          ${week([
+            { day: "Mon", tone: "on" }, { day: "Tue", tone: "" }, { day: "Wed", tone: "on" },
+            { day: "Thu", tone: "" }, { day: "Fri", tone: "swap", mark: "⇄" },
+            { day: "Sat", tone: "" }, { day: "Sun", tone: "" }
+          ])}
+          <p class="week-note">Friday is out for swap</p>
+          <button type="button" class="btn-solid" data-demo-role="Doctor">Get started as a doctor ${arrow()}</button>
+        </article>
+
+        <article class="split-card reveal" id="for-hospitals">
+          <span class="eyebrow">For hospitals</span>
+          <h3>Full coverage. Zero gaps.</h3>
+          <p>
+            See your entire roster in real time. Identify coverage gaps before they
+            become crises, and approve trades from one dashboard.
+          </p>
+          ${week([
+            { day: "Mon", tone: "on" }, { day: "Tue", tone: "on" }, { day: "Wed", tone: "gap", mark: "!" },
+            { day: "Thu", tone: "on" }, { day: "Fri", tone: "on" },
+            { day: "Sat", tone: "" }, { day: "Sun", tone: "" }
+          ])}
+          <p class="week-note gap"><span class="gap-dot"></span>1 coverage gap detected</p>
+          <button type="button" class="btn-solid" data-demo-role="Hospital">Get started as a hospital ${arrow()}</button>
+        </article>
+      </div>
+    </section>`;
+}
+
+function week(days) {
+  return `
+    <div class="week">
+      ${days.map((d) => `
+        <div class="week-day">
+          <span class="week-label">${d.day}</span>
+          <span class="week-cell ${d.tone}">${d.mark || (d.tone ? "•" : "–")}</span>
+        </div>`).join("")}
+    </div>`;
+}
+
+function features() {
+  const items = [
+    ["One-tap shift trading", "Post, match, and confirm shift trades in seconds. No emails, no phone calls."],
+    ["Real-time coverage gaps", "Hospitals see open slots the moment they appear — and fill them before patient care is affected."],
+    ["Rates that react", "Pricing escalates as a shift approaches, so the hard days clear early instead of at midnight."],
+    ["Instant notifications", "Push and email alerts keep both sides moving without anyone chasing a reply."],
+    ["Verified clinicians only", "NPI and licence checks happen up front, so claiming a shift takes a tap and not a phone call."],
+    ["Audit trail & reporting", "Every trade, approval and schedule change is recorded and exportable."]
+  ];
+
+  return `
+    <section class="section alt" id="features">
+      <div class="section-head reveal">
+        <span class="eyebrow">Platform features</span>
+        <h2>Everything you need. Nothing you don't.</h2>
+      </div>
+      <div class="card-grid">
+        ${items.map(([title, body]) => `
+          <article class="feature reveal">
+            <span class="dash"></span>
+            <h3>${title}</h3>
+            <p>${body}</p>
+          </article>`).join("")}
+      </div>
+    </section>`;
+}
+
+function testimonial() {
+  return `
+    <section class="section narrow">
+      <figure class="quote reveal">
+        <span class="dash"></span>
+        <blockquote>
+          "On Call cut our scheduling admin time by 70%. Our residents actually
+          use it — which says everything."
+        </blockquote>
+        <figcaption>
+          <strong>Dr. Sarah Chen</strong>
+          <span>Chief of Emergency Medicine, Metro General Health System</span>
+        </figcaption>
+      </figure>
+    </section>`;
+}
+
+function closing() {
+  return `
+    <section class="section">
+      <div class="cta-band reveal">
+        <div>
+          <h2>Ready to fix your scheduling?</h2>
+          <p>Join 10,000+ doctors and 500+ hospitals already on On Call.</p>
+        </div>
+        <div class="cta-actions">
+          <button type="button" class="btn-solid lg" data-demo-role="Hospital">Start free trial</button>
+          <button type="button" class="btn-outline lg" data-demo-role="Doctor">Request a demo</button>
+        </div>
+      </div>
+    </section>`;
+}
+
+function footer() {
+  const columns = [
+    ["Product", ["Features", "Security", "Changelog"]],
+    ["For doctors", ["Shift trading", "Availability", "Notifications"]],
+    ["For hospitals", ["Roster management", "Coverage gaps", "Reporting"]],
+    ["Company", ["About", "Careers", "Contact"]]
+  ];
+
+  return `
+    <footer class="site-footer">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a class="site-brand" href="#top">${logo()}</a>
+          <p>Shift trading and scheduling built for the pace of modern healthcare.</p>
+        </div>
+        ${columns.map(([title, links]) => `
+          <div class="footer-col">
+            <h4>${title}</h4>
+            ${links.map((l) => `<span>${l}</span>`).join("")}
+          </div>`).join("")}
+      </div>
+      <div class="footer-bottom">
+        <span>© ${new Date().getFullYear()} On Call. All rights reserved.</span>
+        <button type="button" class="btn-quiet" data-goto-auth>Log in</button>
+      </div>
+    </footer>`;
 }
 
 export function bindLanding(root, { onSignIn, onDemo }) {
@@ -103,7 +246,7 @@ export function bindLanding(root, { onSignIn, onDemo }) {
     el.addEventListener("click", () => onDemo(el.dataset.demoRole));
   });
 
-  root.querySelectorAll('.landing-links a, .landing-brand').forEach((link) => {
+  root.querySelectorAll(".site-nav a, .site-brand").forEach((link) => {
     link.addEventListener("click", (event) => {
       const target = root.querySelector(link.getAttribute("href"));
       if (!target) return;
@@ -112,37 +255,7 @@ export function bindLanding(root, { onSignIn, onDemo }) {
     });
   });
 
-  revealOnScroll(root);
-  trackNavElevation(root);
-}
-
-/** Fades sections in as they arrive. Falls back to visible if unsupported. */
-function revealOnScroll(root) {
-  const items = [...root.querySelectorAll(".reveal")];
-  if (!("IntersectionObserver" in window)) {
-    items.forEach((el) => el.classList.add("in"));
-    return;
-  }
-
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      entry.target.classList.add("in");
-      observer.unobserve(entry.target);
-    }
-  }, { threshold: 0.12, rootMargin: "0px 0px -40px 0px" });
-
-  items.forEach((el, i) => {
-    el.style.setProperty("--reveal-delay", `${Math.min(i % 4, 3) * 70}ms`);
-    observer.observe(el);
-  });
-}
-
-/** Gives the header a background once the hero scrolls under it. */
-function trackNavElevation(root) {
-  const nav = root.querySelector(".landing-nav");
-  if (!nav) return;
-  const onScroll = () => nav.classList.toggle("scrolled", window.scrollY > 12);
-  onScroll();
-  window.addEventListener("scroll", onScroll, { passive: true });
+  bindReveals(root);
+  bindCounters(root);
+  bindStickyHeader(root);
 }

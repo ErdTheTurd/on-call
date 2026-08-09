@@ -17,7 +17,11 @@ export function defaultPolicy() {
     tradePenaltyAmount: 250,
     tradePenaltyHoursBeforeStart: 72,
     specialtyBaseRates: {},
-    doctorBaseRates: {}
+    doctorBaseRates: {},
+    // Daily request tokens. The default applies to the whole roster;
+    // doctorTokenLimits holds per-doctor exceptions keyed by doctor id.
+    defaultDailyTokens: 3,
+    doctorTokenLimits: {}
   };
 }
 
