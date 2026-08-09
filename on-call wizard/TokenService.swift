@@ -9,7 +9,6 @@ public final class TokenStore: ObservableObject {
     public static let shared = TokenStore()
 
     private let storageKey = "doctor_tokens_v2"
-    private let defaultDailyTokens = 3
 
     @Published public var tokensRemaining: Int = 3
     @Published public var dailyLimit: Int = 3
@@ -91,6 +90,22 @@ public final class TokenStore: ObservableObject {
     }
 
     public init() { load() }
+
+    /// Apply hospital policy limits without refunding or revoking tokens already spent today.
+    public func reconcileDailyLimit() {
+        let doctorID = SessionStore.shared.currentDoctorID
+        let limit = SchedulingPolicyStore.shared.effectiveDailyTokenLimit(forDoctorID: doctorID)
+        applyDailyLimit(limit)
+    }
+
+    public func applyDailyLimit(_ limit: Int) {
+        let clamped = SchedulingPolicy.clampDailyTokens(limit)
+        guard clamped != dailyLimit else { return }
+        let usedToday = max(0, dailyLimit - tokensRemaining)
+        dailyLimit = clamped
+        tokensRemaining = max(0, clamped - usedToday)
+        save()
+    }
 
     // MARK: - Request a day
 
@@ -230,18 +245,24 @@ public final class TokenStore: ObservableObject {
     }
 
     private func load() {
+        let doctorID = SessionStore.shared.currentDoctorID
+        let policyLimit = SchedulingPolicyStore.shared.effectiveDailyTokenLimit(forDoctorID: doctorID)
+
         guard let data = UserDefaults.standard.data(forKey: storageKey),
               let stored = try? JSONDecoder().decode(Stored.self, from: data) else {
-            tokensRemaining = defaultDailyTokens
-            dailyLimit = defaultDailyTokens
+            dailyLimit = policyLimit
+            tokensRemaining = policyLimit
             return
         }
-        dailyLimit = stored.dailyLimit
         requestedDays = stored.requestedDays
+        let usedToday: Int
         if Calendar.current.isDateInToday(stored.lastResetDate) {
-            tokensRemaining = stored.tokensRemaining
+            usedToday = max(0, stored.dailyLimit - stored.tokensRemaining)
+            dailyLimit = policyLimit
+            tokensRemaining = max(0, policyLimit - usedToday)
         } else {
-            tokensRemaining = stored.dailyLimit
+            dailyLimit = policyLimit
+            tokensRemaining = policyLimit
         }
     }
 
@@ -278,5 +299,80 @@ public struct TokenBadge: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(Color.secondary.opacity(0.08), in: Capsule())
+        .onAppear { store.reconcileDailyLimit() }
+    }
+}
+
+// MARK: - Hospital token allowance stepper
+
+/// Lets a hospital set how many daily request tokens one physician may spend.
+public struct DoctorTokenAllowanceStepper: View {
+    let hospitalID: UUID
+    let doctorID: UUID
+    var compact: Bool = false
+
+    @ObservedObject private var policyStore = SchedulingPolicyStore.shared
+
+    private var policy: SchedulingPolicy {
+        policyStore.policy(for: hospitalID)
+    }
+
+    private var value: Int {
+        policy.dailyTokenLimit(forDoctorID: doctorID)
+    }
+
+    private var isCustom: Bool {
+        policy.hasCustomTokenLimit(forDoctorID: doctorID)
+    }
+
+    public var body: some View {
+        HStack(spacing: compact ? 8 : 10) {
+            Text(compact ? "Tokens/day" : "Daily tokens")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 0) {
+                Button {
+                    policyStore.adjustDoctorTokenLimit(hospitalID: hospitalID, doctorID: doctorID, delta: -1)
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(value <= SchedulingPolicy.minDailyTokens)
+
+                Text("\(value)")
+                    .font(.subheadline.weight(.bold).monospacedDigit())
+                    .frame(minWidth: 22)
+                    .contentTransition(.numericText())
+
+                Button {
+                    policyStore.adjustDoctorTokenLimit(hospitalID: hospitalID, doctorID: doctorID, delta: 1)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(value >= SchedulingPolicy.maxDailyTokens)
+            }
+            .background(Color.secondary.opacity(0.1), in: Capsule())
+
+            if isCustom {
+                Button("Use default") {
+                    policyStore.clearDoctorTokenLimit(hospitalID: hospitalID, doctorID: doctorID)
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Brand.accent)
+                .buttonStyle(.plain)
+            } else {
+                Text("Default")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Daily tokens for physician")
+        .accessibilityValue("\(value)")
     }
 }

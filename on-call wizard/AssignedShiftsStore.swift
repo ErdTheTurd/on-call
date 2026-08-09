@@ -798,6 +798,54 @@ public final class SchedulingPolicyStore: ObservableObject {
         policy = newPolicy
         save()
         ShiftTradeService.shared.upsertPolicy(newPolicy, for: hospitalID)
+        TokenStore.shared.reconcileDailyLimit()
+    }
+
+    /// Tokens/day for a doctor at one hospital (override or that hospital's default).
+    public func tokenLimit(forDoctorID doctorID: UUID, hospitalID: UUID) -> Int {
+        policy(for: hospitalID).dailyTokenLimit(forDoctorID: doctorID)
+    }
+
+    /**
+     A doctor holds one pool of tokens but may sit on several rosters, so the
+     most generous hospital wins. Anything else would let one hospital throttle
+     a doctor's requests to another.
+     */
+    public func effectiveDailyTokenLimit(forDoctorID doctorID: UUID?) -> Int {
+        guard let doctorID else { return SchedulingPolicy().defaultDailyTokens }
+        var limit: Int?
+        for policy in policiesByHospital.values {
+            let candidate = policy.dailyTokenLimit(forDoctorID: doctorID)
+            limit = limit.map { max($0, candidate) } ?? candidate
+        }
+        // Also consider the in-memory active policy if it isn't keyed yet.
+        let active = policy.dailyTokenLimit(forDoctorID: doctorID)
+        limit = limit.map { max($0, active) } ?? active
+        return limit ?? SchedulingPolicy().defaultDailyTokens
+    }
+
+    public func setDoctorTokenLimit(hospitalID: UUID, doctorID: UUID, limit: Int?) {
+        var updated = policy(for: hospitalID)
+        updated.setDailyTokenLimit(limit, forDoctorID: doctorID)
+        setPolicy(updated, for: hospitalID)
+        if let profile = HospitalProfile.load(), profile.id == hospitalID {
+            var p = profile
+            p.schedulingPolicy = updated
+            p.save()
+        }
+    }
+
+    public func adjustDoctorTokenLimit(hospitalID: UUID, doctorID: UUID, delta: Int) {
+        let current = tokenLimit(forDoctorID: doctorID, hospitalID: hospitalID)
+        setDoctorTokenLimit(
+            hospitalID: hospitalID,
+            doctorID: doctorID,
+            limit: SchedulingPolicy.clampDailyTokens(current + delta)
+        )
+    }
+
+    public func clearDoctorTokenLimit(hospitalID: UUID, doctorID: UUID) {
+        setDoctorTokenLimit(hospitalID: hospitalID, doctorID: doctorID, limit: nil)
     }
 
     public func loadForHospital(_ profile: HospitalProfile?) {
