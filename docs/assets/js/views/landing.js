@@ -10,29 +10,37 @@ export function renderLanding() {
       ${header()}
       ${hero()}
       ${statBand()}
-      ${preview()}
-      ${forDoctors()}
-      ${forHospitals()}
-      ${howItWorks()}
+      ${bothSides()}
+      ${features()}
+      ${testimonial()}
       ${closing()}
       ${footer()}
     </div>`;
 }
 
+function logo() {
+  return `
+    <span class="logo">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="6.5" cy="17.5" r="2.6" fill="currentColor"/>
+        <path d="M11.5 20A11 11 0 0 0 4 8.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M17 20A16.5 16.5 0 0 0 4 3.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+      <span>On Call</span>
+    </span>`;
+}
+
 function header() {
   return `
     <header class="site-header">
-      <a class="site-brand" href="#top">
-        <span class="site-mark"></span>
-        <span>On Call</span>
-      </a>
+      <a class="site-brand" href="#top">${logo()}</a>
       <nav class="site-nav">
-        <a href="#preview">Product</a>
+        <a href="#features">Features</a>
         <a href="#for-doctors">For doctors</a>
         <a href="#for-hospitals">For hospitals</a>
       </nav>
       <div class="site-actions">
-        <button type="button" class="btn-quiet" data-goto-auth>Sign in</button>
+        <button type="button" class="btn-quiet" data-goto-auth>Log in</button>
         <button type="button" class="btn-solid" data-goto-auth>Get started</button>
       </div>
     </header>`;
@@ -41,29 +49,34 @@ function header() {
 function hero() {
   return `
     <section class="hero">
-      <p class="eyebrow reveal">On-call coverage, solved</p>
+      <span class="pill reveal">Now live for all specialties</span>
       <h1 class="hero-title reveal">
-        The rota fills itself<br />while you sleep.
+        Shift trading.<br /><span class="accent">Perfectly scheduled.</span>
       </h1>
       <p class="hero-sub reveal">
-        Post the shifts you can't cover. On Call prices each gap by how urgent it is,
-        puts it in front of verified doctors, and locks the rate the moment someone claims it.
-        No group chat. No agency markup. No 2am phone tree.
+        The platform built for doctors who need flexibility and hospitals that
+        need coverage. No friction. No gaps.
       </p>
       <div class="hero-actions reveal">
-        <button type="button" class="btn-solid lg" data-demo-role="Hospital">See the hospital view</button>
-        <button type="button" class="btn-outline lg" data-demo-role="Doctor">See the doctor view</button>
+        <button type="button" class="btn-solid lg" data-demo-role="Doctor">For doctors ${arrow()}</button>
+        <button type="button" class="btn-outline lg" data-demo-role="Hospital">For hospitals ${arrow()}</button>
       </div>
       <p class="hero-note reveal">Opens a live account with sample data. Nothing to sign up for.</p>
     </section>`;
 }
 
+function arrow() {
+  return `<svg class="arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M3 8h9m0 0L8.5 4.5M12 8l-3.5 3.5" stroke="currentColor" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+
 function statBand() {
   const stats = [
-    { to: 86, suffix: "%", label: "of shifts filled", sub: "across pilot rotas" },
-    { to: 4, suffix: " min", label: "median time to claim", sub: "from post to accepted" },
-    { to: 12400, label: "shifts covered", sub: "since launch" },
-    { to: 0, prefix: "$", label: "agency markup", sub: "hospitals pay the doctor" }
+    { to: 10, suffix: "k", label: "Doctors active" },
+    { to: 500, label: "Hospitals onboarded" },
+    { to: 2, decimals: 1, suffix: "M", label: "Shifts traded" }
   ];
 
   return `
@@ -71,166 +84,158 @@ function statBand() {
       <div class="stat-band-inner">
         ${stats.map((s) => `
           <div class="stat reveal">
-            <div class="stat-value"
-                 data-count-to="${s.to}"
-                 ${s.prefix ? `data-count-prefix="${s.prefix}"` : ""}
-                 ${s.suffix ? `data-count-suffix="${s.suffix}"` : ""}>0</div>
+            <div class="stat-value">
+              <span data-count-to="${s.to}"
+                    ${s.decimals ? `data-count-decimals="${s.decimals}"` : ""}
+                    ${s.suffix ? `data-count-suffix="${s.suffix}"` : ""}>0</span><span class="plus">+</span>
+            </div>
             <div class="stat-label">${s.label}</div>
-            <div class="stat-sub">${s.sub}</div>
           </div>`).join("")}
       </div>
     </section>`;
 }
 
-/** A still of the hospital dashboard, built from static markup. */
-function preview() {
-  const days = [
-    { n: 1, tone: "" }, { n: 2, tone: "ok" }, { n: 3, tone: "ok" }, { n: 4, tone: "" },
-    { n: 5, tone: "warn" }, { n: 6, tone: "ok" }, { n: 7, tone: "ok" },
-    { n: 8, tone: "ok" }, { n: 9, tone: "hot" }, { n: 10, tone: "warn" }, { n: 11, tone: "ok" },
-    { n: 12, tone: "ok" }, { n: 13, tone: "" }, { n: 14, tone: "ok" }
-  ];
-
-  return `
-    <section class="preview" id="preview">
-      <div class="section-head center reveal">
-        <span class="tag">The control room</span>
-        <h2>Every gap, priced and visible.</h2>
-        <p>One screen tells you what is covered, what is about to hurt, and what it will cost.</p>
-      </div>
-
-      <div class="preview-frame reveal">
-        <div class="preview-bar">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="preview-title">Riverside General — August</span>
-        </div>
-        <div class="preview-body">
-          <div class="preview-metrics">
-            <div class="metric">
-              <div class="metric-value" data-count-to="15">0</div>
-              <div class="metric-label">Open shifts</div>
-            </div>
-            <div class="metric">
-              <div class="metric-value accent" data-count-to="86" data-count-suffix="%">0</div>
-              <div class="metric-label">Fill rate</div>
-            </div>
-            <div class="metric">
-              <div class="metric-value" data-count-to="7">0</div>
-              <div class="metric-label">Auto-approved</div>
-            </div>
-          </div>
-
-          <div class="preview-cal">
-            ${days.map((d) => `<span class="cal-day ${d.tone}">${d.n}</span>`).join("")}
-          </div>
-
-          <div class="preview-rows">
-            ${previewRow("Emergency Medicine", "Sat 9 Aug", 2450, "Critical", "hot")}
-            ${previewRow("Internal Medicine", "Sun 10 Aug", 1780, "Soon", "warn")}
-            ${previewRow("Cardiology", "Tue 12 Aug", 1600, "Open", "ok")}
-          </div>
-        </div>
-      </div>
-    </section>`;
-}
-
-function previewRow(specialty, when, rate, badge, tone) {
-  return `
-    <div class="preview-row">
-      <span class="row-dot ${tone}"></span>
-      <div class="row-main">
-        <div class="row-title">${specialty}</div>
-        <div class="row-sub">${when} · Full day</div>
-      </div>
-      <div class="row-rate ${tone}">$<span data-count-to="${rate}">0</span>/day</div>
-      <span class="row-badge ${tone}">${badge}</span>
-    </div>`;
-}
-
-function forDoctors() {
-  return `
-    <section class="section" id="for-doctors">
-      <div class="section-head reveal">
-        <span class="tag">For doctors</span>
-        <h2>Pick up the shifts you actually want.</h2>
-        <p>Your specialties, your hospitals, one calendar — and a rate that rises the closer it gets.</p>
-      </div>
-      <div class="card-grid">
-        ${card("One calendar", "Every hospital you work with in a single month view, instead of three portals and a WhatsApp thread.")}
-        ${card("The rate is on the card", "You see what a shift pays before you claim it, and it is locked the second you do.")}
-        ${card("Trades without the favour economy", "Offer a swap, name what you want for it, and settle the whole thing in the app.")}
-        ${card("Verified once", "NPI and licence checks happen up front, so claiming a shift takes a tap and not a phone call.")}
-      </div>
-    </section>`;
-}
-
-function forHospitals() {
-  return `
-    <section class="section alt" id="for-hospitals">
-      <div class="section-head reveal">
-        <span class="tag">For hospitals</span>
-        <h2>Stop chasing coverage.</h2>
-        <p>Post the rota once. The algorithm prices the gaps and the roster comes to you.</p>
-      </div>
-      <div class="card-grid">
-        ${card("Coverage at a glance", "Open days, filled days, and the ones about to go critical — colour-coded on one calendar.")}
-        ${card("Pricing that reacts", "Rates escalate as a shift approaches, so hard days clear early instead of at midnight.")}
-        ${card("Approve once, not every time", "Auto-approve the doctors you trust and let the rest come through a queue you control.")}
-        ${card("Your policy, your rules", "Cancellation windows, approval requirements and per-doctor rates all stay yours.")}
-      </div>
-    </section>`;
-}
-
-function howItWorks() {
-  const steps = [
-    ["Post the gap", "Add the days you cannot cover. Rates start from your floor and climb as the date nears."],
-    ["Doctors claim it", "Verified doctors in that specialty see it instantly and claim at the posted rate."],
-    ["It is locked", "The rate fixes on claim, and cancellation follows the policy you set."]
-  ];
-
+function bothSides() {
   return `
     <section class="section">
       <div class="section-head center reveal">
-        <span class="tag">How it works</span>
-        <h2>Three steps, no phone calls.</h2>
+        <h2>Built for both sides of the schedule.</h2>
+        <p>Whether you're trading a shift or managing an entire department, On Call has you covered.</p>
       </div>
-      <ol class="steps">
-        ${steps.map(([title, body], i) => `
-          <li class="step reveal">
-            <span class="step-num">${i + 1}</span>
+
+      <div class="split">
+        <article class="split-card reveal" id="for-doctors">
+          <span class="eyebrow">For doctors</span>
+          <h3>Trade shifts in one tap.</h3>
+          <p>
+            Post a shift, find a match, confirm — done. Set your availability once
+            and let On Call handle the rest.
+          </p>
+          ${week([
+            { day: "Mon", tone: "on" }, { day: "Tue", tone: "" }, { day: "Wed", tone: "on" },
+            { day: "Thu", tone: "" }, { day: "Fri", tone: "swap", mark: "⇄" },
+            { day: "Sat", tone: "" }, { day: "Sun", tone: "" }
+          ])}
+          <p class="week-note">Friday is out for swap</p>
+          <button type="button" class="btn-solid" data-demo-role="Doctor">Get started as a doctor ${arrow()}</button>
+        </article>
+
+        <article class="split-card reveal" id="for-hospitals">
+          <span class="eyebrow">For hospitals</span>
+          <h3>Full coverage. Zero gaps.</h3>
+          <p>
+            See your entire roster in real time. Identify coverage gaps before they
+            become crises, and approve trades from one dashboard.
+          </p>
+          ${week([
+            { day: "Mon", tone: "on" }, { day: "Tue", tone: "on" }, { day: "Wed", tone: "gap", mark: "!" },
+            { day: "Thu", tone: "on" }, { day: "Fri", tone: "on" },
+            { day: "Sat", tone: "" }, { day: "Sun", tone: "" }
+          ])}
+          <p class="week-note gap"><span class="gap-dot"></span>1 coverage gap detected</p>
+          <button type="button" class="btn-solid" data-demo-role="Hospital">Get started as a hospital ${arrow()}</button>
+        </article>
+      </div>
+    </section>`;
+}
+
+function week(days) {
+  return `
+    <div class="week">
+      ${days.map((d) => `
+        <div class="week-day">
+          <span class="week-label">${d.day}</span>
+          <span class="week-cell ${d.tone}">${d.mark || (d.tone ? "•" : "–")}</span>
+        </div>`).join("")}
+    </div>`;
+}
+
+function features() {
+  const items = [
+    ["One-tap shift trading", "Post, match, and confirm shift trades in seconds. No emails, no phone calls."],
+    ["Real-time coverage gaps", "Hospitals see open slots the moment they appear — and fill them before patient care is affected."],
+    ["Rates that react", "Pricing escalates as a shift approaches, so the hard days clear early instead of at midnight."],
+    ["Instant notifications", "Push and email alerts keep both sides moving without anyone chasing a reply."],
+    ["Verified clinicians only", "NPI and licence checks happen up front, so claiming a shift takes a tap and not a phone call."],
+    ["Audit trail & reporting", "Every trade, approval and schedule change is recorded and exportable."]
+  ];
+
+  return `
+    <section class="section alt" id="features">
+      <div class="section-head reveal">
+        <span class="eyebrow">Platform features</span>
+        <h2>Everything you need. Nothing you don't.</h2>
+      </div>
+      <div class="card-grid">
+        ${items.map(([title, body]) => `
+          <article class="feature reveal">
+            <span class="dash"></span>
             <h3>${title}</h3>
             <p>${body}</p>
-          </li>`).join("")}
-      </ol>
+          </article>`).join("")}
+      </div>
+    </section>`;
+}
+
+function testimonial() {
+  return `
+    <section class="section narrow">
+      <figure class="quote reveal">
+        <span class="dash"></span>
+        <blockquote>
+          "On Call cut our scheduling admin time by 70%. Our residents actually
+          use it — which says everything."
+        </blockquote>
+        <figcaption>
+          <strong>Dr. Sarah Chen</strong>
+          <span>Chief of Emergency Medicine, Metro General Health System</span>
+        </figcaption>
+      </figure>
     </section>`;
 }
 
 function closing() {
   return `
-    <section class="closing reveal">
-      <h2>See it with real data.</h2>
-      <p>Open a fully populated hospital or doctor account and click through the whole product.</p>
-      <div class="hero-actions">
-        <button type="button" class="btn-solid lg" data-demo-role="Hospital">Explore as a hospital</button>
-        <button type="button" class="btn-outline lg" data-demo-role="Doctor">Explore as a doctor</button>
+    <section class="section">
+      <div class="cta-band reveal">
+        <div>
+          <h2>Ready to fix your scheduling?</h2>
+          <p>Join 10,000+ doctors and 500+ hospitals already on On Call.</p>
+        </div>
+        <div class="cta-actions">
+          <button type="button" class="btn-solid lg" data-demo-role="Hospital">Start free trial</button>
+          <button type="button" class="btn-outline lg" data-demo-role="Doctor">Request a demo</button>
+        </div>
       </div>
     </section>`;
 }
 
 function footer() {
+  const columns = [
+    ["Product", ["Features", "Security", "Changelog"]],
+    ["For doctors", ["Shift trading", "Availability", "Notifications"]],
+    ["For hospitals", ["Roster management", "Coverage gaps", "Reporting"]],
+    ["Company", ["About", "Careers", "Contact"]]
+  ];
+
   return `
     <footer class="site-footer">
-      <span>© ${new Date().getFullYear()} On Call</span>
-      <button type="button" class="btn-quiet" data-goto-auth>Sign in</button>
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a class="site-brand" href="#top">${logo()}</a>
+          <p>Shift trading and scheduling built for the pace of modern healthcare.</p>
+        </div>
+        ${columns.map(([title, links]) => `
+          <div class="footer-col">
+            <h4>${title}</h4>
+            ${links.map((l) => `<span>${l}</span>`).join("")}
+          </div>`).join("")}
+      </div>
+      <div class="footer-bottom">
+        <span>© ${new Date().getFullYear()} On Call. All rights reserved.</span>
+        <button type="button" class="btn-quiet" data-goto-auth>Log in</button>
+      </div>
     </footer>`;
-}
-
-function card(title, body) {
-  return `
-    <article class="feature reveal">
-      <h3>${title}</h3>
-      <p>${body}</p>
-    </article>`;
 }
 
 export function bindLanding(root, { onSignIn, onDemo }) {
