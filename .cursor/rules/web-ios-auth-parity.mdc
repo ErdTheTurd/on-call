@@ -1,0 +1,29 @@
+---
+description: Auth and security changes must ship on web and iOS together
+alwaysApply: true
+---
+
+# Web + iOS auth parity
+
+When the user asks for an auth or account-security change on **either** the web app (`docs/`) or the iOS app (`on-call wizard/`), apply the **same behavior on both** unless they explicitly say “web only” or “iOS only”.
+
+## Covered surfaces
+
+- Sign in / sign up (email + password)
+- Email verification (6-digit OTP, not magic links)
+- Google and Apple OAuth
+- Authenticator MFA / 2FA (TOTP)
+- Session handling, sign-out, password reset (when implemented)
+- Role selection for new OAuth users (Doctor / Hospital)
+
+## How to implement
+
+1. Update web: `docs/assets/js/store.js`, `docs/assets/js/domain/mfa.js`, `docs/assets/js/views/auth.js`, `docs/assets/js/app.js`, and related CSS.
+2. Update iOS: `on-call wizard/Supabase/SupabaseAuthService.swift`, `on-call wizard/AuthView.swift`, and any credentials/security UI.
+3. Keep copy, error messages, and flow order aligned (e.g. signup → email OTP → optional MFA enroll → app).
+4. Document dashboard steps once in `supabase/AUTH_SETUP.md` (applies to both clients).
+
+## Do not
+
+- Ship OAuth or MFA on only one platform by default
+- Use magic-link confirm emails when the product standard is 6-digit codes
