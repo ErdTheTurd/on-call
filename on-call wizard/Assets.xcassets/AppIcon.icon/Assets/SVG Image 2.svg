@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
-  <!-- ECG / pulse mark — white stroke reads through liquid glass -->
-  <path d="M160 512h140l90-220 150 440 95-220h229"
+  <!-- Classic ECG pulse — bold enough to read at small sizes -->
+  <path d="M120 530 H280 L340 530 L420 250 L520 780 L600 420 L660 530 H904"
         stroke="white"
-        stroke-width="72"
+        stroke-width="68"
         stroke-linecap="round"
         stroke-linejoin="round"
         fill="none"/>

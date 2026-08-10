@@ -1,4 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
-  <!-- Soft glass orb highlight for Icon Composer translucency -->
-  <ellipse cx="360" cy="300" rx="280" ry="200" fill="white" fill-opacity="0.55"/>
+  <!-- Soft specular highlight for liquid-glass (Icon Composer translucency does the rest) -->
+  <defs>
+    <radialGradient id="sheen" cx="38%" cy="28%" r="55%">
+      <stop offset="0%" stop-color="white" stop-opacity="0.75"/>
+      <stop offset="45%" stop-color="white" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="380" cy="300" rx="320" ry="240" fill="url(#sheen)"/>
+  <ellipse cx="300" cy="220" rx="90" ry="50" fill="white" fill-opacity="0.35"/>
 </svg>
