@@ -1,4 +1,4 @@
-import { uuid, startOfDay, sameDay, SPECIALTIES } from "./brand.js";
+import { uuid, startOfDay, sameDay, SPECIALTIES, specialtyMatches, doctorSpecialty } from "./brand.js";
 import { normalizeShift, isPastShift, currentRate } from "./shift-math.js";
 import { getSupabase, isConfigured, upsertProfile } from "./supabase-client.js";
 import { defaultPolicy, previewPenalty, normalizeCancellationScale, bracketLabel } from "./domain/policy.js";
@@ -215,8 +215,13 @@ export async function syncEverything() {
 }
 
 async function afterMutation(fn) {
-  if (!isConfigured()) return;
-  try { await fn(); } catch { /* offline */ }
+  if (!isConfigured()) return { ok: true, offline: true };
+  try {
+    await fn();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || "Sync failed" };
+  }
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────
@@ -665,15 +670,15 @@ export function findShiftForDay(hospitalID, specialty, date) {
 
 export function openShifts(profile) {
   const prefs = appStore.doctorPrefs;
-  const mySpecialty = profile?.specialties?.[0];
+  const mySpecialty = doctorSpecialty(profile);
   return appStore.shifts
     .filter((s) => !isPastShift(s) && !isShiftFilled(s.id))
     .filter((s) => !isDayUnavailable(s.start, s.hospitalID))
     .filter((s) => {
       if (prefs.hiddenHospitalIDs.includes(s.hospitalID)) return false;
-      // Doctors only ever see their one assigned specialty.
-      if (mySpecialty) return s.specialty === mySpecialty;
-      return true;
+      // One specialty only — never fall open to the full board.
+      if (!mySpecialty) return false;
+      return specialtyMatches(s.specialty, mySpecialty);
     });
 }
 
@@ -684,9 +689,14 @@ export function isShiftFilled(shiftID) {
 }
 
 export function activeAssignments() {
-  return appStore.assignments.filter((a) =>
-    a.status === "scheduled" || a.status === "traded_pending"
-  );
+  const mySpecialty = doctorSpecialty(appStore.doctorProfile);
+  const doctorID = appStore.doctorProfile?.id || appStore.session?.userID;
+  return appStore.assignments.filter((a) => {
+    if (!(a.status === "scheduled" || a.status === "traded_pending")) return false;
+    if (doctorID && a.doctorID && a.doctorID !== doctorID) return false;
+    if (!mySpecialty) return false;
+    return specialtyMatches(a.shift?.specialty, mySpecialty);
+  });
 }
 
 export function pendingTradeCount() {
@@ -817,7 +827,11 @@ export async function requestToken(date, hospitalID, hospitalName, specialty, do
   tokens.requestedDays = [...(tokens.requestedDays || []), req];
   appStore.saveTokens(tokens);
 
-  await afterMutation(() => sync.submitTokenRequest(req));
+  const syncRes = await afterMutation(() => sync.submitTokenRequest(req));
+  if (syncRes && syncRes.ok === false && isConfigured()) {
+    // Keep the local request — hospital sync may catch up — but tell the user.
+    return { ok: true, request: req, warning: syncRes.error };
+  }
   return { ok: true, request: req };
 }
 
@@ -921,15 +935,23 @@ export async function cancelShift(assignment) {
   return { ok: true, penalty };
 }
 
-export async function requestTrade(assignment, toDoctor) {
+export async function requestTrade(assignment, toDoctor, { partnerAssignment = null, compensationAmount = 0 } = {}) {
   const policy = getPolicy(assignment.shift.hospitalID);
   const preview = previewPenalty("trade", policy, assignment.shift.start);
   if (!preview.allowed) return { ok: false, error: preview.blockedReason };
 
+  const amount = Math.max(0, Math.min(1000, Math.round(Number(compensationAmount) || 0)));
   const list = appStore.assignments.map((a) =>
     a.id === assignment.id ? { ...a, status: "traded_pending" } : a
   );
-  appStore.saveAssignments(list);
+  if (partnerAssignment) {
+    const partnerList = list.map((a) =>
+      a.id === partnerAssignment.id ? { ...a, status: "traded_pending" } : a
+    );
+    appStore.saveAssignments(partnerList);
+  } else {
+    appStore.saveAssignments(list);
+  }
 
   const trade = {
     id: uuid(),
@@ -937,6 +959,11 @@ export async function requestTrade(assignment, toDoctor) {
     fromDoctorID: assignment.doctorID,
     toDoctorID: toDoctor.id,
     toDoctorName: toDoctor.name,
+    requestedShiftID: partnerAssignment?.shiftID || null,
+    offeredDate: assignment.shift.start,
+    requestedDate: partnerAssignment?.shift?.start || null,
+    specialty: assignment.shift.specialty,
+    compensationAmount: amount,
     state: "pending",
     createdAt: new Date().toISOString()
   };
@@ -946,7 +973,13 @@ export async function requestTrade(assignment, toDoctor) {
   appStore.saveTrades(trades);
 
   await afterMutation(() =>
-    sync.requestTrade(assignment.shiftID, assignment.doctorID, toDoctor.id)
+    sync.requestTrade(assignment.shiftID, assignment.doctorID, toDoctor.id, {
+      requestedShiftId: trade.requestedShiftID,
+      compensationAmount: amount,
+      offeredDate: trade.offeredDate,
+      requestedDate: trade.requestedDate,
+      specialty: trade.specialty
+    })
   );
 
   return { ok: true, trade, preview };
@@ -997,38 +1030,77 @@ export async function respondTrade(trade, accept) {
   return { ok: true, penalty };
 }
 
-/** Counter an incoming trade by changing the compensation asked. */
-export async function counterTrade(trade, compensationAmount) {
+/**
+ * Alternate scheduled days the current doctor can offer when countering.
+ * Mirrors iOS AssignedShiftsStore.counterAlternateDays.
+ */
+export function counterAlternateDays(trade) {
+  const excluded = new Set([trade.shiftID, trade.requestedShiftID].filter(Boolean));
+  return activeAssignments()
+    .filter((a) => !excluded.has(a.shiftID) && !isPastShift(a.shift) && a.status === "scheduled")
+    .sort((a, b) => new Date(a.shift.start) - new Date(b.shift.start));
+}
+
+/**
+ * Counter an incoming trade by swapping a different day of yours + compensation.
+ * Matches iOS: does not decline the original as a bare reject.
+ */
+export async function counterTrade(trade, compensationAmount, alternateAssignment) {
+  if (!alternateAssignment?.shiftID) {
+    return { ok: false, error: "Pick one of your other days to offer." };
+  }
+  if (alternateAssignment.shiftID === trade.shiftID || alternateAssignment.shiftID === trade.requestedShiftID) {
+    return { ok: false, error: "Pick a different day than the one already in this trade." };
+  }
+
   const amount = Math.max(0, Math.min(1000, Math.round(Number(compensationAmount) || 0)));
-  const trades = appStore.trades;
-  const incoming = (trades.incoming || []).map((t) =>
-    t.id === trade.id
-      ? {
-          ...t,
-          compensationAmount: amount,
-          state: "countered",
-          counteredAt: new Date().toISOString()
-        }
-      : t
-  );
-  // After countering, it leaves the inbox — the other party sees the revised ask.
-  trades.incoming = incoming.filter((t) => t.id !== trade.id);
-  trades.outgoing = [
-    ...(trades.outgoing || []),
-    {
-      ...trade,
-      compensationAmount: amount,
-      state: "countered",
-      counteredAt: new Date().toISOString(),
-      fromDoctorID: trade.toDoctorID,
-      toDoctorID: trade.fromDoctorID,
-      fromDoctorName: trade.toDoctorName,
-      toDoctorName: trade.fromDoctorName
+
+  // Release the previously requested day (if any) back to scheduled, lock the new one.
+  let list = appStore.assignments.map((a) => {
+    if (trade.requestedShiftID && a.shiftID === trade.requestedShiftID && a.status === "traded_pending") {
+      return { ...a, status: "scheduled" };
     }
-  ];
+    if (a.id === alternateAssignment.id || a.shiftID === alternateAssignment.shiftID) {
+      return { ...a, status: "traded_pending" };
+    }
+    return a;
+  });
+  appStore.saveAssignments(list);
+
+  const counter = {
+    id: uuid(),
+    shiftID: trade.shiftID,
+    fromDoctorID: trade.fromDoctorID,
+    fromDoctorName: trade.fromDoctorName,
+    toDoctorID: trade.toDoctorID,
+    toDoctorName: trade.toDoctorName,
+    requestedShiftID: alternateAssignment.shiftID,
+    offeredDate: trade.offeredDate || null,
+    requestedDate: alternateAssignment.shift.start,
+    specialty: trade.specialty || alternateAssignment.shift.specialty,
+    compensationAmount: amount,
+    counterOfTradeID: trade.id,
+    state: "pending",
+    createdAt: new Date().toISOString()
+  };
+
+  const trades = appStore.trades;
+  trades.incoming = (trades.incoming || []).filter((t) => t.id !== trade.id);
+  trades.outgoing = [...(trades.outgoing || []), counter];
   appStore.saveTrades(trades);
-  await afterMutation(() => sync.respondTrade?.(trade.id, false));
-  return { ok: true, amount };
+
+  await afterMutation(() =>
+    sync.requestTrade(counter.shiftID, counter.fromDoctorID, counter.toDoctorID, {
+      requestedShiftId: counter.requestedShiftID,
+      compensationAmount: amount,
+      offeredDate: counter.offeredDate,
+      requestedDate: counter.requestedDate,
+      specialty: counter.specialty,
+      counterOfTradeId: trade.id
+    })
+  );
+
+  return { ok: true, amount, trade: counter };
 }
 
 function recordPenalty(entry) {
@@ -1046,14 +1118,19 @@ export function penaltyPreview(action, assignment) {
 }
 
 export function earningsSummary() {
+  const mySpecialty = doctorSpecialty(appStore.doctorProfile);
+  const matchesSpecialty = (a) =>
+    !mySpecialty || specialtyMatches(a.shift?.specialty, mySpecialty);
+
   const active = activeAssignments();
   const projected = active.reduce((sum, a) => sum + currentRate(a.shift), 0);
   const completed = appStore.assignments.filter((a) =>
-    a.status === "scheduled" && isPastShift(a.shift)
+    a.status === "scheduled" && isPastShift(a.shift) && matchesSpecialty(a)
   );
   const earned = completed.reduce((sum, a) => sum + currentRate(a.shift), 0);
   const history = appStore.assignments.filter((a) =>
-    a.status === "canceled" || a.status === "traded_complete" || isPastShift(a.shift)
+    (a.status === "canceled" || a.status === "traded_complete" || isPastShift(a.shift))
+    && matchesSpecialty(a)
   );
   return {
     projected,
@@ -1131,7 +1208,7 @@ function autoApprovePendingTokens(doctorId) {
 export function eligibleTradePartners(specialty, excludingDoctorId) {
   return appStore.roster.filter((d) =>
     d.id !== excludingDoctorId &&
-    d.specialty === specialty &&
+    specialtyMatches(d.specialty, specialty) &&
     d.verificationStatus === "verified"
   );
 }

@@ -58,7 +58,9 @@ function update(patch) {
     "alterCalendarMonth", "alterRateFloor", "alterUseFlat", "alterFlatRate", "alterSaved",
     "alterDrafts",
     "adminFilter", "adminSearch", "policyTab", "doctorFilter", "doctorAutoOnly",
-    "doctorDetailId", "rateEditSpecialty", "focusOpenDays"
+    "doctorDetailId", "rateEditSpecialty", "focusOpenDays",
+    "counterTradeId", "counterComp", "counterAltShiftId",
+    "tradePartnerId", "tradeComp"
   ];
   if (uiKeys.some((k) => k in patch)) {
     const uiPatch = {};

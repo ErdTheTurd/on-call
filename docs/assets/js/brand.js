@@ -83,3 +83,19 @@ export function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+/** Treats "Surgery" / "General Surgery" as the same specialty (iOS parity). */
+export function normalizeSpecialty(name) {
+  const trimmed = String(name || "").trim();
+  if (/^surgery$/i.test(trimmed)) return "General Surgery";
+  return trimmed;
+}
+
+export function specialtyMatches(a, b) {
+  return normalizeSpecialty(a).toLowerCase() === normalizeSpecialty(b).toLowerCase();
+}
+
+export function doctorSpecialty(profile) {
+  const raw = profile?.specialties?.[0];
+  return raw ? normalizeSpecialty(raw) : null;
+}
