@@ -1,4 +1,4 @@
-import { bindReveals, bindCounters, bindStickyHeader } from "../lib/motion.js";
+import { bindReveals, bindCounters, bindStickyHeader, bindDotField } from "../lib/motion.js";
 
 /**
  * Public marketing page. No product state is read here — every figure is
@@ -7,6 +7,9 @@ import { bindReveals, bindCounters, bindStickyHeader } from "../lib/motion.js";
 export function renderLanding() {
   return `
     <div class="site" id="top">
+      <div class="site-dotfield" aria-hidden="true">
+        <canvas class="site-dotfield-canvas"></canvas>
+      </div>
       ${header()}
       ${hero()}
       ${statBand()}
@@ -258,4 +261,5 @@ export function bindLanding(root, { onSignIn, onDemo }) {
   bindReveals(root);
   bindCounters(root);
   bindStickyHeader(root);
+  bindDotField(root);
 }
