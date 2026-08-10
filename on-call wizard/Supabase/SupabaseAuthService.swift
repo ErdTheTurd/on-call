@@ -1,5 +1,25 @@
 import Foundation
 
+enum AuthServiceError: LocalizedError {
+    case emailNotConfirmed
+    case needsEmailVerification
+    case invalidResponse
+    case passwordsDoNotMatch
+
+    var errorDescription: String? {
+        switch self {
+        case .emailNotConfirmed:
+            return "Confirm your email before signing in. Check your inbox for the link."
+        case .needsEmailVerification:
+            return "Check your email for a verification link, then sign in."
+        case .invalidResponse:
+            return "Unexpected response from the server."
+        case .passwordsDoNotMatch:
+            return "Passwords don't match."
+        }
+    }
+}
+
 @MainActor
 final class SupabaseAuthService {
     static let shared = SupabaseAuthService()
@@ -16,43 +36,101 @@ final class SupabaseAuthService {
         return UUID(uuidString: raw)
     }
 
-    func signUp(email: String, password: String, role: UserRole) async throws -> UUID {
-        let body: [String: Any] = ["email": email, "password": password]
+    struct SignUpResult {
+        let userID: UUID
+        let needsEmailVerification: Bool
+    }
+
+    func signUp(email: String, password: String, role: UserRole) async throws -> SignUpResult {
+        let redirect = SupabaseConfig.websiteBaseURL
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            + "/callback.html"
+        let body: [String: Any] = [
+            "email": email,
+            "password": password,
+            "data": ["role": role.rawValue.lowercased()],
+            "gotrue_meta_security": [:],
+            "email_redirect_to": redirect
+        ]
         let data = try await SupabaseHTTPClient.shared.request(
             path: "auth/v1/signup",
             method: "POST",
             body: try JSONSerialization.data(withJSONObject: body)
         )
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let user = json?["user"] as? [String: Any],
-              let idStr = user["id"] as? String,
+        // Newer GoTrue wraps the user at top-level; older responses nest under "user".
+        let user = (json?["user"] as? [String: Any]) ?? json
+        guard let idStr = user?["id"] as? String,
               let userID = UUID(uuidString: idStr) else {
-            throw SupabaseError.invalidResponse
+            throw AuthServiceError.invalidResponse
         }
-        if let access = json?["access_token"] as? String {
+
+        let access = json?["access_token"] as? String
+        let confirmed = (user?["email_confirmed_at"] as? String)?.isEmpty == false
+            || (user?["confirmed_at"] as? String)?.isEmpty == false
+        let needsVerification = access == nil || !confirmed
+
+        if let access {
             persistSession(access: access, refresh: json?["refresh_token"] as? String, userID: userID)
+            try await upsertProfile(userID: userID, email: email, role: role)
         }
-        try await upsertProfile(userID: userID, email: email, role: role)
-        return userID
+
+        return SignUpResult(userID: userID, needsEmailVerification: needsVerification)
     }
 
     func signIn(email: String, password: String) async throws -> (UUID, UserRole) {
         let body: [String: Any] = ["email": email, "password": password]
-        let data = try await SupabaseHTTPClient.shared.request(
-            path: "auth/v1/token?grant_type=password",
+        do {
+            let data = try await SupabaseHTTPClient.shared.request(
+                path: "auth/v1/token?grant_type=password",
+                method: "POST",
+                body: try JSONSerialization.data(withJSONObject: body)
+            )
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            guard let access = json?["access_token"] as? String,
+                  let user = json?["user"] as? [String: Any],
+                  let idStr = user["id"] as? String,
+                  let userID = UUID(uuidString: idStr) else {
+                throw AuthServiceError.invalidResponse
+            }
+
+            let confirmed = (user["email_confirmed_at"] as? String)?.isEmpty == false
+                || (user["confirmed_at"] as? String)?.isEmpty == false
+            if !confirmed {
+                signOut()
+                throw AuthServiceError.emailNotConfirmed
+            }
+
+            persistSession(access: access, refresh: json?["refresh_token"] as? String, userID: userID)
+            if let role = try await fetchRole(userID: userID) {
+                return (userID, role)
+            }
+            let metaRole = (user["user_metadata"] as? [String: Any])?["role"] as? String
+            let role = UserRole(rawValue: (metaRole ?? "doctor").capitalized) ?? .doctor
+            try? await upsertProfile(userID: userID, email: email, role: role)
+            return (userID, role)
+        } catch let http as SupabaseError {
+            if case .server(let message) = http, message.localizedCaseInsensitiveContains("email not confirmed") {
+                throw AuthServiceError.emailNotConfirmed
+            }
+            throw http
+        }
+    }
+
+    func resendSignupEmail(email: String) async throws {
+        let redirect = SupabaseConfig.websiteBaseURL
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            + "/callback.html"
+        let body: [String: Any] = [
+            "email": email,
+            "type": "signup",
+            "email_redirect_to": redirect
+        ]
+        _ = try await SupabaseHTTPClient.shared.request(
+            path: "auth/v1/resend",
             method: "POST",
             body: try JSONSerialization.data(withJSONObject: body)
         )
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let access = json?["access_token"] as? String,
-              let user = json?["user"] as? [String: Any],
-              let idStr = user["id"] as? String,
-              let userID = UUID(uuidString: idStr) else {
-            throw SupabaseError.invalidResponse
-        }
-        persistSession(access: access, refresh: json?["refresh_token"] as? String, userID: userID)
-        let role = try await fetchRole(userID: userID) ?? .doctor
-        return (userID, role)
     }
 
     func signOut() {
@@ -77,7 +155,8 @@ final class SupabaseAuthService {
             path: "rest/v1/profiles",
             method: "POST",
             body: try JSONSerialization.data(withJSONObject: row),
-            accessToken: accessToken
+            accessToken: accessToken,
+            prefer: "resolution=merge-duplicates"
         )
     }
 

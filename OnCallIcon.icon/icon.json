@@ -1,17 +1,17 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "display-p3:0.26244,0.66420,1.00000,1.00000",
-      "display-p3:0.37788,0.76910,0.96783,1.00000"
+      "display-p3:0.29020,0.52549,0.98039,1.00000",
+      "display-p3:0.14510,0.38824,0.92157,1.00000"
     ],
     "orientation" : {
       "start" : {
-        "x" : 0.5,
+        "x" : 0.35,
         "y" : 0
       },
       "stop" : {
-        "x" : 0.5,
-        "y" : 0.7
+        "x" : 0.7,
+        "y" : 1
       }
     }
   },
@@ -20,53 +20,41 @@
       "layers" : [
         {
           "fill" : {
-            "solid" : "display-p3:0.55725,0.29173,0.96783,1.00000"
+            "solid" : "display-p3:1.00000,1.00000,1.00000,1.00000"
           },
           "image-name" : "SVG Image.svg",
-          "name" : "SVG Image",
+          "name" : "Glass sheen",
+          "opacity" : 0.4,
           "position" : {
-            "scale" : 18,
+            "scale" : 1.05,
             "translation-in-points" : [
-              -164.0703125,
-              128.0703125
+              -36,
+              -64
             ]
           }
         },
         {
           "fill" : {
-            "linear-gradient" : [
-              "display-p3:0.70168,0.40143,1.06836,1.00000",
-              "display-p3:0.56040,0.22680,0.96783,1.00000"
-            ],
-            "orientation" : {
-              "start" : {
-                "x" : 0.5,
-                "y" : 0
-              },
-              "stop" : {
-                "x" : 0.5,
-                "y" : 0.7
-              }
-            }
+            "solid" : "display-p3:1.00000,1.00000,1.00000,1.00000"
           },
           "image-name" : "SVG Image 2.svg",
-          "name" : "SVG Image 2",
+          "name" : "Pulse",
           "position" : {
-            "scale" : 18,
+            "scale" : 1,
             "translation-in-points" : [
               0,
-              -35.8359375
+              10
             ]
           }
         }
       ],
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.5
+        "opacity" : 0.35
       },
       "translucency" : {
         "enabled" : true,
-        "value" : 0.5
+        "value" : 0.45
       }
     }
   ],

@@ -2,21 +2,37 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="refresh" content="0; url=./index.html" />
-  <title>Redirecting…</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Confirming email…</title>
+  <style>
+    body { margin:0; min-height:100dvh; display:grid; place-items:center; background:#070B17; color:#fff;
+      font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif; }
+    p { color:rgba(255,255,255,0.7); }
+    a { color:#4F8EF7; }
+  </style>
 </head>
 <body>
-  <p><a href="./index.html">Continue to MD Shift</a></p>
+  <p id="msg">Confirming your email…</p>
   <script type="module">
     import { getSupabase, isConfigured } from "./assets/js/supabase-client.js";
+    const msg = document.getElementById("msg");
     if (isConfigured()) {
       try {
         const supabase = getSupabase();
         const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
-        if (error) console.warn(error.message);
-      } catch (e) { console.warn(e); }
+        if (error) {
+          // Hash-based implicit flow fallback
+          const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+          if (!hash.get("access_token")) throw error;
+        }
+        msg.textContent = "Email confirmed. Redirecting to sign in…";
+      } catch (e) {
+        console.warn(e);
+        msg.innerHTML = 'Could not confirm automatically. <a href="./index.html">Continue to MD Shift</a>';
+        throw e;
+      }
     }
-    window.location.replace("./index.html");
+    setTimeout(() => window.location.replace("./index.html"), 900);
   </script>
 </body>
 </html>
