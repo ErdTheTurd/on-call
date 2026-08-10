@@ -16,7 +16,6 @@ export function renderLanding() {
       ${statBand()}
       ${bothSides()}
       ${features()}
-      ${testimonial()}
       ${closing()}
       ${footer()}
     </div>`;
@@ -170,23 +169,6 @@ function features() {
             <p>${body}</p>
           </article>`).join("")}
       </div>
-    </section>`;
-}
-
-function testimonial() {
-  return `
-    <section class="section narrow">
-      <figure class="quote reveal">
-        <span class="dash"></span>
-        <blockquote>
-          "${BRAND.name} cut our scheduling admin time by 70%. Our residents actually
-          use it — which says everything."
-        </blockquote>
-        <figcaption>
-          <strong>Dr. Sarah Chen</strong>
-          <span>Chief of Emergency Medicine, Metro General Health System</span>
-        </figcaption>
-      </figure>
     </section>`;
 }
 
