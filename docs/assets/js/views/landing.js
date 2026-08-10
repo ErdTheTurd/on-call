@@ -1,4 +1,5 @@
 import { bindReveals, bindCounters, bindStickyHeader, bindDotField } from "../lib/motion.js";
+import { BRAND, brandLockup } from "../brand.js";
 
 /**
  * Public marketing page. No product state is read here — every figure is
@@ -22,15 +23,7 @@ export function renderLanding() {
 }
 
 function logo() {
-  return `
-    <span class="logo">
-      <svg viewBox="0 0 28 28" fill="none" aria-hidden="true">
-        <rect width="28" height="28" rx="8" fill="var(--blue)"/>
-        <path d="M5.5 14.5h3.2l2.1-4.6 3.4 9.2 2.2-4.6h6.1"
-              stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <span>On Call</span>
-    </span>`;
+  return brandLockup();
 }
 
 function header() {
@@ -103,7 +96,7 @@ function bothSides() {
     <section class="section">
       <div class="section-head center reveal">
         <h2>Built for both sides of the schedule.</h2>
-        <p>Whether you're trading a shift or managing an entire department, On Call has you covered.</p>
+        <p>Whether you're trading a shift or managing an entire department, ${BRAND.name} has you covered.</p>
       </div>
 
       <div class="split">
@@ -112,7 +105,7 @@ function bothSides() {
           <h3>Trade shifts in one tap.</h3>
           <p>
             Post a shift, find a match, confirm — done. Set your availability once
-            and let On Call handle the rest.
+            and let ${BRAND.name} handle the rest.
           </p>
           ${week([
             { day: "Mon", tone: "on" }, { day: "Tue", tone: "" }, { day: "Wed", tone: "on" },
@@ -186,7 +179,7 @@ function testimonial() {
       <figure class="quote reveal">
         <span class="dash"></span>
         <blockquote>
-          "On Call cut our scheduling admin time by 70%. Our residents actually
+          "${BRAND.name} cut our scheduling admin time by 70%. Our residents actually
           use it — which says everything."
         </blockquote>
         <figcaption>
@@ -203,7 +196,7 @@ function closing() {
       <div class="cta-band reveal">
         <div>
           <h2>Ready to fix your scheduling?</h2>
-          <p>Join 10,000+ doctors and 500+ hospitals already on On Call.</p>
+          <p>Join 10,000+ doctors and 500+ hospitals already on ${BRAND.name}.</p>
         </div>
         <div class="cta-actions">
           <button type="button" class="btn-solid lg" data-demo-role="Hospital">Start free trial</button>
@@ -235,7 +228,7 @@ function footer() {
           </div>`).join("")}
       </div>
       <div class="footer-bottom">
-        <span>© ${new Date().getFullYear()} On Call. All rights reserved.</span>
+        <span>© ${new Date().getFullYear()} ${BRAND.name}. All rights reserved.</span>
         <button type="button" class="btn-quiet" data-goto-auth>Log in</button>
       </div>
     </footer>`;

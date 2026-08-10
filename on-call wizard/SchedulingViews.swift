@@ -489,7 +489,7 @@ private struct PricingModePicker: View {
                 modeBlurb(
                     icon: "sparkles",
                     title: "Auto",
-                    body: "On Call algorithm prices selected specialties for you.",
+                    body: "MD Shift algorithm prices selected specialties for you.",
                     active: useAlgorithm
                 )
                 modeBlurb(

@@ -1,4 +1,6 @@
 export const BRAND = {
+  name: "MD Shift",
+  tagline: "Smarter shift scheduling",
   bg: "#070B17",
   accent: "#4F8EF7",
   accentAlt: "#8B5CF6",
@@ -6,6 +8,24 @@ export const BRAND = {
   success: "#34D399",
   warning: "#FBBF24"
 };
+
+/** Heart-rate mark used on the marketing site and auth — not the favicon. */
+export function brandMark({ size = 28 } = {}) {
+  return `
+    <svg viewBox="0 0 28 28" width="${size}" height="${size}" fill="none" aria-hidden="true">
+      <rect width="28" height="28" rx="8" fill="var(--blue, #2563eb)"/>
+      <path d="M5.5 14.5h3.2l2.1-4.6 3.4 9.2 2.2-4.6h6.1"
+            stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
+}
+
+export function brandLockup({ size = 28 } = {}) {
+  return `
+    <span class="logo">
+      ${brandMark({ size })}
+      <span>${BRAND.name}</span>
+    </span>`;
+}
 
 export const SPECIALTIES = [
   "Internal Medicine",
