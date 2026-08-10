@@ -29,6 +29,75 @@ export function renderAuthView(state, handlers) {
   const mode = state.authMode || "signin";
   const verifyEmail = state.verifyEmail;
 
+  if (state.mfaChallenge) {
+    return `
+    <div class="auth-screen auth-bg">
+      <div class="mesh-blob"></div><div class="mesh-blob"></div><div class="mesh-blob"></div>
+      <button type="button" class="auth-back" data-back-to-landing>‹ Back</button>
+      <div class="auth-brand">
+        <div class="auth-brand-row">
+          <span class="auth-brand-icon">${brandMark({ size: 32 })}</span>
+          <span>${BRAND.name}</span>
+        </div>
+        <p class="auth-tagline">${BRAND.tagline}</p>
+      </div>
+      <div class="auth-card-shell" style="padding:28px 24px">
+        <h2 style="margin:0 0 8px;font-size:1.35rem">Authenticator code</h2>
+        <p class="subtitle" style="margin:0 0 18px;line-height:1.5">
+          Open Google Authenticator (or any TOTP app) and enter the 6-digit code for MD Shift.
+        </p>
+        <form id="mfa-form" class="otp-form">
+          <div class="otp-row" role="group" aria-label="Authenticator code">
+            ${otpInputs(state.mfaCode)}
+          </div>
+        </form>
+        ${state.error ? `<p class="error-text" style="padding:12px 0 0">${escapeHtml(state.error)}</p>` : ""}
+        <div class="auth-actions" style="padding:20px 0 0">
+          <button type="submit" form="mfa-form" class="btn-primary" ${state.loading ? "disabled" : ""}>
+            ${state.loading ? `<span class="spinner"></span>` : "Verify"}
+          </button>
+          <button type="button" class="btn-secondary" data-auth-mode="signin" style="margin-top:10px">Back to sign in</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  if (state.mfaEnroll) {
+    const qr = state.mfaEnroll.qrCode || "";
+    const secret = state.mfaEnroll.secret || "";
+    return `
+    <div class="auth-screen auth-bg">
+      <div class="mesh-blob"></div><div class="mesh-blob"></div><div class="mesh-blob"></div>
+      <button type="button" class="auth-back" data-back-to-landing>‹ Back</button>
+      <div class="auth-brand">
+        <div class="auth-brand-row">
+          <span class="auth-brand-icon">${brandMark({ size: 32 })}</span>
+          <span>${BRAND.name}</span>
+        </div>
+      </div>
+      <div class="auth-card-shell" style="padding:28px 24px">
+        <h2 style="margin:0 0 8px;font-size:1.35rem">Set up authenticator</h2>
+        <p class="subtitle" style="margin:0 0 16px;line-height:1.5">
+          Scan this QR with Google Authenticator, 1Password, or Authy. Then enter the 6-digit code to confirm.
+        </p>
+        ${qr ? `<div class="mfa-qr">${qr.startsWith("<svg") || qr.startsWith("data:") ? (qr.startsWith("data:") ? `<img alt="QR code" src="${escapeHtml(qr)}" width="180" height="180" />` : qr) : `<img alt="QR code" src="${escapeHtml(qr)}" width="180" height="180" />`}</div>` : ""}
+        ${secret ? `<p class="subtitle" style="margin:12px 0;font-family:ui-monospace,monospace;letter-spacing:0.08em">${escapeHtml(secret)}</p>` : ""}
+        <form id="mfa-enroll-form" class="otp-form">
+          <div class="otp-row" role="group" aria-label="Authenticator confirmation code">
+            ${otpInputs(state.mfaCode)}
+          </div>
+        </form>
+        ${state.error ? `<p class="error-text" style="padding:12px 0 0">${escapeHtml(state.error)}</p>` : ""}
+        <div class="auth-actions" style="padding:20px 0 0">
+          <button type="submit" form="mfa-enroll-form" class="btn-primary" ${state.loading ? "disabled" : ""}>
+            ${state.loading ? `<span class="spinner"></span>` : "Confirm and continue"}
+          </button>
+          <button type="button" class="btn-ghost" data-mfa-skip style="margin-top:12px;width:100%">Skip for now</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   if (verifyEmail) {
     return `
     <div class="auth-screen auth-bg">
@@ -143,7 +212,38 @@ function readOtp(root) {
     .slice(0, 6);
 }
 
-export function bindAuth(root, { onSubmit, onMode, onRole, onDemo, onBack, onResend, onOAuth, onVerifyOtp }) {
+function bindOtpDigits(root, onComplete) {
+  const digits = Array.from(root.querySelectorAll(".otp-digit"));
+  digits.forEach((input, i) => {
+    input.addEventListener("input", () => {
+      const v = input.value.replace(/\D/g, "").slice(-1);
+      input.value = v;
+      if (v && i < digits.length - 1) digits[i + 1].focus();
+      const code = readOtp(root);
+      if (code.length === 6) onComplete?.(code);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" && !input.value && i > 0) digits[i - 1].focus();
+    });
+    input.addEventListener("paste", (e) => {
+      e.preventDefault();
+      const pasted = (e.clipboardData?.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+      pasted.split("").forEach((ch, idx) => {
+        if (digits[idx]) digits[idx].value = ch;
+      });
+      const focusIdx = Math.min(pasted.length, digits.length - 1);
+      digits[focusIdx]?.focus();
+      if (pasted.length === 6) onComplete?.(pasted);
+    });
+  });
+  digits[0]?.focus();
+  return digits;
+}
+
+export function bindAuth(root, {
+  onSubmit, onMode, onRole, onDemo, onBack, onResend, onOAuth, onVerifyOtp,
+  onVerifyMfa, onConfirmMfaEnroll, onSkipMfaEnroll
+}) {
   root.querySelectorAll("[data-demo]").forEach((btn) => {
     btn.addEventListener("click", () => onDemo?.(btn.dataset.demo));
   });
@@ -169,38 +269,32 @@ export function bindAuth(root, { onSubmit, onMode, onRole, onDemo, onBack, onRes
   root.querySelectorAll("[data-oauth]").forEach((btn) => {
     btn.addEventListener("click", () => onOAuth?.(btn.dataset.oauth));
   });
+  root.querySelector("[data-mfa-skip]")?.addEventListener("click", () => onSkipMfaEnroll?.());
 
   const otpForm = root.querySelector("#otp-form");
   if (otpForm) {
-    const digits = Array.from(root.querySelectorAll(".otp-digit"));
-    digits.forEach((input, i) => {
-      input.addEventListener("input", () => {
-        const v = input.value.replace(/\D/g, "").slice(-1);
-        input.value = v;
-        if (v && i < digits.length - 1) digits[i + 1].focus();
-        const code = readOtp(root);
-        const hidden = root.querySelector("#otp-value");
-        if (hidden) hidden.value = code;
-        if (code.length === 6) onVerifyOtp?.(code);
-      });
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Backspace" && !input.value && i > 0) digits[i - 1].focus();
-      });
-      input.addEventListener("paste", (e) => {
-        e.preventDefault();
-        const pasted = (e.clipboardData?.getData("text") || "").replace(/\D/g, "").slice(0, 6);
-        pasted.split("").forEach((ch, idx) => {
-          if (digits[idx]) digits[idx].value = ch;
-        });
-        const focusIdx = Math.min(pasted.length, digits.length - 1);
-        digits[focusIdx]?.focus();
-        if (pasted.length === 6) onVerifyOtp?.(pasted);
-      });
-    });
+    bindOtpDigits(root, (code) => onVerifyOtp?.(code));
     otpForm.addEventListener("submit", (e) => {
       e.preventDefault();
       onVerifyOtp?.(readOtp(root));
     });
-    digits[0]?.focus();
+  }
+
+  const mfaForm = root.querySelector("#mfa-form");
+  if (mfaForm) {
+    bindOtpDigits(root, (code) => onVerifyMfa?.(code));
+    mfaForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      onVerifyMfa?.(readOtp(root));
+    });
+  }
+
+  const enrollForm = root.querySelector("#mfa-enroll-form");
+  if (enrollForm) {
+    bindOtpDigits(root, (code) => onConfirmMfaEnroll?.(code));
+    enrollForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      onConfirmMfaEnroll?.(readOtp(root));
+    });
   }
 }

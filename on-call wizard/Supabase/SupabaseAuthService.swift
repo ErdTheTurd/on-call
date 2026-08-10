@@ -119,7 +119,7 @@ final class SupabaseAuthService: NSObject {
         return (userID, resolved)
     }
 
-    func signIn(email: String, password: String) async throws -> (UUID, UserRole) {
+    func signIn(email: String, password: String) async throws -> AuthResult {
         let body: [String: Any] = ["email": email, "password": password]
         do {
             let data = try await SupabaseHTTPClient.shared.request(
@@ -143,13 +143,34 @@ final class SupabaseAuthService: NSObject {
             }
 
             persistSession(access: access, refresh: json?["refresh_token"] as? String, userID: userID)
-            if let role = try await fetchRole(userID: userID) {
-                return (userID, role)
+
+            let verifiedFactors = Self.verifiedTotpIDs(fromUser: user)
+            let aal = jwtClaim(access, key: "aal") as? String
+            if !verifiedFactors.isEmpty && (aal == nil || aal == "aal1") {
+                return AuthResult(
+                    userID: userID,
+                    email: (user["email"] as? String) ?? email,
+                    role: .doctor,
+                    needsMfa: true,
+                    suggestMfaEnroll: false
+                )
             }
-            let metaRole = (user["user_metadata"] as? [String: Any])?["role"] as? String
-            let role = UserRole(rawValue: (metaRole ?? "doctor").capitalized) ?? .doctor
-            try? await upsertProfile(userID: userID, email: email, role: role)
-            return (userID, role)
+
+            let role: UserRole
+            if let existing = try await fetchRole(userID: userID) {
+                role = existing
+            } else {
+                let metaRole = (user["user_metadata"] as? [String: Any])?["role"] as? String
+                role = UserRole(rawValue: (metaRole ?? "doctor").capitalized) ?? .doctor
+                try? await upsertProfile(userID: userID, email: email, role: role)
+            }
+            return AuthResult(
+                userID: userID,
+                email: (user["email"] as? String) ?? email,
+                role: role,
+                needsMfa: false,
+                suggestMfaEnroll: verifiedFactors.isEmpty
+            )
         } catch let http as SupabaseError {
             if case .server(let message) = http, message.localizedCaseInsensitiveContains("email not confirmed") {
                 throw AuthServiceError.emailNotConfirmed
@@ -171,7 +192,7 @@ final class SupabaseAuthService: NSObject {
     }
 
     /// Google / Apple via browser OAuth (PKCE). Apple native id_token path is separate.
-    func signInWithOAuth(provider: String, role: UserRole) async throws -> (UUID, String, UserRole) {
+    func signInWithOAuth(provider: String, role: UserRole) async throws -> AuthResult {
         guard provider == "google" || provider == "apple" else {
             throw AuthServiceError.oauthFailed("Unsupported provider.")
         }
@@ -207,7 +228,7 @@ final class SupabaseAuthService: NSObject {
         return try await finishOAuthSession(data: data, preferredRole: role)
     }
 
-    func signInWithAppleIDToken(_ idToken: String, nonce: String?, role: UserRole) async throws -> (UUID, String, UserRole) {
+    func signInWithAppleIDToken(_ idToken: String, nonce: String?, role: UserRole) async throws -> AuthResult {
         var body: [String: Any] = [
             "provider": "apple",
             "id_token": idToken
@@ -223,6 +244,128 @@ final class SupabaseAuthService: NSObject {
         return try await finishOAuthSession(data: data, preferredRole: role)
     }
 
+    struct AuthResult {
+        let userID: UUID
+        let email: String
+        let role: UserRole
+        let needsMfa: Bool
+        let suggestMfaEnroll: Bool
+    }
+
+    struct TotpEnrollment {
+        let factorId: String
+        let secret: String
+        let qrCode: String
+        let uri: String
+    }
+
+    func needsMfaChallenge() async throws -> Bool {
+        guard let access = accessToken else { return false }
+        let factors = try await listVerifiedTotpFactorIDs()
+        guard !factors.isEmpty else { return false }
+        if let aal = jwtClaim(access, key: "aal") as? String {
+            return aal == "aal1"
+        }
+        return true
+    }
+
+    /// Matches supabase-js `mfa.listFactors()` — factors live on the user, not GET /factors.
+    func listVerifiedTotpFactorIDs() async throws -> [String] {
+        guard let access = accessToken else { return [] }
+        let data = try await SupabaseHTTPClient.shared.request(
+            path: "auth/v1/user",
+            accessToken: access
+        )
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return Self.verifiedTotpIDs(fromUser: json)
+    }
+
+    private static func verifiedTotpIDs(fromUser user: [String: Any]?) -> [String] {
+        let factors = (user?["factors"] as? [[String: Any]]) ?? []
+        return factors.compactMap { row in
+            guard (row["factor_type"] as? String) == "totp",
+                  (row["status"] as? String) == "verified",
+                  let id = row["id"] as? String else { return nil }
+            return id
+        }
+    }
+
+    func enrollTotp(friendlyName: String = "MD Shift") async throws -> TotpEnrollment {
+        guard let access = accessToken else { throw SupabaseError.notConfigured }
+        let body: [String: Any] = [
+            "factor_type": "totp",
+            "friendly_name": friendlyName
+        ]
+        let data = try await SupabaseHTTPClient.shared.request(
+            path: "auth/v1/factors",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: body),
+            accessToken: access
+        )
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let id = json?["id"] as? String else { throw AuthServiceError.invalidResponse }
+        let totp = json?["totp"] as? [String: Any]
+        return TotpEnrollment(
+            factorId: id,
+            secret: (totp?["secret"] as? String) ?? "",
+            qrCode: (totp?["qr_code"] as? String) ?? "",
+            uri: (totp?["uri"] as? String) ?? ""
+        )
+    }
+
+    func verifyTotp(factorId: String, code: String) async throws {
+        guard let access = accessToken else { throw SupabaseError.notConfigured }
+        let token = code.filter(\.isNumber)
+        guard token.count == 6 else { throw AuthServiceError.invalidOTP }
+
+        let challengeBody: [String: Any] = [:]
+        let challengeData = try await SupabaseHTTPClient.shared.request(
+            path: "auth/v1/factors/\(factorId)/challenge",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: challengeBody),
+            accessToken: access
+        )
+        let challengeJSON = try JSONSerialization.jsonObject(with: challengeData) as? [String: Any]
+        guard let challengeId = challengeJSON?["id"] as? String else { throw AuthServiceError.invalidResponse }
+
+        let verifyBody: [String: Any] = [
+            "challenge_id": challengeId,
+            "code": token
+        ]
+        let verifyData = try await SupabaseHTTPClient.shared.request(
+            path: "auth/v1/factors/\(factorId)/verify",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: verifyBody),
+            accessToken: access
+        )
+        let verifyJSON = try JSONSerialization.jsonObject(with: verifyData) as? [String: Any]
+        if let access = verifyJSON?["access_token"] as? String {
+            let user = verifyJSON?["user"] as? [String: Any]
+            let idStr = user?["id"] as? String ?? currentUserID?.uuidString
+            if let idStr, let userID = UUID(uuidString: idStr) {
+                persistSession(access: access, refresh: verifyJSON?["refresh_token"] as? String, userID: userID)
+            }
+        }
+    }
+
+    func challengeAndVerifyFirstTotp(code: String) async throws {
+        let ids = try await listVerifiedTotpFactorIDs()
+        guard let factorId = ids.first else { throw AuthServiceError.invalidOTP }
+        try await verifyTotp(factorId: factorId, code: code)
+    }
+
+    private func jwtClaim(_ jwt: String, key: String) -> Any? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var payload = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while payload.count % 4 != 0 { payload += "=" }
+        guard let data = Data(base64Encoded: payload),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return json[key]
+    }
+
     func signOut() {
         UserDefaults.standard.removeObject(forKey: sessionKey)
         UserDefaults.standard.removeObject(forKey: refreshKey)
@@ -231,7 +374,7 @@ final class SupabaseAuthService: NSObject {
 
     // MARK: - Private
 
-    private func finishOAuthSession(data: Data, preferredRole: UserRole) async throws -> (UUID, String, UserRole) {
+    private func finishOAuthSession(data: Data, preferredRole: UserRole) async throws -> AuthResult {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard let access = json?["access_token"] as? String,
               let user = json?["user"] as? [String: Any],
@@ -242,13 +385,33 @@ final class SupabaseAuthService: NSObject {
         persistSession(access: access, refresh: json?["refresh_token"] as? String, userID: userID)
         let email = (user["email"] as? String) ?? ""
 
-        if let role = try await fetchRole(userID: userID) {
-            return (userID, email, role)
+        let verifiedFactors = Self.verifiedTotpIDs(fromUser: user)
+        let aal = jwtClaim(access, key: "aal") as? String
+        if !verifiedFactors.isEmpty && (aal == nil || aal == "aal1") {
+            return AuthResult(userID: userID, email: email, role: preferredRole, needsMfa: true, suggestMfaEnroll: false)
         }
-        let metaRole = (user["user_metadata"] as? [String: Any])?["role"] as? String
-        let role = UserRole(rawValue: (metaRole ?? preferredRole.rawValue).capitalized) ?? preferredRole
-        try? await upsertProfile(userID: userID, email: email, role: role)
-        return (userID, email, role)
+
+        let role: UserRole
+        if let existing = try await fetchRole(userID: userID) {
+            role = existing
+        } else {
+            let metaRole = (user["user_metadata"] as? [String: Any])?["role"] as? String
+            role = UserRole(rawValue: (metaRole ?? preferredRole.rawValue).capitalized) ?? preferredRole
+            try? await upsertProfile(userID: userID, email: email, role: role)
+        }
+        return AuthResult(
+            userID: userID,
+            email: email,
+            role: role,
+            needsMfa: false,
+            suggestMfaEnroll: verifiedFactors.isEmpty
+        )
+    }
+
+    func fetchRoleAfterMfa() async throws -> UserRole {
+        guard let userID = currentUserID else { return .doctor }
+        if let role = try await fetchRole(userID: userID) { return role }
+        return .doctor
     }
 
     private func persistSession(access: String, refresh: String?, userID: UUID) {

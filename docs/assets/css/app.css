@@ -431,11 +431,15 @@ a { color: var(--accent); text-decoration: none; }
   text-align: center;
   caret-color: var(--accent);
 }
-.otp-digit:focus {
-  outline: none;
-  border-color: rgba(79, 142, 247, 0.7);
-  box-shadow: 0 0 0 3px rgba(79, 142, 247, 0.2);
+.mfa-qr {
+  display: grid;
+  place-items: center;
+  margin: 8px 0 4px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #fff;
 }
+.mfa-qr img, .mfa-qr svg { width: 180px; height: 180px; }
 
 .auth-footer {
   padding: 24px 40px 48px;

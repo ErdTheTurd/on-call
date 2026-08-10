@@ -5,6 +5,7 @@ import { defaultPolicy, previewPenalty, normalizeCancellationScale, bracketLabel
 import { algorithmRate, computeRate, rateBreakdown, groupPricingComponents } from "./domain/pricing.js";
 import * as sync from "./domain/sync.js";
 import { hydrateLocalProfiles } from "./domain/sync.js";
+import { needsMfaChallenge, listTotpFactors } from "./domain/mfa.js";
 
 export const KEYS = {
   accounts: "accounts_v2",
@@ -286,18 +287,32 @@ export async function signInRemote(email, password) {
     err.email = email;
     throw err;
   }
+
+  if (await needsMfaChallenge()) {
+    return {
+      userID: user.id,
+      email: user.email,
+      role: null,
+      needsMfa: true
+    };
+  }
+
+  return finalizeRemoteSession(user, email);
+}
+
+async function finalizeRemoteSession(user, emailFallback) {
+  const email = user.email || emailFallback;
+  const supabase = getSupabase();
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   let role = profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : null;
   if (!role) {
     const metaRole = String(user.user_metadata?.role || "doctor").toLowerCase();
     role = metaRole.charAt(0).toUpperCase() + metaRole.slice(1);
-    try { await upsertProfile(user.id, user.email || email, metaRole); } catch { /* ignore */ }
+    try { await upsertProfile(user.id, email, metaRole); } catch { /* ignore */ }
   }
 
-  // Bring server profiles into localStorage before routing, otherwise a
-  // returning hospital/doctor looks brand-new and lands in onboarding.
   try {
-    const hydrated = await hydrateLocalProfiles({ userID: user.id, role, email: user.email });
+    const hydrated = await hydrateLocalProfiles({ userID: user.id, role, email });
     if (hydrated?.kind === "hospital") {
       appStore.saveHospitalProfile(hydrated.profile);
       ensureDemoShifts(hydrated.profile.id, hydrated.profile.name);
@@ -310,7 +325,10 @@ export async function signInRemote(email, password) {
     /* offline / RLS — route from whatever is already local */
   }
 
-  return { userID: user.id, email: user.email, role };
+  const factors = await listTotpFactors().catch(() => []);
+  const hasMfa = factors.some((f) => f.status === "verified");
+
+  return { userID: user.id, email, role, needsMfa: false, suggestMfaEnroll: !hasMfa };
 }
 
 export async function signUpRemote(email, password, role) {
@@ -380,7 +398,14 @@ export async function verifySignupOtp(email, token, role) {
     }
   } catch { /* offline */ }
 
-  return { userID: user.id, email: user.email || email, role: normalizedRole };
+  const factors = await listTotpFactors().catch(() => []);
+  const hasMfa = factors.some((f) => f.status === "verified");
+  return {
+    userID: user.id,
+    email: user.email || email,
+    role: normalizedRole,
+    suggestMfaEnroll: !hasMfa
+  };
 }
 
 export async function resendSignupEmail(email) {
@@ -420,7 +445,7 @@ export async function signInWithOAuth(provider, role) {
   }
   stashOAuthRole(role || "Doctor");
   const supabase = getSupabase();
-  const redirectTo = `${window.location.origin}${window.location.pathname.replace(/\/?$/, "/")}callback.html`;
+  const redirectTo = `${window.location.origin}/callback.html`;
   const { error } = await supabase.auth.signInWithOAuth({
     provider,
     options: {
@@ -439,6 +464,15 @@ export async function completeOAuthSession() {
   if (!session?.user) return null;
 
   const user = session.user;
+  if (await needsMfaChallenge()) {
+    return {
+      userID: user.id,
+      email: user.email,
+      role: null,
+      needsMfa: true
+    };
+  }
+
   const preferred = takeOAuthRole();
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   let role = profile?.role
@@ -466,7 +500,17 @@ export async function completeOAuthSession() {
     }
   } catch { /* ignore */ }
 
-  return { userID: user.id, email: user.email, role };
+  const factors = await listTotpFactors().catch(() => []);
+  const hasMfa = factors.some((f) => f.status === "verified");
+  return { userID: user.id, email: user.email, role, suggestMfaEnroll: !hasMfa };
+}
+
+/** After MFA challenge succeeds, hydrate role the same way as a normal sign-in. */
+export async function completeMfaSession() {
+  const supabase = getSupabase();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) throw new Error("Session expired. Sign in again.");
+  return finalizeRemoteSession(session.user, session.user.email);
 }
 
 export function beginSession({ userID, email, role }) {

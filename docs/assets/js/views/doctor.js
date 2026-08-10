@@ -236,6 +236,13 @@ function renderCredentials(profile) {
                 <div class="list-row"><strong>${escapeHtml(d.type || "Document")}</strong><span class="muted">${escapeHtml(d.status || "uploaded")}</span></div>
               `).join("") : `<div class="empty-inline">No documents uploaded yet.</div>`}
             </section>
+            <section class="card stack">
+              ${sectionHeader("Account security", "lock")}
+              <p class="subtitle" style="margin:0">
+                Email verification uses a 6-digit code. Authenticator 2FA (Google Authenticator / Authy) is prompted after sign-in
+                and required on later logins once enabled — same on web and iOS.
+              </p>
+            </section>
           </div>
           <section class="card stack">
             ${sectionHeader("Preferences")}

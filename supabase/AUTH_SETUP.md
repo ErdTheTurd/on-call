@@ -108,24 +108,89 @@ Auth → URL Configuration:
   - `https://mdshift.net/callback.html`
   - `oncallwizard://auth-callback` (iOS OAuth)
 
-## 3. Google
+## 3. Google (required for “Continue with Google”)
 
-1. Create OAuth credentials in Google Cloud Console (Web + iOS if needed).
-2. Auth → Providers → Google → enable  
+Google is still **off** until Client ID + Secret are pasted into Supabase.
+
+### 3a. Google Cloud Console
+
+1. Open https://console.cloud.google.com/apis/credentials
+2. Create / select a project
+3. Configure **OAuth consent screen** (External is fine while testing)
+4. **Create credentials** → **OAuth client ID** → type **Web application**
+5. Authorized JavaScript origins:
+   - `https://mdshift.net`
+   - `http://127.0.0.1:3000` (local)
+6. Authorized redirect URIs — **exact**:
+   - `https://yrnndfpvovuvjlzgivgu.supabase.co/auth/v1/callback`
+7. Copy **Client ID** and **Client Secret**
+
+### 3b. Supabase
+
+1. Auth → Providers → Google  
    https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/providers
-3. Paste Client ID + Client Secret.
-4. Authorized redirect URI from Supabase (shown in the provider panel), typically:  
-   `https://yrnndfpvovuvjlzgivgu.supabase.co/auth/v1/callback`
+2. Enable Google
+3. Paste Client ID + Client Secret → Save
 
-## 4. Apple
+Or with a PAT:
 
-1. Apple Developer → Identifiers → enable Sign in with Apple for the App ID.
-2. Create a Services ID for web if needed; configure return URL to the Supabase callback above.
-3. Auth → Providers → Apple → enable; paste Services ID, Secret Key (JWT), Team ID, Key ID.
-4. Xcode: Sign in with Apple capability is in `Config/OnCallWizard.entitlements`.
+```bash
+export SUPABASE_ACCESS_TOKEN=sbp_...
+export GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+export GOOGLE_CLIENT_SECRET=...
+./scripts/configure-oauth-providers.sh
+```
 
-## 5. App behavior
+### 3c. Redirect URLs (Auth → URL Configuration)
 
-- Web/iOS: after email signup, user enters the 6-digit code (`verifyOtp` / `/auth/v1/verify`).
-- Web: Google/Apple → `callback.html` → session.
+Must include:
+
+- `https://mdshift.net/callback.html`
+- `https://mdshift.net/**`
+- `oncallwizard://auth-callback` (iOS)
+
+## 4. Apple (required for “Continue with Apple”)
+
+### 4a. Apple Developer
+
+Bundle ID: `callsystems.on-call-wizard`
+
+1. Identifiers → App ID → enable **Sign In with Apple**
+2. Create a **Services ID** (for web/OAuth), e.g. `callsystems.on-call-wizard.web`
+   - Domains: `yrnndfpvovuvjlzgivgu.supabase.co`
+   - Return URL: `https://yrnndfpvovuvjlzgivgu.supabase.co/auth/v1/callback`
+3. Keys → create a key with Sign In with Apple → download `.p8` once
+4. Note Team ID, Key ID, Services ID
+5. Generate the client secret JWT (Supabase docs / dashboard helper)
+
+### 4b. Supabase
+
+Auth → Providers → Apple → enable  
+https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/providers
+
+- **Client IDs** (comma-separated so web + iOS both work):  
+  `callsystems.on-call-wizard,callsystems.on-call-wizard.web`  
+  (Bundle ID first, then your Services ID — adjust the Services ID to whatever you created)
+- **Secret Key**: the JWT generated from your `.p8` (Team ID + Key ID + Services ID/Bundle ID per Apple docs)
+- Save
+
+Or: `APPLE_CLIENT_ID` / `APPLE_SECRET` with `./scripts/configure-oauth-providers.sh`
+
+### 4c. Xcode
+
+Sign in with Apple capability is already in `Config/OnCallWizard.entitlements`.
+URL scheme `oncallwizard` is in `Config/AppInfo.plist` for Google OAuth return.
+
+## 5. Authenticator 2FA (TOTP)
+
+After email OTP (or OAuth), web and iOS prompt to enroll Google Authenticator / Authy.
+If enrolled, later sign-ins require the 6-digit authenticator code before entering the app.
+
+## 6. App behavior
+
+- Web/iOS: after email signup, user enters the 6-digit email code (`verifyOtp` / `/auth/v1/verify`).
+- Then optional authenticator enroll (same UX on both platforms).
+- Web: Google/Apple → `callback.html` → session (+ MFA if enrolled).
 - iOS: Google via `ASWebAuthenticationSession` (`oncallwizard://auth-callback`); Apple via native Sign in with Apple + `id_token` grant.
+
+**Parity rule:** any auth/security change ships on web and iOS together (see `.cursor/rules/web-ios-auth-parity.mdc`).

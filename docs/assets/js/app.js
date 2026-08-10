@@ -2,9 +2,10 @@ import { isConfigured, getSupabase } from "./supabase-client.js";
 import {
   authState, beginSession, registerAccount, signInLocal,
   signInRemote, signUpRemote, resendSignupEmail, verifySignupOtp,
-  signInWithOAuth, completeOAuthSession, signOut, appStore, syncEverything, startPeriodicSync,
+  signInWithOAuth, completeOAuthSession, completeMfaSession, signOut, appStore, syncEverything, startPeriodicSync,
   normalizeEmail
 } from "./store.js";
+import { enrollTotp, verifyTotp, challengeAndVerifyFirstTotp } from "./domain/mfa.js";
 import { hydrateLocalProfiles } from "./domain/sync.js";
 import { renderAuthView, bindAuth } from "./views/auth.js";
 import { renderAdminApp, bindAdmin } from "./views/admin.js";
@@ -29,6 +30,10 @@ const state = {
   verifyEmail: null,
   verifyNotice: null,
   otpCode: "",
+  mfaChallenge: false,
+  mfaEnroll: null,
+  mfaCode: "",
+  pendingAuth: null,
   onb: { step: 0, role: "Doctor", specialties: [], verified: false, codeVerified: false },
   ui: { tab: "home", sheet: false, daySheet: null, calendarMonth: new Date().toISOString() },
   admin: emptyAdminState()
@@ -75,7 +80,8 @@ function update(patch) {
   }
 
   if ("authMode" in patch || "role" in patch || "email" in patch || "error" in patch || "loading" in patch
-      || "verifyEmail" in patch || "verifyNotice" in patch || "otpCode" in patch) {
+      || "verifyEmail" in patch || "verifyNotice" in patch || "otpCode" in patch
+      || "mfaChallenge" in patch || "mfaEnroll" in patch || "mfaCode" in patch || "pendingAuth" in patch) {
     Object.assign(state, patch);
   }
   render();
@@ -155,10 +161,24 @@ async function boot() {
     try {
       // OAuth callback.html may have just established a session — apply role stash.
       const oauth = await completeOAuthSession();
+      if (oauth?.needsMfa) {
+        state.route = "auth";
+        state.mfaChallenge = true;
+        state.pendingAuth = { userID: oauth.userID, email: oauth.email };
+        update({ loading: false, error: null, mfaCode: "" });
+        return;
+      }
       if (oauth) {
         beginSession({ userID: oauth.userID, email: oauth.email, role: oauth.role });
         sessionUser = { id: oauth.userID, email: oauth.email };
         sessionRole = oauth.role;
+        if (oauth.suggestMfaEnroll) {
+          await enterAuthedRoute(
+            { userID: oauth.userID, email: oauth.email, role: oauth.role, suggestMfaEnroll: true },
+            { suggestMfa: true }
+          );
+          return;
+        }
       }
 
       const supabase = getSupabase();
@@ -243,11 +263,17 @@ function render() {
   if (state.route === "auth") {
     root.innerHTML = renderAuthView(state, {});
     bindAuth(root, {
-      onMode: (mode) => update({ authMode: mode, error: null, verifyEmail: null, verifyNotice: null, otpCode: "" }),
+      onMode: (mode) => update({
+        authMode: mode, error: null, verifyEmail: null, verifyNotice: null, otpCode: "",
+        mfaChallenge: false, mfaEnroll: null, mfaCode: "", pendingAuth: null
+      }),
       onRole: (role) => update({ role }),
       onSubmit: handleAuthSubmit,
       onDemo: enterDemo,
-      onBack: () => update({ route: "landing", error: null, verifyEmail: null, verifyNotice: null, otpCode: "" }),
+      onBack: () => update({
+        route: "landing", error: null, verifyEmail: null, verifyNotice: null, otpCode: "",
+        mfaChallenge: false, mfaEnroll: null, mfaCode: "", pendingAuth: null
+      }),
       onResend: async () => {
         if (!state.verifyEmail) return;
         update({ loading: true, error: null, verifyNotice: null });
@@ -259,7 +285,10 @@ function render() {
         }
       },
       onOAuth: handleOAuth,
-      onVerifyOtp: handleVerifyOtp
+      onVerifyOtp: handleVerifyOtp,
+      onVerifyMfa: handleVerifyMfa,
+      onConfirmMfaEnroll: handleConfirmMfaEnroll,
+      onSkipMfaEnroll: handleSkipMfaEnroll
     });
     return;
   }
@@ -365,6 +394,95 @@ async function handleOAuth(provider) {
   }
 }
 
+async function enterAuthedRoute(res, { suggestMfa = false } = {}) {
+  beginSession({ userID: res.userID, email: res.email, role: res.role });
+  if (await enterAdminIfPermitted(res.userID, res.email)) return;
+
+  if (suggestMfa || res.suggestMfaEnroll) {
+    try {
+      const enroll = await enrollTotp();
+      update({
+        route: "auth",
+        loading: false,
+        verifyEmail: null,
+        mfaChallenge: false,
+        mfaEnroll: enroll,
+        mfaCode: "",
+        pendingAuth: { userID: res.userID, email: res.email, role: res.role },
+        error: null
+      });
+      return;
+    } catch {
+      /* enrollment optional if API fails */
+    }
+  }
+
+  const auth = authState();
+  state.route = auth.kind === "needsOnboarding" ? "onboarding" : (res.role === "Hospital" ? "hospital" : "doctor");
+  if (auth.kind === "needsOnboarding") {
+    state.onb = { step: 0, role: res.role, specialties: [], verified: false, codeVerified: false, email: res.email };
+  }
+  update({
+    loading: false,
+    verifyEmail: null,
+    verifyNotice: null,
+    otpCode: "",
+    mfaChallenge: false,
+    mfaEnroll: null,
+    mfaCode: "",
+    pendingAuth: null
+  });
+}
+
+async function handleVerifyMfa(code) {
+  const otp = String(code || "").replace(/\D/g, "").slice(0, 6);
+  update({ mfaCode: otp, error: null });
+  if (otp.length !== 6) {
+    update({ error: "Enter the 6-digit authenticator code." });
+    return;
+  }
+  update({ loading: true });
+  try {
+    await challengeAndVerifyFirstTotp(otp);
+    const res = await completeMfaSession();
+    await enterAuthedRoute(res);
+  } catch (err) {
+    update({ loading: false, error: err.message || "Invalid authenticator code." });
+  }
+}
+
+async function handleConfirmMfaEnroll(code) {
+  if (!state.mfaEnroll?.factorId) return;
+  const otp = String(code || "").replace(/\D/g, "").slice(0, 6);
+  update({ mfaCode: otp, error: null });
+  if (otp.length !== 6) {
+    update({ error: "Enter the 6-digit authenticator code." });
+    return;
+  }
+  update({ loading: true });
+  try {
+    await verifyTotp({ factorId: state.mfaEnroll.factorId, code: otp });
+    const pending = state.pendingAuth;
+    if (pending?.role) {
+      await enterAuthedRoute({ ...pending, suggestMfaEnroll: false });
+    } else {
+      const res = await completeMfaSession();
+      await enterAuthedRoute(res);
+    }
+  } catch (err) {
+    update({ loading: false, error: err.message || "Could not confirm authenticator." });
+  }
+}
+
+async function handleSkipMfaEnroll() {
+  const pending = state.pendingAuth;
+  if (!pending?.role) {
+    update({ mfaEnroll: null, mfaChallenge: false, route: "auth", authMode: "signin" });
+    return;
+  }
+  await enterAuthedRoute({ ...pending, suggestMfaEnroll: false });
+}
+
 async function handleVerifyOtp(code) {
   if (!state.verifyEmail) return;
   const otp = String(code || "").replace(/\D/g, "").slice(0, 6);
@@ -376,14 +494,7 @@ async function handleVerifyOtp(code) {
   update({ loading: true });
   try {
     const res = await verifySignupOtp(state.verifyEmail, otp, state.role);
-    beginSession({ userID: res.userID, email: res.email, role: res.role });
-    if (await enterAdminIfPermitted(res.userID, res.email)) return;
-    const auth = authState();
-    state.route = auth.kind === "needsOnboarding" ? "onboarding" : (res.role === "Hospital" ? "hospital" : "doctor");
-    if (auth.kind === "needsOnboarding") {
-      state.onb = { step: 0, role: res.role, specialties: [], verified: false, codeVerified: false, email: res.email };
-    }
-    update({ loading: false, verifyEmail: null, verifyNotice: null, otpCode: "" });
+    await enterAuthedRoute(res, { suggestMfa: true });
   } catch (err) {
     update({ loading: false, error: err.message || "Invalid or expired code." });
   }
@@ -433,12 +544,18 @@ async function handleAuthSubmit({ email, password, confirm }) {
     if (isConfigured()) {
       try {
         const res = await signInRemote(normalizedEmail, password);
-        beginSession({ userID: res.userID, email: res.email, role: res.role });
-        if (await enterAdminIfPermitted(res.userID, res.email)) return;
-        const auth = authState();
-        state.route = auth.kind === "needsOnboarding" ? "onboarding" : (res.role === "Hospital" ? "hospital" : "doctor");
-        if (auth.kind === "needsOnboarding") state.onb.role = res.role;
-        update({ loading: false, verifyEmail: null, otpCode: "" });
+        if (res.needsMfa) {
+          update({
+            loading: false,
+            mfaChallenge: true,
+            mfaEnroll: null,
+            mfaCode: "",
+            pendingAuth: { userID: res.userID, email: res.email },
+            error: null
+          });
+          return;
+        }
+        await enterAuthedRoute(res);
         return;
       } catch (err) {
         const message = err?.message || "Could not sign in.";

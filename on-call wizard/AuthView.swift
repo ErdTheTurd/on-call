@@ -18,6 +18,9 @@ struct AuthView: View {
     @State private var noticeMessage: String? = nil
     @State private var showDevRolePicker = false
     @State private var appleNonce: String?
+    @State private var mfaChallenge = false
+    @State private var mfaEnroll: SupabaseAuthService.TotpEnrollment? = nil
+    @State private var mfaCode = ""
     @Namespace private var ns
 
     enum AuthMode { case signIn, signUp }
@@ -46,7 +49,11 @@ struct AuthView: View {
                     .padding(.top, 64)
                     .padding(.bottom, 48)
 
-                    if pendingVerificationEmail != nil {
+                    if mfaChallenge {
+                        mfaChallengeCard
+                    } else if let enroll = mfaEnroll {
+                        mfaEnrollCard(enroll)
+                    } else if pendingVerificationEmail != nil {
                         otpCard
                     } else {
                         mainAuthCard
@@ -65,6 +72,163 @@ struct AuthView: View {
         .withContactSupport()
         .sheet(isPresented: $showDevRolePicker) {
             DevRolePickerView(auth: auth)
+        }
+    }
+
+    private var mfaChallengeCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Authenticator code")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.white)
+            Text("Open Google Authenticator (or any TOTP app) and enter the 6-digit code for MD Shift.")
+                .font(.system(size: 14))
+                .foregroundStyle(Color.white.opacity(0.55))
+            codeField(placeholder: "6-digit code", text: $mfaCode) {
+                if mfaCode.filter(\.isNumber).count == 6 { submitMfaChallenge() }
+            }
+            if let err = errorMessage {
+                Text(err).font(.system(size: 13, weight: .medium)).foregroundStyle(Color(hex: "F87171"))
+            }
+            Button { submitMfaChallenge() } label: { authPrimaryLabel("Verify") }
+                .buttonStyle(.plain)
+                .disabled(isLoading || mfaCode.filter(\.isNumber).count != 6)
+            Button {
+                mfaChallenge = false
+                mfaCode = ""
+                try? SupabaseAuthService.shared.signOut()
+            } label: {
+                Text("Back to sign in").font(.system(size: 14, weight: .medium)).foregroundStyle(Color.white.opacity(0.55)).frame(maxWidth: .infinity)
+            }
+        }
+        .padding(24)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        .padding(.horizontal, 20)
+    }
+
+    private func mfaEnrollCard(_ enroll: SupabaseAuthService.TotpEnrollment) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Set up authenticator")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.white)
+            Text("Add MD Shift in Google Authenticator using this secret, then enter the 6-digit code.")
+                .font(.system(size: 14))
+                .foregroundStyle(Color.white.opacity(0.55))
+            if !enroll.secret.isEmpty {
+                Text(enroll.secret)
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color(hex: "4F8EF7"))
+                    .textSelection(.enabled)
+            }
+            codeField(placeholder: "6-digit code", text: $mfaCode) {
+                if mfaCode.filter(\.isNumber).count == 6 { confirmMfaEnroll() }
+            }
+            if let err = errorMessage {
+                Text(err).font(.system(size: 13, weight: .medium)).foregroundStyle(Color(hex: "F87171"))
+            }
+            Button { confirmMfaEnroll() } label: { authPrimaryLabel("Confirm and continue") }
+                .buttonStyle(.plain)
+                .disabled(isLoading || mfaCode.filter(\.isNumber).count != 6)
+            Button { skipMfaEnroll() } label: {
+                Text("Skip for now").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "4F8EF7")).frame(maxWidth: .infinity)
+            }
+        }
+        .padding(24)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        .padding(.horizontal, 20)
+    }
+
+    private func codeField(placeholder: String, text: Binding<String>, onComplete: @escaping () -> Void) -> some View {
+        TextField(placeholder, text: text)
+            .keyboardType(.numberPad)
+            .textContentType(.oneTimeCode)
+            .multilineTextAlignment(.center)
+            .font(.system(size: 28, weight: .semibold, design: .rounded))
+            .padding(.vertical, 14)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+            .onChange(of: text.wrappedValue) { _, newValue in
+                let filtered = newValue.filter(\.isNumber)
+                if filtered.count > 6 { text.wrappedValue = String(filtered.prefix(6)) }
+                else if filtered != newValue { text.wrappedValue = filtered }
+                if text.wrappedValue.count == 6 { onComplete() }
+            }
+    }
+
+    private func submitMfaChallenge() {
+        let code = mfaCode.filter(\.isNumber)
+        guard code.count == 6 else { errorMessage = "Enter the 6-digit authenticator code."; return }
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                try await SupabaseAuthService.shared.challengeAndVerifyFirstTotp(code: code)
+                let role = try await SupabaseAuthService.shared.fetchRoleAfterMfa()
+                let mail = email.isEmpty ? (pendingVerificationEmail ?? "user") : normalizeEmail(email)
+                await MainActor.run {
+                    isLoading = false
+                    mfaChallenge = false
+                    finishAuth(userID: SupabaseAuthService.shared.currentUserID ?? UUID(), email: mail, role: role)
+                }
+            } catch {
+                await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }
+            }
+        }
+    }
+
+    private func confirmMfaEnroll() {
+        guard let enroll = mfaEnroll else { return }
+        let code = mfaCode.filter(\.isNumber)
+        guard code.count == 6 else { errorMessage = "Enter the 6-digit authenticator code."; return }
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                try await SupabaseAuthService.shared.verifyTotp(factorId: enroll.factorId, code: code)
+                await MainActor.run {
+                    isLoading = false
+                    mfaEnroll = nil
+                    mfaCode = ""
+                    let mail = pendingVerificationEmail ?? normalizeEmail(email)
+                    finishAuth(userID: SupabaseAuthService.shared.currentUserID ?? UUID(), email: mail, role: selectedRole)
+                }
+            } catch {
+                await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }
+            }
+        }
+    }
+
+    private func skipMfaEnroll() {
+        mfaEnroll = nil
+        mfaCode = ""
+        let mail = pendingVerificationEmail ?? normalizeEmail(email)
+        if let id = SupabaseAuthService.shared.currentUserID {
+            finishAuth(userID: id, email: mail, role: selectedRole)
+        }
+    }
+
+    private func maybePromptMfaEnroll(thenFinish userID: UUID, email: String, role: UserRole, suggest: Bool) {
+        guard suggest else {
+            finishAuth(userID: userID, email: email, role: role)
+            return
+        }
+        Task {
+            do {
+                let enroll = try await SupabaseAuthService.shared.enrollTotp()
+                await MainActor.run {
+                    selectedRole = role
+                    pendingVerificationEmail = email
+                    mfaEnroll = enroll
+                    mfaCode = ""
+                    isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    finishAuth(userID: userID, email: email, role: role)
+                }
+            }
         }
     }
 
@@ -337,10 +501,21 @@ struct AuthView: View {
         errorMessage = nil
         Task {
             do {
-                let (userID, mail, role) = try await SupabaseAuthService.shared.signInWithOAuth(provider: "google", role: selectedRole)
+                let result = try await SupabaseAuthService.shared.signInWithOAuth(provider: "google", role: selectedRole)
                 await MainActor.run {
-                    isLoading = false
-                    finishAuth(userID: userID, email: mail.isEmpty ? "google-user" : mail, role: role)
+                    if result.needsMfa {
+                        isLoading = false
+                        mfaChallenge = true
+                        mfaCode = ""
+                        email = result.email
+                    } else {
+                        maybePromptMfaEnroll(
+                            thenFinish: result.userID,
+                            email: result.email.isEmpty ? "google-user" : result.email,
+                            role: result.role,
+                            suggest: result.suggestMfaEnroll
+                        )
+                    }
                 }
             } catch AuthServiceError.oauthCancelled {
                 await MainActor.run { isLoading = false }
@@ -371,15 +546,26 @@ struct AuthView: View {
             let nonce = appleNonce
             Task {
                 do {
-                    let (userID, mail, role) = try await SupabaseAuthService.shared.signInWithAppleIDToken(
+                    let result = try await SupabaseAuthService.shared.signInWithAppleIDToken(
                         idToken,
                         nonce: nonce,
                         role: selectedRole
                     )
-                    let resolved = mail.isEmpty ? (credential.email ?? "apple-user") : mail
+                    let resolved = result.email.isEmpty ? (credential.email ?? "apple-user") : result.email
                     await MainActor.run {
-                        isLoading = false
-                        finishAuth(userID: userID, email: resolved, role: role)
+                        if result.needsMfa {
+                            isLoading = false
+                            mfaChallenge = true
+                            mfaCode = ""
+                            email = resolved
+                        } else {
+                            maybePromptMfaEnroll(
+                                thenFinish: result.userID,
+                                email: resolved,
+                                role: result.role,
+                                suggest: result.suggestMfaEnroll
+                            )
+                        }
                     }
                 } catch {
                     await MainActor.run {
@@ -412,7 +598,7 @@ struct AuthView: View {
                     isLoading = false
                     pendingVerificationEmail = nil
                     otpCode = ""
-                    finishAuth(userID: userID, email: pending, role: role)
+                    maybePromptMfaEnroll(thenFinish: userID, email: pending, role: role, suggest: true)
                 }
             } catch {
                 await MainActor.run {
@@ -468,17 +654,31 @@ struct AuthView: View {
                                 errorMessage = nil
                                 noticeMessage = nil
                             } else {
-                                finishAuth(userID: result.userID, email: trimmedEmail, role: selectedRole)
+                                maybePromptMfaEnroll(
+                                    thenFinish: result.userID,
+                                    email: trimmedEmail,
+                                    role: selectedRole,
+                                    suggest: true
+                                )
                             }
                         }
                     } else {
-                        let (userID, role) = try await SupabaseAuthService.shared.signIn(
-                            email: trimmedEmail,
-                            password: password
-                        )
+                        let result = try await SupabaseAuthService.shared.signIn(email: trimmedEmail, password: password)
                         await MainActor.run {
-                            isLoading = false
-                            finishAuth(userID: userID, email: trimmedEmail, role: role)
+                            if result.needsMfa {
+                                isLoading = false
+                                mfaChallenge = true
+                                mfaCode = ""
+                                email = result.email
+                                errorMessage = nil
+                            } else {
+                                maybePromptMfaEnroll(
+                                    thenFinish: result.userID,
+                                    email: result.email,
+                                    role: result.role,
+                                    suggest: result.suggestMfaEnroll
+                                )
+                            }
                         }
                     }
                 } catch let urlErr as URLError
