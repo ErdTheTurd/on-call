@@ -1,4 +1,4 @@
-import { escapeHtml } from "../brand.js";
+import { escapeHtml, BRAND, brandMark } from "../brand.js";
 import { icon } from "../components.js";
 import { isConfigured } from "../supabase-client.js";
 
@@ -10,10 +10,10 @@ export function renderAuthView(state, handlers) {
       <button type="button" class="auth-back" data-back-to-landing>‹ Back</button>
       <div class="auth-brand">
         <div class="auth-brand-row">
-          <span class="auth-brand-icon">${icon("wand")}</span>
-          <span>On Call</span>
+          <span class="auth-brand-icon">${brandMark({ size: 32 })}</span>
+          <span>${BRAND.name}</span>
         </div>
-        <p class="auth-tagline">Smarter on-call scheduling</p>
+        <p class="auth-tagline">${BRAND.tagline}</p>
       </div>
       <div class="auth-card-shell">
         <div class="tab-switcher" role="tablist">

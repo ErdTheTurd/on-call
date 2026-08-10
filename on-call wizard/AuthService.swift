@@ -57,7 +57,7 @@ final class AuthService: ObservableObject {
             return
         }
 
-        let reason = "Verify your identity to access On Call"
+        let reason = "Verify your identity to access MD Shift"
         context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, err in
             DispatchQueue.main.async {
                 if success {
@@ -113,7 +113,7 @@ struct BiometricLockScreen: View {
                         .font(.system(size: 72))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(Color.accentColor)
-                    Text("On Call")
+                    Text("MD Shift")
                         .font(.system(.largeTitle, design: .rounded, weight: .bold))
                     Text("Welcome back")
                         .font(.subheadline)

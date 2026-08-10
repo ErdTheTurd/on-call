@@ -100,7 +100,7 @@ struct DeepLinkBanner: View {
     private var subtitle: String {
         switch route {
         case .shift(let id): return "Shift \(id.uuidString.prefix(8))…"
-        default: return "Connected to the On Call website"
+        default: return "Connected to the MD Shift website"
         }
     }
 

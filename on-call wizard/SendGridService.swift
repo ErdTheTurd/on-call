@@ -11,7 +11,7 @@ final class SendGridService {
     }
     private let devRedirectEmail = "erdunn706@gmail.com"
     private let fromEmail = "noreply@oncallwizard.com"
-    private let fromName  = "On Call"
+    private let fromName  = "MD Shift"
     #if DEBUG
     private let isDev = true
     #else
@@ -46,7 +46,7 @@ final class SendGridService {
                 name: "send-notification",
                 body: [
                     "to": isDev ? devRedirectEmail : email,
-                    "subject": "Your On Call verification code",
+                    "subject": "Your MD Shift verification code",
                     "html": "<p>Your code is <strong>\(code)</strong></p>"
                 ]
             )
@@ -59,14 +59,14 @@ final class SendGridService {
         let body: [String: Any] = [
             "personalizations": [[
                 "to": [["email": recipient, "name": recipientName]],
-                "subject": "Your On Call verification code"
+                "subject": "Your MD Shift verification code"
             ]],
             "from": ["email": fromEmail, "name": fromName],
             "content": [[
                 "type": "text/html",
                 "value": """
                 <div style="font-family:-apple-system,sans-serif;max-width:480px;margin:0 auto;padding:32px">
-                  <h2 style="color:#1a1a2e;margin-bottom:8px">On Call</h2>
+                  <h2 style="color:#1a1a2e;margin-bottom:8px">MD Shift</h2>
                   <p style="color:#555">Hi \(recipientName),</p>
                   <p style="color:#555">Your verification code is:</p>
                   <div style="background:#f0f4ff;border-radius:12px;padding:24px;text-align:center;margin:24px 0">

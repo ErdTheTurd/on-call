@@ -180,18 +180,6 @@ export function bindDotField(root, siteSelector = ".site") {
     const hy = currY;
     const lit = glow > 0.02 && hx != null && hy != null;
 
-    // Soft blue wash under the bright dots so the radius reads clearly.
-    if (lit) {
-      const wash = ctx.createRadialGradient(hx, hy, 0, hx, hy, RADIUS);
-      wash.addColorStop(0, `rgba(147, 197, 253, ${0.32 * glow})`);
-      wash.addColorStop(0.4, `rgba(96, 165, 250, ${0.14 * glow})`);
-      wash.addColorStop(1, "rgba(59, 130, 246, 0)");
-      ctx.fillStyle = wash;
-      ctx.beginPath();
-      ctx.arc(hx, hy, RADIUS, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
     const cols = Math.ceil(width / GAP) + 1;
     const rows = Math.ceil(height / GAP) + 1;
     const r2 = RADIUS * RADIUS;
@@ -200,8 +188,9 @@ export function bindDotField(root, siteSelector = ".site") {
       const y = row * GAP + 4;
       for (let col = 0; col < cols; col += 1) {
         const x = col * GAP + 4;
-        let alpha = 0.11;
-        let radius = 1.05;
+        // Quiet base grid — only the dots themselves brighten near the pointer.
+        let alpha = 0.09;
+        let radius = 1;
         let r = 226;
         let g = 232;
         let b = 240;
@@ -213,11 +202,11 @@ export function bindDotField(root, siteSelector = ".site") {
           if (dist2 < r2) {
             const t = 1 - Math.sqrt(dist2) / RADIUS;
             const boost = t * t * glow;
-            alpha = Math.min(1, 0.11 + boost * 0.95);
-            radius = 1.05 + boost * 1.35;
-            r = Math.round(226 + boost * 29);
-            g = Math.round(232 + boost * 23);
-            b = Math.round(240 + boost * 15);
+            alpha = Math.min(0.72, 0.09 + boost * 0.55);
+            radius = 1 + boost * 0.55;
+            r = Math.round(226 + boost * 20);
+            g = Math.round(232 + boost * 16);
+            b = Math.round(240 + boost * 10);
           }
         }
 

@@ -83,7 +83,7 @@ struct RoleSelectionView: View {
             VStack(spacing: 12) {
                 Image(systemName: "stethoscope.circle.fill")
                     .font(.system(size: 72)).symbolRenderingMode(.hierarchical).foregroundStyle(Color.accentColor)
-                Text("On Call")
+                Text("MD Shift")
                     .font(.system(.largeTitle, design: .rounded, weight: .bold))
                 Text("Dynamic marketplace for on‑call coverage")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)

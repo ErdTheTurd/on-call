@@ -27,17 +27,14 @@ struct AuthView: View {
                     // Logo + wordmark
                     VStack(spacing: 10) {
                         HStack(spacing: 10) {
-                            Image(systemName: "wand.and.stars")
+                            Image(systemName: "waveform.path.ecg")
                                 .font(.system(size: 28, weight: .semibold))
-                                .foregroundStyle(
-                                    LinearGradient(colors: [Color(hex: "4F8EF7"), Color(hex: "A78BFA")],
-                                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                                )
-                            Text("On Call")
+                                .foregroundStyle(Color(hex: "4F8EF7"))
+                            Text("MD Shift")
                                 .font(.system(size: 22, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                         }
-                        Text("Smarter on-call scheduling")
+                        Text("Smarter shift scheduling")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Color.white.opacity(0.4))
                             .tracking(0.5)

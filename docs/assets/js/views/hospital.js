@@ -258,7 +258,7 @@ function renderAlterShifts(state, profile) {
           </div>
 
           <label class="toggle-row">
-            <span>✨ Use On Call pricing algorithm</span>
+            <span>Use MD Shift pricing algorithm</span>
             <input type="checkbox" data-alter-algo ${useAlgorithm ? "checked" : ""} />
           </label>
 
