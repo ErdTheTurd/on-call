@@ -85,29 +85,24 @@ function demoDoctorProfile() {
 function seedDoctor() {
   const profile = demoDoctorProfile();
   appStore.saveDoctorProfile(profile);
+  const specialty = profile.specialties[0];
 
-  // Each hospital needs 30+ upcoming days on the board, otherwise the app's own
-  // filler kicks in and buries these named hospitals under generic demo shifts.
-  const rotation = [
-    "Emergency Medicine", "Internal Medicine", "Cardiology",
-    "Emergency Medicine", "Internal Medicine", "Hospitalist"
-  ];
+  // Board only the doctor's specialty so Home / calendar match iOS filtering.
   const shifts = [];
   for (let offset = 1; offset <= 32; offset++) {
     const date = dayAt(offset);
     const weekend = [0, 6].includes(date.getDay());
-    HOSPITALS.forEach((hospital, index) => {
-      const specialty = rotation[(offset + index) % rotation.length];
+    HOSPITALS.forEach((hospital) => {
       const base = BASE_RATES[specialty] || 1200;
       shifts.push(makeShift(hospital, specialty, date, weekend ? base + 250 : base));
     });
   }
 
   const booked = [
-    { specialty: "Emergency Medicine", offset: 2, hospital: HOSPITALS[0] },
-    { specialty: "Internal Medicine", offset: 6, hospital: HOSPITALS[1] },
-    { specialty: "Emergency Medicine", offset: 11, hospital: HOSPITALS[0] }
-  ].map(({ specialty, offset, hospital }) =>
+    { offset: 2, hospital: HOSPITALS[0] },
+    { offset: 6, hospital: HOSPITALS[1] },
+    { offset: 11, hospital: HOSPITALS[0] }
+  ].map(({ offset, hospital }) =>
     makeShift(hospital, specialty, dayAt(offset), BASE_RATES[specialty])
   );
 
@@ -130,14 +125,15 @@ function seedDoctor() {
   appStore.saveTrades({
     incoming: [{
       id: uuid(),
-      shiftID: tradedShift.shiftID || tradedShift.id,
+      shiftID: tradedShift.id,
       fromDoctorID: appStore.roster[2]?.id || uuid(),
       fromDoctorName: "Dr. Maria Santos",
       toDoctorID: profile.id,
       toDoctorName: `${profile.firstName} ${profile.lastName}`,
-      specialty: tradedShift.specialty,
+      specialty,
       offeredDate: dayAt(9).toISOString(),
       requestedDate: tradedShift.start,
+      requestedShiftID: tradedShift.id,
       compensationAmount: 250,
       state: "pending",
       createdAt: new Date(Date.now() - 5 * 3600000).toISOString()
@@ -154,14 +150,14 @@ function seedDoctor() {
       doctorID: profile.id,
       doctorName: `${profile.firstName} ${profile.lastName}`,
       credential: profile.credential,
-      hospitalID: HOSPITALS[1].id,
-      hospitalName: HOSPITALS[1].name,
+      hospitalID: HOSPITALS[0].id,
+      hospitalName: HOSPITALS[0].name,
       date: dayAt(4).toISOString(),
-      specialty: "Internal Medicine",
+      specialty,
       status: "pending",
       requestedAt: new Date(Date.now() - 20 * 3600000).toISOString(),
       approvedAt: null,
-      shiftRate: BASE_RATES["Internal Medicine"]
+      shiftRate: BASE_RATES[specialty]
     }]
   });
 

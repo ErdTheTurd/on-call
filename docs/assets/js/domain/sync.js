@@ -383,12 +383,21 @@ export async function setUnavailable(hospitalId, date, blocked) {
   }
 }
 
-export async function requestTrade(shiftId, fromDoctorId, toDoctorId) {
+export async function requestTrade(shiftId, fromDoctorId, toDoctorId, extras = {}) {
   if (!isConfigured()) return null;
   const supabase = getSupabase();
-  const { data, error } = await supabase.functions.invoke("request-trade", {
-    body: { shift_id: shiftId, from_doctor_id: fromDoctorId, to_doctor_id: toDoctorId }
-  });
+  const body = {
+    shift_id: shiftId,
+    from_doctor_id: fromDoctorId,
+    to_doctor_id: toDoctorId
+  };
+  if (extras.requestedShiftId) body.requested_shift_id = extras.requestedShiftId;
+  if (extras.compensationAmount != null) body.compensation_amount = extras.compensationAmount;
+  if (extras.offeredDate) body.offered_date = extras.offeredDate;
+  if (extras.requestedDate) body.requested_date = extras.requestedDate;
+  if (extras.specialty) body.specialty = extras.specialty;
+  if (extras.counterOfTradeId) body.counter_of_trade_id = extras.counterOfTradeId;
+  const { data, error } = await supabase.functions.invoke("request-trade", { body });
   if (error) throw error;
   return data;
 }
@@ -465,7 +474,12 @@ export async function syncEverything(hooks) {
 
     if (tokens.length) {
       const tok = hooks.readLocal("tokens") || {};
-      hooks.writeLocal("tokens", { ...tok, requestedDays: tokens });
+      const localReqs = tok.requestedDays || [];
+      // Merge by id so a just-submitted local request is not wiped before
+      // the next remote round-trip returns it.
+      const byId = new Map(localReqs.map((r) => [r.id, r]));
+      for (const remote of tokens) byId.set(remote.id, remote);
+      hooks.writeLocal("tokens", { ...tok, requestedDays: [...byId.values()] });
     }
 
     if (roster) {

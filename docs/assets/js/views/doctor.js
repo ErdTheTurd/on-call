@@ -1,4 +1,4 @@
-import { escapeHtml, formatShiftDate } from "../brand.js";
+import { escapeHtml, formatShiftDate, doctorSpecialty } from "../brand.js";
 import {
   navBar, tabBar, shiftRow, tokenBadge, pendingBanner,
   credentialStatusCard, sectionHeader, emptyState, sheet, verificationBadge, icon, currency
@@ -9,8 +9,8 @@ import { currentRate } from "../shift-math.js";
 import {
   appStore, recommendedShifts, shiftsForDate, activeAssignments,
   pendingTradeCount, acceptShift, requestToken, cancelTokenRequest, ensureDemoShifts, signOut, demoHospital,
-  cancelShift, requestTrade, respondTrade, counterTrade, penaltyPreview, eligibleTradePartners,
-  incomingTrades, earningsSummary, savePreferences, requestStatusForDay, canAcceptOnDay
+  cancelShift, requestTrade, respondTrade, counterTrade, counterAlternateDays, penaltyPreview, eligibleTradePartners,
+  openShifts, canAcceptOnDay, requestStatusForDay, incomingTrades, earningsSummary, savePreferences
 } from "../store.js";
 
 export function renderDoctorApp(state) {
@@ -32,7 +32,7 @@ export function renderDoctorApp(state) {
       ], tab, pendingTradeCount())}
       ${state.sheet ? renderDoctorMenuSheet(state.sheet) : ""}
       ${state.daySheet ? renderDaySheet(state.daySheet, profile) : ""}
-      ${state.tradeSheet ? renderTradeSheet(state.tradeSheet) : ""}
+      ${state.tradeSheet ? renderTradeSheet(state.tradeSheet, state) : ""}
     </div>`;
 }
 
@@ -44,11 +44,11 @@ function renderDoctorHome(state, profile) {
   const rec = recommendedShifts();
   const tokenReqs = (appStore.tokens.requestedDays || []).slice(0, 5);
 
-  const specialty = profile?.specialties?.[0] || "Internal Medicine";
+  const specialty = doctorSpecialty(profile) || "Internal Medicine";
   const focusOpen = Boolean(state.focusOpenDays);
 
   return `
-    ${navBar(profile ? `Dr. ${profile.lastName}` : "On‑Call")}
+    ${navBar(profile ? `Dr. ${profile.lastName}` : "MD Shift")}
     <main class="main-scroll stack">
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
       <div class="content-grid two-col">
@@ -122,6 +122,10 @@ function renderMyShifts(state, profile) {
               const pay = Number(t.compensationAmount) || 0;
               const counterOpen = state.counterTradeId === t.id;
               const counterComp = Number(state.counterComp ?? pay);
+              const altDays = counterOpen ? counterAlternateDays(t) : [];
+              const selectedAlt = state.counterAltShiftId
+                || altDays[0]?.shiftID
+                || null;
               return `
               <div class="trade-card">
                 <div class="trade-from">${escapeHtml(from)} wants to swap</div>
@@ -138,6 +142,15 @@ function renderMyShifts(state, profile) {
                 </div>
                 ${counterOpen ? `
                   <div class="trade-counter-panel">
+                    <div class="subtitle" style="font-weight:600;margin-bottom:6px">Offer a different day of yours</div>
+                    ${altDays.length ? `
+                      <div class="chip-grid" style="margin-bottom:10px">
+                        ${altDays.map((a) => `
+                          <button type="button" class="chip ${selectedAlt === a.shiftID ? "active" : ""}"
+                                  data-counter-alt="${a.shiftID}">
+                            ${escapeHtml(formatShiftDate(a.shift.start))}
+                          </button>`).join("")}
+                      </div>` : `<p class="subtitle" style="color:var(--danger)">No other scheduled days to counter with.</p>`}
                     <div class="counter-row">
                       <span class="subtitle" style="font-weight:600">Ask them for</span>
                       <strong style="color:var(--accent)">$${Math.round(counterComp).toLocaleString()}</strong>
@@ -153,7 +166,7 @@ function renderMyShifts(state, profile) {
                           : `$${Math.round(pay - counterComp).toLocaleString()} less than they offered`
                     }</p>
                     <div class="trade-actions">
-                      <button type="button" class="counter" data-send-counter="${t.id}">Send counter</button>
+                      <button type="button" class="counter" data-send-counter="${t.id}" ${altDays.length ? "" : "disabled"}>Send counter</button>
                       <button type="button" class="deny" data-close-counter="${t.id}">Cancel</button>
                     </div>
                   </div>` : ""}
@@ -387,7 +400,11 @@ function renderDaySheet(dateISO, profile) {
   const holiday = holidayOn(date.toISOString());
   const premium = holidayPremiumMultiplier(date.toISOString());
   const existing = profile ? requestStatusForDay(date, profile.id) : null;
-  const approved = profile && existing && canAcceptOnDay(date, existing.hospitalID || demo.id, profile.id);
+  // Prefer the hospital on an open shift that day, then any open specialty shift, then demo.
+  const hospitalHint = shifts[0]
+    || openShifts(profile)[0]
+    || { hospitalID: demo.id, hospital: demo.name, specialty: doctorSpecialty(profile) || "Internal Medicine" };
+  const approved = profile && existing && canAcceptOnDay(date, existing.hospitalID || hospitalHint.hospitalID, profile.id);
 
   const body = `
     <main class="main-scroll stack" style="padding-bottom:24px">
@@ -405,7 +422,7 @@ function renderDaySheet(dateISO, profile) {
           <span style="font-size:1.4rem;color:var(--success)">✓</span>
           <div style="flex:1">
             <div style="font-weight:600">Request submitted</div>
-            <div class="subtitle">${escapeHtml(statusLabel(existing.status))}</div>
+            <div class="subtitle">${escapeHtml(statusLabel(existing.status))} · ${escapeHtml(existing.hospitalName || "")}</div>
           </div>
           ${existing.status === "pending" ? `<button type="button" class="btn-ghost" style="color:var(--danger)" data-cancel-request="${existing.id}">Cancel</button>` : ""}
         </section>` : ""}
@@ -432,25 +449,44 @@ function renderDaySheet(dateISO, profile) {
         <section class="card empty-state">
           <div class="empty-icon">${icon("moon", { size: 28 })}</div>
           <div class="empty-title">No open shifts on this day</div>
-          <p class="subtitle">You can still request call — the hospital may post shifts later.</p>
-          ${!existing ? `<button type="button" class="btn-primary" data-request-day ${appStore.tokens.tokensRemaining === 0 ? "disabled" : ""}>Request This Day</button>` : ""}
+          <p class="subtitle">You can still request call at ${escapeHtml(hospitalHint.hospital || hospitalHint.name || "the hospital")} — they may post later.</p>
+          ${!existing ? `<button type="button" class="btn-primary" data-request-day
+            data-hospital-id="${escapeHtml(hospitalHint.hospitalID)}"
+            data-hospital-name="${escapeHtml(hospitalHint.hospital || hospitalHint.name || "")}"
+            data-specialty="${escapeHtml(hospitalHint.specialty || doctorSpecialty(profile) || "")}"
+            ${appStore.tokens.tokensRemaining === 0 ? "disabled" : ""}>Request This Day</button>` : ""}
         </section>`}
     </main>`;
   return sheet("Available Shifts", body);
 }
 
-function renderTradeSheet(assignmentId) {
+function renderTradeSheet(assignmentId, state = {}) {
   const assignment = appStore.assignments.find((a) => a.id === assignmentId);
   if (!assignment) return "";
   const partners = eligibleTradePartners(assignment.shift.specialty, assignment.doctorID);
+  const selectedPartner = state.tradePartnerId
+    ? partners.find((d) => d.id === state.tradePartnerId)
+    : null;
+  const compensation = Number(state.tradeComp ?? 0);
   const body = `
     <main class="main-scroll stack" style="padding:16px">
       <p class="subtitle">Select a verified colleague to trade with:</p>
       ${partners.length ? partners.map((d) => `
-        <button type="button" class="menu-item" data-trade-to="${d.id}" data-assignment="${assignmentId}">
+        <button type="button" class="menu-item ${selectedPartner?.id === d.id ? "active" : ""}" data-select-trade-partner="${d.id}">
           <span>${escapeHtml(d.name)}, ${escapeHtml(d.credential)}</span>
           <span class="tertiary">${escapeHtml(d.specialty)}</span>
         </button>`).join("") : emptyState("No partners", "No verified doctors in this specialty on the roster.")}
+      ${selectedPartner ? `
+        <section class="card stack">
+          <div class="counter-row">
+            <span class="subtitle" style="font-weight:600">Compensation to them</span>
+            <strong style="color:var(--accent)">$${Math.round(compensation).toLocaleString()}</strong>
+          </div>
+          <input type="range" min="0" max="1000" step="25" value="${Math.round(compensation)}" data-trade-comp />
+          <button type="button" class="btn-primary" data-trade-to="${selectedPartner.id}" data-assignment="${assignmentId}">
+            Send trade request
+          </button>
+        </section>` : ""}
     </main>`;
   return sheet("Request Trade", body);
 }
@@ -552,14 +588,13 @@ export function bindDoctor(root, state, update) {
   root.querySelector("[data-request-day]")?.addEventListener("click", async () => {
     const profile = appStore.doctorProfile;
     const date = state.daySheet;
+    if (!profile || !date) return;
+    const btn = root.querySelector("[data-request-day]");
     const demo = demoHospital();
-    const res = await requestToken(
-      date,
-      demo.id,
-      demo.name,
-      profile?.specialties?.[0] || "Internal Medicine",
-      profile
-    );
+    const hospitalID = btn?.dataset.hospitalId || openShifts(profile)[0]?.hospitalID || demo.id;
+    const hospitalName = btn?.dataset.hospitalName || openShifts(profile)[0]?.hospital || demo.name;
+    const specialty = btn?.dataset.specialty || doctorSpecialty(profile) || "Internal Medicine";
+    const res = await requestToken(date, hospitalID, hospitalName, specialty, profile);
     const errEl = root.querySelector("[data-token-error]");
     if (!res.ok) {
       if (errEl) errEl.textContent = res.error;
@@ -583,16 +618,28 @@ export function bindDoctor(root, state, update) {
     });
   });
   root.querySelectorAll("[data-trade-shift]").forEach((btn) => {
-    btn.addEventListener("click", () => update({ tradeSheet: btn.dataset.tradeShift }));
+    btn.addEventListener("click", () => update({
+      tradeSheet: btn.dataset.tradeShift,
+      tradePartnerId: null,
+      tradeComp: 0
+    }));
+  });
+  root.querySelectorAll("[data-select-trade-partner]").forEach((btn) => {
+    btn.addEventListener("click", () => update({ tradePartnerId: btn.dataset.selectTradePartner }));
+  });
+  root.querySelector("[data-trade-comp]")?.addEventListener("input", (e) => {
+    update({ tradeComp: Number(e.target.value) || 0 });
   });
   root.querySelectorAll("[data-trade-to]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const assignment = appStore.assignments.find((a) => a.id === btn.dataset.assignment);
       const partner = appStore.roster.find((d) => d.id === btn.dataset.tradeTo);
       if (!assignment || !partner) return;
-      const res = await requestTrade(assignment, partner);
+      const res = await requestTrade(assignment, partner, {
+        compensationAmount: Number(state.tradeComp) || 0
+      });
       if (!res.ok) alert(res.error);
-      else update({ tradeSheet: null });
+      else update({ tradeSheet: null, tradePartnerId: null, tradeComp: 0 });
     });
   });
   root.querySelectorAll("[data-respond-trade]").forEach((btn) => {
@@ -601,21 +648,34 @@ export function bindDoctor(root, state, update) {
       if (!trade) return;
       const accept = btn.dataset.accept === "1";
       await respondTrade(trade, accept);
-      update({ counterTradeId: null, counterComp: null });
+      update({ counterTradeId: null, counterComp: null, counterAltShiftId: null });
     });
   });
   root.querySelectorAll("[data-open-counter]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const trade = incomingTrades().find((t) => t.id === btn.dataset.openCounter);
       if (!trade) return;
+      const alts = counterAlternateDays(trade);
+      if (!alts.length) {
+        alert("No other scheduled days available to counter with.");
+        return;
+      }
       update({
         counterTradeId: trade.id,
-        counterComp: Number(trade.compensationAmount) || 0
+        counterComp: Number(trade.compensationAmount) || 0,
+        counterAltShiftId: alts[0].shiftID
       });
     });
   });
   root.querySelectorAll("[data-close-counter]").forEach((btn) => {
-    btn.addEventListener("click", () => update({ counterTradeId: null, counterComp: null }));
+    btn.addEventListener("click", () => update({
+      counterTradeId: null,
+      counterComp: null,
+      counterAltShiftId: null
+    }));
+  });
+  root.querySelectorAll("[data-counter-alt]").forEach((btn) => {
+    btn.addEventListener("click", () => update({ counterAltShiftId: btn.dataset.counterAlt }));
   });
   root.querySelectorAll("[data-counter-comp]").forEach((el) => {
     el.addEventListener("input", () => {
@@ -627,9 +687,11 @@ export function bindDoctor(root, state, update) {
       const trade = incomingTrades().find((t) => t.id === btn.dataset.sendCounter);
       if (!trade) return;
       const amount = Number(state.counterComp ?? trade.compensationAmount) || 0;
-      const res = await counterTrade(trade, amount);
+      const altId = state.counterAltShiftId;
+      const alt = activeAssignments().find((a) => a.shiftID === altId) || counterAlternateDays(trade)[0];
+      const res = await counterTrade(trade, amount, alt);
       if (!res.ok) alert(res.error || "Could not send counter");
-      else update({ counterTradeId: null, counterComp: null });
+      else update({ counterTradeId: null, counterComp: null, counterAltShiftId: null });
     });
   });
 }

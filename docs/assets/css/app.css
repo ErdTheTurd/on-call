@@ -1276,6 +1276,11 @@ a { color: var(--accent); text-decoration: none; }
   transition: background 0.15s;
 }
 
+.menu-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .menu-list a:hover, .menu-list .menu-item:hover { background: rgba(255, 255, 255, 0.05); }
 
 .menu-list .menu-item > .ic { color: var(--accent); }
