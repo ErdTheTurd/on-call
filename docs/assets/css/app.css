@@ -2317,27 +2317,6 @@ a { color: var(--accent); text-decoration: none; }
 .feature h3 { margin: 15px 0 8px; font-size: 16.5px; font-weight: 650; }
 .feature p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--body); }
 
-/* Testimonial */
-.quote {
-  margin: 0;
-  padding: 32px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--ink-card);
-}
-
-.quote blockquote {
-  margin: 18px 0 20px;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.5;
-  letter-spacing: -0.015em;
-}
-
-.quote figcaption { display: grid; gap: 3px; }
-.quote figcaption strong { font-size: 14px; }
-.quote figcaption span { font-size: 12.5px; color: var(--body-dim); }
-
 /* Closing band */
 .cta-band {
   display: flex;
