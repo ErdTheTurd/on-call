@@ -1,13 +1,86 @@
-# Auth setup — email OTP + Google / Apple
+# Auth setup — email OTP + Google / Apple + Resend SMTP
 
 Password signups use a **6-digit email code** (no “click this link”).
+Auth mail is sent through **Resend SMTP** (not Supabase’s built-in mailer).
 Google and Apple OAuth are available on web and iOS once providers are enabled.
+
+## 0. Resend SMTP (required for reliable OTP delivery)
+
+Supabase’s default mailer is not for production. Wire Resend:
+
+### 0a. Resend account + domain DNS
+
+1. Sign up at https://resend.com
+2. **Domains** → **Add Domain** → `mdshift.net` (or `mail.mdshift.net`)
+3. Add the DNS records Resend shows (SPF, DKIM; DMARC if prompted)
+
+**Important for mdshift.net today:** public TXT is currently `v=spf1 -all`, which
+blocks all senders. Replace that SPF with Resend’s (typically includes
+`include:amazonses.com` / Resend’s published SPF). DNS appears to be on
+Squarespace (`squarespacedns.com`) — edit DNS there until Resend shows **Verified**.
+
+Sender to use: `noreply@mdshift.net` (must match the verified domain).
+
+Until the domain verifies, Resend only allows limited test sends (e.g. to your
+own account email with their onboarding sender). Finish DNS before real signups.
+
+### 0b. API key
+
+1. Resend → **API Keys** → create key with **Sending access**
+2. Copy `re_...` once
+
+### 0c. Paste into Supabase (dashboard or script)
+
+**Dashboard:** Authentication → Email → SMTP Settings  
+https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/smtp
+
+| Field | Value |
+|--------|--------|
+| Enable custom SMTP | ON |
+| Sender email | `noreply@mdshift.net` |
+| Sender name | `MD Shift` |
+| Host | `smtp.resend.com` |
+| Port | `465` |
+| Username | `resend` |
+| Password | your Resend API key |
+
+**Or script** (needs a Supabase personal access token from
+https://supabase.com/dashboard/account/tokens):
+
+```bash
+export RESEND_API_KEY=re_...
+export SUPABASE_ACCESS_TOKEN=sbp_...
+export RESEND_FROM_EMAIL=noreply@mdshift.net
+./scripts/configure-resend-smtp.sh
+./scripts/configure-otp-email-template.sh
+```
+
+Smoke-test Resend alone:
+
+```bash
+export RESEND_API_KEY=re_...
+export RESEND_TEST_TO=you@example.com
+export RESEND_FROM_EMAIL=noreply@mdshift.net
+./scripts/test-resend-send.sh
+```
+
+### 0d. Rate limits
+
+After custom SMTP is on: Auth → Rate Limits — raise email send rate above the
+built-in default.  
+https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/rate-limits
+
+Local CLI config already points SMTP at Resend via `env(RESEND_API_KEY)` in
+`supabase/config.toml`.
+
+---
 
 ## 1. Confirm email (OTP)
 
 Already on for this project (`mailer_autoconfirm = false`).
 
-Update the hosted **Confirm signup** template so the body shows the token only:
+Update the hosted **Confirm signup** template so the body shows the token only
+(or run `./scripts/configure-otp-email-template.sh`):
 
 1. Auth → Email Templates → Confirm signup  
    https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/templates
@@ -22,6 +95,8 @@ Update the hosted **Confirm signup** template so the body shows the token only:
 ```
 
 Local CLI already points at `supabase/templates/confirmation.html`.
+
+---
 
 ## 2. Redirect URLs
 
