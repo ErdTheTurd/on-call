@@ -156,12 +156,15 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "https://erdtheturd.github.io/on-call"
+site_url = "https://mdshift.net"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 additional_redirect_urls = [
-  "https://erdtheturd.github.io/on-call/callback.html",
+  "https://mdshift.net/callback.html",
+  "https://mdshift.net/**",
+  "oncallwizard://auth-callback",
+  "https://erdtheturd.github.io/on-call/docs/callback.html",
   "http://127.0.0.1:3000",
   "https://127.0.0.1:3000"
 ]
@@ -251,6 +254,11 @@ otp_expiry = 3600
 # [auth.email.template.invite]
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
+
+# Confirmation emails show a 6-digit code (no magic link) for web + iOS.
+[auth.email.template.confirmation]
+subject = "Your MD Shift verification code"
+content_path = "./supabase/templates/confirmation.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]

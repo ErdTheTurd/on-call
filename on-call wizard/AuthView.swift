@@ -1,4 +1,6 @@
 import SwiftUI
+import AuthenticationServices
+import CryptoKit
 
 // MARK: - Auth Screen (Sign In / Sign Up)
 
@@ -12,20 +14,21 @@ struct AuthView: View {
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
     @State private var pendingVerificationEmail: String? = nil
+    @State private var otpCode = ""
+    @State private var noticeMessage: String? = nil
     @State private var showDevRolePicker = false
+    @State private var appleNonce: String?
     @Namespace private var ns
 
     enum AuthMode { case signIn, signUp }
 
     var body: some View {
         ZStack {
-            // Background — deep navy with subtle grid
             Color(hex: "0A0F1E").ignoresSafeArea()
             MeshBackground()
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    // Logo + wordmark
                     VStack(spacing: 10) {
                         HStack(spacing: 10) {
                             Image(systemName: "waveform.path.ecg")
@@ -43,154 +46,12 @@ struct AuthView: View {
                     .padding(.top, 64)
                     .padding(.bottom, 48)
 
-                    // Card
-                    VStack(spacing: 0) {
-                        // Tab switcher
-                        HStack(spacing: 0) {
-                            TabPill(label: "Sign in", isActive: mode == .signIn, ns: ns) {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { mode = .signIn; errorMessage = nil }
-                            }
-                            TabPill(label: "Create account", isActive: mode == .signUp, ns: ns) {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { mode = .signUp; errorMessage = nil }
-                            }
-                        }
-                        .padding(4)
-                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 28)
-
-                        // Role selector (sign up only)
-                        if mode == .signUp {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("I AM A")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(Color.white.opacity(0.35))
-                                    .tracking(1.5)
-                                HStack(spacing: 10) {
-                                    RolePill(label: "Doctor", icon: "stethoscope", isSelected: selectedRole == .doctor) {
-                                        withAnimation(.spring(response: 0.3)) { selectedRole = .doctor }
-                                    }
-                                    RolePill(label: "Hospital", icon: "cross.case.fill", isSelected: selectedRole == .hospital) {
-                                        withAnimation(.spring(response: 0.3)) { selectedRole = .hospital }
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.bottom, 20)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                        }
-
-                        // Fields
-                        VStack(spacing: 12) {
-                            AuthField(icon: "envelope", placeholder: "Email address", text: $email, keyboard: .emailAddress)
-                            AuthField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
-                            if mode == .signUp {
-                                AuthField(icon: "lock.fill", placeholder: "Confirm password", text: $confirmPassword, isSecure: true)
-                                    .transition(.move(edge: .top).combined(with: .opacity))
-                            }
-                        }
-                        .padding(.horizontal, 24)
-                        .animation(.spring(response: 0.35), value: mode)
-
-                        // Error
-                        if let err = errorMessage {
-                            Text(err)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Color(hex: "F87171"))
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 24)
-                                .padding(.top, 12)
-                                .transition(.opacity)
-                        }
-                        if pendingVerificationEmail != nil {
-                            Button {
-                                resendVerification()
-                            } label: {
-                                Text("Resend verification email")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(Color(hex: "4F8EF7"))
-                            }
-                            .padding(.top, 8)
-                            .disabled(isLoading)
-                        }
-
-                        // Forgot password (sign in only)
-                        if mode == .signIn {
-                            HStack {
-                                Spacer()
-                                Button("Forgot password?") {}
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Color(hex: "4F8EF7").opacity(0.8))
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.top, 8)
-                        }
-
-                        // Primary CTA
-                        Button { handleSubmit() } label: {
-                            ZStack {
-                                if isLoading {
-                                    ProgressView().tint(.white)
-                                } else {
-                                    Text(mode == .signIn ? "Sign in" : "Create account")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundStyle(.white)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 52)
-                            .background(
-                                LinearGradient(
-                                    colors: [Color(hex: "4F8EF7"), Color(hex: "7C3AED")],
-                                    startPoint: .leading, endPoint: .trailing
-                                ),
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isLoading || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty || (mode == .signUp && confirmPassword.isEmpty))
-                        .padding(.horizontal, 24)
-                        .padding(.top, 20)
-
-                        // Divider
-                        HStack(spacing: 12) {
-                            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
-                            Text("OR").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.white.opacity(0.25)).tracking(1)
-                            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 20)
-
-                        // Google SSO
-                        Button {} label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "globe")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(Color.white.opacity(0.75))
-                                Text("Continue with Google")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(Color.white.opacity(0.75))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 52)
-                            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 32)
+                    if pendingVerificationEmail != nil {
+                        otpCard
+                    } else {
+                        mainAuthCard
                     }
-                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-                    .padding(.horizontal, 20)
 
-                    // Terms
                     Text("By continuing you agree to our Terms of Service and Privacy Policy.")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.white.opacity(0.2))
@@ -207,8 +68,239 @@ struct AuthView: View {
         }
     }
 
+    private var otpCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Enter verification code")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.white)
+            Text("We sent a 6-digit code to \(pendingVerificationEmail ?? ""). Enter it here — no link to click.")
+                .font(.system(size: 14))
+                .foregroundStyle(Color.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("", text: $otpCode)
+                .keyboardType(.numberPad)
+                .textContentType(.oneTimeCode)
+                .multilineTextAlignment(.center)
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .padding(.vertical, 14)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+                .onChange(of: otpCode) { _, newValue in
+                    let filtered = newValue.filter(\.isNumber)
+                    if filtered.count > 6 {
+                        otpCode = String(filtered.prefix(6))
+                    } else if filtered != newValue {
+                        otpCode = filtered
+                    }
+                    if otpCode.count == 6 { submitOTP() }
+                }
+
+            if let err = errorMessage {
+                Text(err)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color(hex: "F87171"))
+            }
+            if let notice = noticeMessage {
+                Text(notice)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color(hex: "34D399"))
+            }
+
+            Button { submitOTP() } label: {
+                authPrimaryLabel("Verify and continue")
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading || otpCode.count != 6)
+
+            Button { resendVerification() } label: {
+                Text("Resend code")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color(hex: "4F8EF7"))
+                    .frame(maxWidth: .infinity)
+            }
+            .disabled(isLoading)
+
+            Button {
+                pendingVerificationEmail = nil
+                otpCode = ""
+                errorMessage = nil
+                noticeMessage = nil
+                mode = .signIn
+            } label: {
+                Text("Back to sign in")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.55))
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(24)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .padding(.horizontal, 20)
+    }
+
+    private var mainAuthCard: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                TabPill(label: "Sign in", isActive: mode == .signIn, ns: ns) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { mode = .signIn; errorMessage = nil }
+                }
+                TabPill(label: "Create account", isActive: mode == .signUp, ns: ns) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { mode = .signUp; errorMessage = nil }
+                }
+            }
+            .padding(4)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.horizontal, 24)
+            .padding(.bottom, 28)
+
+            if mode == .signUp {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("I AM A")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                        .tracking(1.5)
+                    HStack(spacing: 10) {
+                        RolePill(label: "Doctor", icon: "stethoscope", isSelected: selectedRole == .doctor) {
+                            withAnimation(.spring(response: 0.3)) { selectedRole = .doctor }
+                        }
+                        RolePill(label: "Hospital", icon: "cross.case.fill", isSelected: selectedRole == .hospital) {
+                            withAnimation(.spring(response: 0.3)) { selectedRole = .hospital }
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 20)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            VStack(spacing: 10) {
+                Button { startGoogleSignIn() } label: {
+                    oauthLabel(systemImage: "globe", title: "Continue with Google")
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading || !SupabaseAuthService.shared.isConfigured)
+
+                SignInWithAppleButton(.signIn) { request in
+                    let nonce = randomNonce()
+                    appleNonce = nonce
+                    request.requestedScopes = [.fullName, .email]
+                    request.nonce = sha256(nonce)
+                } onCompletion: { result in
+                    handleAppleResult(result)
+                }
+                .signInWithAppleButtonStyle(.white)
+                .frame(height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .disabled(isLoading || !SupabaseAuthService.shared.isConfigured)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 8)
+
+            HStack(spacing: 12) {
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                Text("OR USE EMAIL").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.white.opacity(0.25)).tracking(1)
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+
+            VStack(spacing: 12) {
+                AuthField(icon: "envelope", placeholder: "Email address", text: $email, keyboard: .emailAddress)
+                AuthField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
+                if mode == .signUp {
+                    AuthField(icon: "lock.fill", placeholder: "Confirm password", text: $confirmPassword, isSecure: true)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, 24)
+            .animation(.spring(response: 0.35), value: mode)
+
+            if let err = errorMessage {
+                Text(err)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color(hex: "F87171"))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .transition(.opacity)
+            }
+
+            if mode == .signIn {
+                HStack {
+                    Spacer()
+                    Button("Forgot password?") {}
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color(hex: "4F8EF7").opacity(0.8))
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+            }
+
+            Button { handleSubmit() } label: {
+                authPrimaryLabel(mode == .signIn ? "Sign in" : "Create account")
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty || (mode == .signUp && confirmPassword.isEmpty))
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 32)
+        }
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .padding(.horizontal, 20)
+    }
+
+    private func authPrimaryLabel(_ title: String) -> some View {
+        ZStack {
+            if isLoading {
+                ProgressView().tint(.white)
+            } else {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 52)
+        .background(
+            LinearGradient(
+                colors: [Color(hex: "4F8EF7"), Color(hex: "2563EB")],
+                startPoint: .leading, endPoint: .trailing
+            ),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+    }
+
+    private func oauthLabel(systemImage: String, title: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.75))
+            Text(title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.75))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 52)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+
     #if DEBUG
-    /// Short aliases for investor demos. Real auth still goes through Supabase.
     private let demoAccounts: [String: (email: String, role: UserRole)] = [
         "erdunn": ("erdunn706@gmail.com", .hospital),
         "erdunn706@gmail.com": ("erdunn706@gmail.com", .hospital),
@@ -230,15 +322,116 @@ struct AuthView: View {
         return value
     }
 
+    private func finishAuth(userID: UUID, email: String, role: UserRole) {
+        SessionStore.shared.beginSession(userID: userID, email: email, role: role)
+        let hasProfile = role == .doctor ? DoctorProfile.load() != nil : HospitalProfile.load() != nil
+        if hasProfile { auth.completeOnboarding(role: role) } else { auth.selectRole(role) }
+    }
+
+    private func startGoogleSignIn() {
+        guard SupabaseAuthService.shared.isConfigured else {
+            errorMessage = "Supabase is not configured."
+            return
+        }
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                let (userID, mail, role) = try await SupabaseAuthService.shared.signInWithOAuth(provider: "google", role: selectedRole)
+                await MainActor.run {
+                    isLoading = false
+                    finishAuth(userID: userID, email: mail.isEmpty ? "google-user" : mail, role: role)
+                }
+            } catch AuthServiceError.oauthCancelled {
+                await MainActor.run { isLoading = false }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func handleAppleResult(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .failure(let error):
+            let ns = error as NSError
+            if ns.code == ASAuthorizationError.canceled.rawValue { return }
+            errorMessage = error.localizedDescription
+        case .success(let authorization):
+            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                  let tokenData = credential.identityToken,
+                  let idToken = String(data: tokenData, encoding: .utf8) else {
+                errorMessage = "Apple Sign In failed."
+                return
+            }
+            isLoading = true
+            errorMessage = nil
+            let nonce = appleNonce
+            Task {
+                do {
+                    let (userID, mail, role) = try await SupabaseAuthService.shared.signInWithAppleIDToken(
+                        idToken,
+                        nonce: nonce,
+                        role: selectedRole
+                    )
+                    let resolved = mail.isEmpty ? (credential.email ?? "apple-user") : mail
+                    await MainActor.run {
+                        isLoading = false
+                        finishAuth(userID: userID, email: resolved, role: role)
+                    }
+                } catch {
+                    await MainActor.run {
+                        isLoading = false
+                        errorMessage = error.localizedDescription
+                    }
+                }
+            }
+        }
+    }
+
+    private func submitOTP() {
+        guard let pending = pendingVerificationEmail else { return }
+        let code = otpCode.filter(\.isNumber)
+        guard code.count == 6 else {
+            errorMessage = "Enter the 6-digit code from your email."
+            return
+        }
+        isLoading = true
+        errorMessage = nil
+        noticeMessage = nil
+        Task {
+            do {
+                let (userID, role) = try await SupabaseAuthService.shared.verifySignupOTP(
+                    email: pending,
+                    token: code,
+                    role: selectedRole
+                )
+                await MainActor.run {
+                    isLoading = false
+                    pendingVerificationEmail = nil
+                    otpCode = ""
+                    finishAuth(userID: userID, email: pending, role: role)
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
     private func handleSubmit() {
         errorMessage = nil
+        noticeMessage = nil
         pendingVerificationEmail = nil
         let trimmedEmail = normalizeEmail(email)
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
         #if DEBUG
-        // Keep the old role-picker only for the exact demo password on known accounts.
         if let demo = demoAccounts[trimmedEmail], password == demoPassword,
            !SupabaseAuthService.shared.isConfigured {
             isLoading = true
@@ -246,9 +439,7 @@ struct AuthView: View {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 await MainActor.run {
                     isLoading = false
-                    SessionStore.shared.beginSession(userID: UUID(), email: demo.email, role: demo.role)
-                    let hasProfile = demo.role == .doctor ? DoctorProfile.load() != nil : HospitalProfile.load() != nil
-                    if hasProfile { auth.completeOnboarding(role: demo.role) } else { auth.selectRole(demo.role) }
+                    finishAuth(userID: UUID(), email: demo.email, role: demo.role)
                 }
             }
             return
@@ -264,38 +455,44 @@ struct AuthView: View {
                             await MainActor.run { isLoading = false; errorMessage = "Passwords don't match." }
                             return
                         }
-                        let result = try await SupabaseAuthService.shared.signUp(email: trimmedEmail, password: password, role: selectedRole)
+                        let result = try await SupabaseAuthService.shared.signUp(
+                            email: trimmedEmail,
+                            password: password,
+                            role: selectedRole
+                        )
                         await MainActor.run {
                             isLoading = false
                             if result.needsEmailVerification {
                                 pendingVerificationEmail = trimmedEmail
-                                errorMessage = AuthServiceError.needsEmailVerification.localizedDescription
+                                otpCode = ""
+                                errorMessage = nil
+                                noticeMessage = nil
                             } else {
-                                SessionStore.shared.beginSession(userID: result.userID, email: trimmedEmail, role: selectedRole)
-                                auth.selectRole(selectedRole)
+                                finishAuth(userID: result.userID, email: trimmedEmail, role: selectedRole)
                             }
                         }
                     } else {
-                        let (userID, role) = try await SupabaseAuthService.shared.signIn(email: trimmedEmail, password: password)
+                        let (userID, role) = try await SupabaseAuthService.shared.signIn(
+                            email: trimmedEmail,
+                            password: password
+                        )
                         await MainActor.run {
                             isLoading = false
-                            SessionStore.shared.beginSession(userID: userID, email: trimmedEmail, role: role)
-                            let hasProfile = role == .doctor ? DoctorProfile.load() != nil : HospitalProfile.load() != nil
-                            if hasProfile { auth.completeOnboarding(role: role) } else { auth.selectRole(role) }
+                            finishAuth(userID: userID, email: trimmedEmail, role: role)
                         }
                     }
                 } catch let urlErr as URLError
                     where [.cannotConnectToHost, .notConnectedToInternet,
                            .networkConnectionLost, .timedOut,
                            .cannotFindHost, .dnsLookupFailed].contains(urlErr.code) {
-                    // Server unreachable — fall through to local offline auth
                     await MainActor.run { isLoading = false }
                     handleLocalAuth(trimmedEmail: trimmedEmail)
                 } catch AuthServiceError.emailNotConfirmed {
                     await MainActor.run {
                         isLoading = false
                         pendingVerificationEmail = trimmedEmail
-                        errorMessage = AuthServiceError.emailNotConfirmed.localizedDescription
+                        otpCode = ""
+                        errorMessage = nil
                     }
                 } catch {
                     await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }
@@ -308,15 +505,16 @@ struct AuthView: View {
     }
 
     private func resendVerification() {
-        guard let email = pendingVerificationEmail else { return }
+        guard let mail = pendingVerificationEmail else { return }
         isLoading = true
         errorMessage = nil
+        noticeMessage = nil
         Task {
             do {
-                try await SupabaseAuthService.shared.resendSignupEmail(email: email)
+                try await SupabaseAuthService.shared.resendSignupEmail(email: mail)
                 await MainActor.run {
                     isLoading = false
-                    errorMessage = "Verification email sent again."
+                    noticeMessage = "New code sent. Check your inbox."
                 }
             } catch {
                 await MainActor.run {
@@ -326,8 +524,6 @@ struct AuthView: View {
             }
         }
     }
-
-    // MARK: - Local / offline auth
 
     private func handleLocalAuth(trimmedEmail: String) {
         if mode == .signUp {
@@ -341,16 +537,13 @@ struct AuthView: View {
                 await MainActor.run {
                     isLoading = false
                     let userID = AccountStore.shared.register(email: trimmedEmail, password: password, role: selectedRole)
-                    SessionStore.shared.beginSession(userID: userID, email: trimmedEmail, role: selectedRole)
-                    auth.selectRole(selectedRole)
+                    finishAuth(userID: userID, email: trimmedEmail, role: selectedRole)
                 }
             }
         } else {
-            // If no local account yet, create one on first offline sign-in so the user isn't blocked
             if !AccountStore.shared.accountExists(email: trimmedEmail) {
                 let userID = AccountStore.shared.register(email: trimmedEmail, password: password, role: .doctor)
-                SessionStore.shared.beginSession(userID: userID, email: trimmedEmail, role: .doctor)
-                auth.selectRole(.doctor)
+                finishAuth(userID: userID, email: trimmedEmail, role: .doctor)
                 return
             }
             guard AccountStore.shared.passwordMatches(email: trimmedEmail, password: password) else {
@@ -363,12 +556,33 @@ struct AuthView: View {
                     isLoading = false
                     let role = AccountStore.shared.role(for: trimmedEmail) ?? .doctor
                     let userID = AccountStore.shared.userID(for: trimmedEmail) ?? UUID()
-                    SessionStore.shared.beginSession(userID: userID, email: trimmedEmail, role: role)
-                    let hasProfile = role == .doctor ? DoctorProfile.load() != nil : HospitalProfile.load() != nil
-                    if hasProfile { auth.completeOnboarding(role: role) } else { auth.selectRole(role) }
+                    finishAuth(userID: userID, email: trimmedEmail, role: role)
                 }
             }
         }
+    }
+
+    private func randomNonce(length: Int = 32) -> String {
+        let charset = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        var remaining = length
+        while remaining > 0 {
+            let randoms: [UInt8] = (0..<16).map { _ in UInt8.random(in: 0...255) }
+            randoms.forEach { random in
+                if remaining == 0 { return }
+                if random < charset.count {
+                    result.append(charset[Int(random)])
+                    remaining -= 1
+                }
+            }
+        }
+        return result
+    }
+
+    private func sha256(_ input: String) -> String {
+        let data = Data(input.utf8)
+        let hash = SHA256.hash(data: data)
+        return hash.map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -506,7 +720,6 @@ private struct AuthField: View {
 
 private struct MeshBackground: View {
     var body: some View {
-        // Static gradient — animated TimelineView + blur was too expensive on device
         LinearGradient(
             colors: [Color(hex: "0A0F1E"), Color(hex: "1E3A8A").opacity(0.45), Color(hex: "0A0F1E")],
             startPoint: .topLeading,

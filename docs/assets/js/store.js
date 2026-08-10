@@ -270,7 +270,7 @@ export async function signInRemote(email, password) {
   if (error) {
     const message = error.message || "Could not sign in.";
     if (/email not confirmed/i.test(message)) {
-      const err = new Error("Confirm your email before signing in. Check your inbox for the link.");
+      const err = new Error("Enter the 6-digit code from your email before signing in.");
       err.code = "email_not_confirmed";
       err.email = email;
       throw err;
@@ -281,7 +281,7 @@ export async function signInRemote(email, password) {
   if (user && !user.email_confirmed_at && !user.confirmed_at) {
     // Defense in depth if the project still issues a session before confirm.
     try { await supabase.auth.signOut(); } catch { /* ignore */ }
-    const err = new Error("Confirm your email before signing in. Check your inbox for the link.");
+    const err = new Error("Enter the 6-digit code from your email before signing in.");
     err.code = "email_not_confirmed";
     err.email = email;
     throw err;
@@ -315,12 +315,10 @@ export async function signInRemote(email, password) {
 
 export async function signUpRemote(email, password, role) {
   const supabase = getSupabase();
-  const redirectTo = `${window.location.origin}${window.location.pathname.replace(/\/?$/, "/")}callback.html`;
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: redirectTo,
       data: { role: role.toLowerCase() }
     }
   });
@@ -328,7 +326,7 @@ export async function signUpRemote(email, password, role) {
   const user = data.user;
   if (!user?.id) throw new Error("Could not create account.");
 
-  // When confirmations are on, Supabase returns no session until the email link is used.
+  // Confirmations send a 6-digit code (email template shows {{ .Token }}, not a link).
   const needsEmailVerification = !data.session || (!user.email_confirmed_at && !user.confirmed_at);
 
   if (data.session) {
@@ -345,17 +343,130 @@ export async function signUpRemote(email, password, role) {
   };
 }
 
+export async function verifySignupOtp(email, token, role) {
+  if (!isConfigured()) throw new Error("Supabase is not configured.");
+  const supabase = getSupabase();
+  const code = String(token || "").replace(/\D/g, "").slice(0, 6);
+  if (code.length !== 6) throw new Error("Enter the 6-digit code from your email.");
+
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token: code,
+    type: "signup"
+  });
+  if (error) throw error;
+  const user = data.user;
+  if (!user?.id) throw new Error("Could not verify email.");
+
+  const metaRole = String(user.user_metadata?.role || role || "doctor").toLowerCase();
+  const normalizedRole = metaRole.charAt(0).toUpperCase() + metaRole.slice(1);
+  try {
+    await upsertProfile(user.id, user.email || email, metaRole);
+  } catch { /* ignore */ }
+
+  try {
+    const hydrated = await hydrateLocalProfiles({
+      userID: user.id,
+      role: normalizedRole,
+      email: user.email || email
+    });
+    if (hydrated?.kind === "hospital") {
+      appStore.saveHospitalProfile(hydrated.profile);
+      ensureDemoShifts(hydrated.profile.id, hydrated.profile.name);
+      seedMockDoctors();
+    } else if (hydrated?.kind === "doctor") {
+      appStore.saveDoctorProfile(hydrated.profile);
+      registerDoctorOnRoster(hydrated.profile);
+    }
+  } catch { /* offline */ }
+
+  return { userID: user.id, email: user.email || email, role: normalizedRole };
+}
+
 export async function resendSignupEmail(email) {
   if (!isConfigured()) throw new Error("Supabase is not configured.");
   const supabase = getSupabase();
-  const redirectTo = `${window.location.origin}${window.location.pathname.replace(/\/?$/, "/")}callback.html`;
   const { error } = await supabase.auth.resend({
     type: "signup",
-    email,
-    options: { emailRedirectTo: redirectTo }
+    email
   });
   if (error) throw error;
   return { ok: true };
+}
+
+const OAUTH_ROLE_KEY = "mdshift_oauth_role";
+
+export function stashOAuthRole(role) {
+  try {
+    sessionStorage.setItem(OAUTH_ROLE_KEY, String(role || "Doctor"));
+  } catch { /* ignore */ }
+}
+
+export function takeOAuthRole() {
+  try {
+    const role = sessionStorage.getItem(OAUTH_ROLE_KEY) || "Doctor";
+    sessionStorage.removeItem(OAUTH_ROLE_KEY);
+    return role;
+  } catch {
+    return "Doctor";
+  }
+}
+
+/** Starts Google or Apple OAuth in the browser. Role is applied after redirect. */
+export async function signInWithOAuth(provider, role) {
+  if (!isConfigured()) throw new Error("Supabase is not configured.");
+  if (provider !== "google" && provider !== "apple") {
+    throw new Error("Unsupported sign-in provider.");
+  }
+  stashOAuthRole(role || "Doctor");
+  const supabase = getSupabase();
+  const redirectTo = `${window.location.origin}${window.location.pathname.replace(/\/?$/, "/")}callback.html`;
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo,
+      queryParams: provider === "google" ? { access_type: "offline", prompt: "select_account" } : undefined
+    }
+  });
+  if (error) throw error;
+}
+
+/** Finish OAuth (or email confirm) after callback.html lands back on the app. */
+export async function completeOAuthSession() {
+  if (!isConfigured()) return null;
+  const supabase = getSupabase();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return null;
+
+  const user = session.user;
+  const preferred = takeOAuthRole();
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  let role = profile?.role
+    ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1)
+    : preferred;
+  if (!profile?.role) {
+    try {
+      await upsertProfile(user.id, user.email || "", String(role).toLowerCase());
+    } catch { /* ignore */ }
+  }
+
+  try {
+    const hydrated = await hydrateLocalProfiles({
+      userID: user.id,
+      role,
+      email: user.email
+    });
+    if (hydrated?.kind === "hospital") {
+      appStore.saveHospitalProfile(hydrated.profile);
+      ensureDemoShifts(hydrated.profile.id, hydrated.profile.name);
+      seedMockDoctors();
+    } else if (hydrated?.kind === "doctor") {
+      appStore.saveDoctorProfile(hydrated.profile);
+      registerDoctorOnRoster(hydrated.profile);
+    }
+  } catch { /* ignore */ }
+
+  return { userID: user.id, email: user.email, role };
 }
 
 export function beginSession({ userID, email, role }) {

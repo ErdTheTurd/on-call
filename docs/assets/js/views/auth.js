@@ -2,11 +2,34 @@ import { escapeHtml, BRAND, brandMark } from "../brand.js";
 import { icon } from "../components.js";
 import { isConfigured } from "../supabase-client.js";
 
+function googleMark() {
+  return `<svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+    <path fill="#EA4335" d="M9 7.2v3.5h4.9c-.2 1.1-.8 2-1.7 2.6l2.7 2.1c1.6-1.5 2.5-3.7 2.5-6.3 0-.6-.1-1.2-.2-1.8H9z"/>
+    <path fill="#34A853" d="M4.1 10.7l-.7.5-2.3 1.8C2.6 15.7 5.6 17.5 9 17.5c2.4 0 4.4-.8 5.9-2.2l-2.7-2.1c-.8.5-1.8.9-3.2.9-2.4 0-4.5-1.6-5.2-3.9z"/>
+    <path fill="#4A90E2" d="M1.1 5.1C.4 6.4 0 7.7 0 9.2c0 1.5.4 2.8 1.1 4l3-2.3c-.2-.5-.3-1.1-.3-1.7 0-.6.1-1.2.3-1.7L1.1 5.1z"/>
+    <path fill="#FBBC05" d="M9 3.6c1.3 0 2.5.5 3.4 1.3l2.5-2.5C13.4.9 11.4 0 9 0 5.6 0 2.6 1.8 1.1 4.5l3 2.3C4.5 5.2 6.6 3.6 9 3.6z"/>
+  </svg>`;
+}
+
+function appleMark() {
+  return `<svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" fill="currentColor">
+    <path d="M13.6 9.4c0-2 1.6-3 1.7-3.1-1-1.4-2.4-1.6-2.9-1.6-1.2-.1-2.4.7-3 .7-.6 0-1.6-.7-2.7-.7-1.4 0-2.7.8-3.4 2.1-1.5 2.5-.4 6.3 1 8.3.7 1 1.5 2.1 2.6 2 .1 0 .2 0 .3-.1.9-.2 1.3-.7 2.4-.7 1.1 0 1.4.5 2.4.7.1 0 .2 0 .3.1 1.1-.1 1.9-1 2.6-2 .8-1.1 1.1-2.2 1.1-2.3-.1 0-2.1-.8-2.1-3.4zM11.5 3.3c.5-.6.9-1.5.8-2.3-.8 0-1.7.5-2.3 1.2-.5.6-.9 1.5-.8 2.3.9.1 1.7-.4 2.3-1.2z"/>
+  </svg>`;
+}
+
+function otpInputs(value = "") {
+  const digits = String(value || "").replace(/\D/g, "").slice(0, 6).padEnd(6, " ");
+  return Array.from({ length: 6 }, (_, i) => {
+    const d = digits[i] === " " ? "" : digits[i];
+    return `<input class="otp-digit" type="text" inputmode="numeric" maxlength="1" autocomplete="${i === 0 ? "one-time-code" : "off"}" data-otp-index="${i}" value="${escapeHtml(d)}" aria-label="Digit ${i + 1}" />`;
+  }).join("");
+}
+
 export function renderAuthView(state, handlers) {
   const mode = state.authMode || "signin";
   const verifyEmail = state.verifyEmail;
 
-  if (verifyEmail && mode === "signup") {
+  if (verifyEmail) {
     return `
     <div class="auth-screen auth-bg">
       <div class="mesh-blob"></div><div class="mesh-blob"></div><div class="mesh-blob"></div>
@@ -19,16 +42,25 @@ export function renderAuthView(state, handlers) {
         <p class="auth-tagline">${BRAND.tagline}</p>
       </div>
       <div class="auth-card-shell" style="padding:28px 24px">
-        <h2 style="margin:0 0 8px;font-size:1.35rem">Confirm your email</h2>
+        <h2 style="margin:0 0 8px;font-size:1.35rem">Enter verification code</h2>
         <p class="subtitle" style="margin:0 0 18px;line-height:1.5">
-          We sent a verification link to <strong>${escapeHtml(verifyEmail)}</strong>.
-          Open it to activate your account, then sign in.
+          We sent a 6-digit code to <strong>${escapeHtml(verifyEmail)}</strong>.
+          Enter it here — no link to click.
         </p>
-        ${state.verifyNotice ? `<p class="subtitle" style="color:var(--success);margin:0 0 12px">${escapeHtml(state.verifyNotice)}</p>` : ""}
-        ${state.error ? `<p class="error-text" style="padding:0 0 12px">${escapeHtml(state.error)}</p>` : ""}
-        <div class="auth-actions" style="padding:0">
-          <button type="button" class="btn-primary" data-resend-verify ${state.loading ? "disabled" : ""}>
-            ${state.loading ? `<span class="spinner"></span>` : "Resend verification email"}
+        <form id="otp-form" class="otp-form">
+          <div class="otp-row" role="group" aria-label="6-digit verification code">
+            ${otpInputs(state.otpCode)}
+          </div>
+          <input type="hidden" name="otp" id="otp-value" value="${escapeHtml(state.otpCode || "")}" />
+        </form>
+        ${state.verifyNotice ? `<p class="subtitle" style="color:var(--success);margin:12px 0 0">${escapeHtml(state.verifyNotice)}</p>` : ""}
+        ${state.error ? `<p class="error-text" style="padding:12px 0 0">${escapeHtml(state.error)}</p>` : ""}
+        <div class="auth-actions" style="padding:20px 0 0">
+          <button type="submit" form="otp-form" class="btn-primary" ${state.loading ? "disabled" : ""}>
+            ${state.loading ? `<span class="spinner"></span>` : "Verify and continue"}
+          </button>
+          <button type="button" class="btn-ghost" data-resend-verify ${state.loading ? "disabled" : ""} style="margin-top:12px;width:100%">
+            Resend code
           </button>
           <button type="button" class="btn-secondary" data-auth-mode="signin" style="margin-top:10px">Back to sign in</button>
         </div>
@@ -58,6 +90,15 @@ export function renderAuthView(state, handlers) {
             <button type="button" class="role-pill ${state.role === "Doctor" ? "active" : ""}" data-role="Doctor">${icon("stethoscope")} Doctor</button>
             <button type="button" class="role-pill ${state.role === "Hospital" ? "active" : ""}" data-role="Hospital">${icon("hospital")} Hospital</button>
           </div>` : ""}
+        <div class="oauth-row">
+          <button type="button" class="btn-oauth" data-oauth="google" ${state.loading || !isConfigured() ? "disabled" : ""}>
+            ${googleMark()} Continue with Google
+          </button>
+          <button type="button" class="btn-oauth" data-oauth="apple" ${state.loading || !isConfigured() ? "disabled" : ""}>
+            ${appleMark()} Continue with Apple
+          </button>
+        </div>
+        <div class="auth-divider">OR USE EMAIL</div>
         <form class="auth-fields" id="auth-form">
           <label class="auth-field">
             <span class="field-icon">${icon("envelope")}</span>
@@ -74,13 +115,6 @@ export function renderAuthView(state, handlers) {
             </label>` : ""}
         </form>
         ${state.error ? `<p class="error-text" style="padding:12px 24px 0">${escapeHtml(state.error)}</p>` : ""}
-        ${state.verifyEmail && mode === "signin" ? `
-          <div style="padding:8px 24px 0">
-            <button type="button" class="btn-ghost" data-resend-verify ${state.loading ? "disabled" : ""}>
-              Resend verification email
-            </button>
-            ${state.verifyNotice ? `<p class="subtitle" style="color:var(--success);margin:8px 0 0">${escapeHtml(state.verifyNotice)}</p>` : ""}
-          </div>` : ""}
         ${!isConfigured() ? `<p class="error-text" style="padding:8px 24px 0;font-size:12px">Supabase not configured — using local offline auth.</p>` : ""}
         <div class="auth-actions">
           <button type="submit" form="auth-form" class="btn-primary" ${state.loading ? "disabled" : ""}>
@@ -102,7 +136,14 @@ export function renderAuthView(state, handlers) {
     </div>`;
 }
 
-export function bindAuth(root, { onSubmit, onMode, onRole, onDemo, onBack, onResend }) {
+function readOtp(root) {
+  return Array.from(root.querySelectorAll(".otp-digit"))
+    .map((el) => el.value.replace(/\D/g, "").slice(0, 1))
+    .join("")
+    .slice(0, 6);
+}
+
+export function bindAuth(root, { onSubmit, onMode, onRole, onDemo, onBack, onResend, onOAuth, onVerifyOtp }) {
   root.querySelectorAll("[data-demo]").forEach((btn) => {
     btn.addEventListener("click", () => onDemo?.(btn.dataset.demo));
   });
@@ -125,4 +166,41 @@ export function bindAuth(root, { onSubmit, onMode, onRole, onDemo, onBack, onRes
   root.querySelectorAll("[data-resend-verify]").forEach((btn) => {
     btn.addEventListener("click", () => onResend?.());
   });
+  root.querySelectorAll("[data-oauth]").forEach((btn) => {
+    btn.addEventListener("click", () => onOAuth?.(btn.dataset.oauth));
+  });
+
+  const otpForm = root.querySelector("#otp-form");
+  if (otpForm) {
+    const digits = Array.from(root.querySelectorAll(".otp-digit"));
+    digits.forEach((input, i) => {
+      input.addEventListener("input", () => {
+        const v = input.value.replace(/\D/g, "").slice(-1);
+        input.value = v;
+        if (v && i < digits.length - 1) digits[i + 1].focus();
+        const code = readOtp(root);
+        const hidden = root.querySelector("#otp-value");
+        if (hidden) hidden.value = code;
+        if (code.length === 6) onVerifyOtp?.(code);
+      });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Backspace" && !input.value && i > 0) digits[i - 1].focus();
+      });
+      input.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const pasted = (e.clipboardData?.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+        pasted.split("").forEach((ch, idx) => {
+          if (digits[idx]) digits[idx].value = ch;
+        });
+        const focusIdx = Math.min(pasted.length, digits.length - 1);
+        digits[focusIdx]?.focus();
+        if (pasted.length === 6) onVerifyOtp?.(pasted);
+      });
+    });
+    otpForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      onVerifyOtp?.(readOtp(root));
+    });
+    digits[0]?.focus();
+  }
 }
