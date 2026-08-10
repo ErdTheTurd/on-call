@@ -128,3 +128,187 @@ export function bindStickyHeader(root, selector = ".site-header") {
   window.addEventListener("scroll", onScroll, { passive: true });
   return () => window.removeEventListener("scroll", onScroll);
 }
+
+/**
+ * Antigravity-style spotlight on the landing dot grid.
+ * Canvas draws a quiet grid; a soft radius of brighter dots trails the
+ * pointer (lerp) instead of locking onto it. Desktop mouse only.
+ */
+export function bindDotField(root, siteSelector = ".site") {
+  const site = root.querySelector(siteSelector);
+  const host = site?.querySelector(".site-dotfield");
+  const canvas = host?.querySelector("canvas");
+  if (!site || !host || !canvas) return () => {};
+  if (REDUCED) return () => {};
+
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) return () => {};
+
+  const GAP = 24;
+  const RADIUS = 190;
+  const FOLLOW = 0.1;
+  const FIELD_H = 760;
+
+  let targetX = null;
+  let targetY = null;
+  let currX = null;
+  let currY = null;
+  let glow = 0;
+  let targetGlow = 0;
+  let raf = 0;
+  let active = false;
+  let width = 0;
+  let height = 0;
+  let dpr = 1;
+
+  const resize = () => {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    width = Math.max(1, Math.floor(host.clientWidth));
+    height = Math.max(1, Math.floor(host.clientHeight || FIELD_H));
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    paint();
+  };
+
+  const paint = () => {
+    ctx.clearRect(0, 0, width, height);
+
+    const hx = currX;
+    const hy = currY;
+    const lit = glow > 0.02 && hx != null && hy != null;
+
+    // Soft blue wash under the bright dots so the radius reads clearly.
+    if (lit) {
+      const wash = ctx.createRadialGradient(hx, hy, 0, hx, hy, RADIUS);
+      wash.addColorStop(0, `rgba(147, 197, 253, ${0.32 * glow})`);
+      wash.addColorStop(0.4, `rgba(96, 165, 250, ${0.14 * glow})`);
+      wash.addColorStop(1, "rgba(59, 130, 246, 0)");
+      ctx.fillStyle = wash;
+      ctx.beginPath();
+      ctx.arc(hx, hy, RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const cols = Math.ceil(width / GAP) + 1;
+    const rows = Math.ceil(height / GAP) + 1;
+    const r2 = RADIUS * RADIUS;
+
+    for (let row = 0; row < rows; row += 1) {
+      const y = row * GAP + 4;
+      for (let col = 0; col < cols; col += 1) {
+        const x = col * GAP + 4;
+        let alpha = 0.11;
+        let radius = 1.05;
+        let r = 226;
+        let g = 232;
+        let b = 240;
+
+        if (lit) {
+          const dx = x - hx;
+          const dy = y - hy;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 < r2) {
+            const t = 1 - Math.sqrt(dist2) / RADIUS;
+            const boost = t * t * glow;
+            alpha = Math.min(1, 0.11 + boost * 0.95);
+            radius = 1.05 + boost * 1.35;
+            r = Math.round(226 + boost * 29);
+            g = Math.round(232 + boost * 23);
+            b = Math.round(240 + boost * 15);
+          }
+        }
+
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  };
+
+  const tick = () => {
+    raf = 0;
+
+    if (targetX == null || targetY == null) {
+      glow += (0 - glow) * 0.06;
+      if (glow < 0.01) {
+        glow = 0;
+        active = false;
+        paint();
+        return;
+      }
+    } else {
+      if (currX == null) {
+        currX = targetX;
+        currY = targetY;
+      } else {
+        currX += (targetX - currX) * FOLLOW;
+        currY += (targetY - currY) * FOLLOW;
+      }
+      glow += (targetGlow - glow) * 0.18;
+    }
+
+    paint();
+
+    const chasing = targetX != null && (
+      Math.abs(targetX - (currX || 0)) > 0.4
+      || Math.abs(targetY - (currY || 0)) > 0.4
+      || Math.abs(targetGlow - glow) > 0.01
+      || glow > 0.01
+    );
+    if (chasing || glow > 0.01) {
+      raf = requestAnimationFrame(tick);
+    } else {
+      active = false;
+    }
+  };
+
+  const kick = () => {
+    if (active) return;
+    active = true;
+    raf = requestAnimationFrame(tick);
+  };
+
+  const onMove = (event) => {
+    // Touch/pen skip — mouse and unspecified (some browsers) get the trail.
+    if (event.pointerType === "touch" || event.pointerType === "pen") return;
+    const rect = host.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    if (y < -40 || y > FIELD_H + 40 || x < -40 || x > rect.width + 40) {
+      targetGlow = 0;
+      targetX = null;
+      targetY = null;
+      kick();
+      return;
+    }
+    targetX = x;
+    targetY = y;
+    targetGlow = 1;
+    kick();
+  };
+
+  const onLeaveWindow = (event) => {
+    if (event.relatedTarget) return;
+    targetGlow = 0;
+    targetX = null;
+    targetY = null;
+    kick();
+  };
+
+  resize();
+  // Window capture so interactive hero controls cannot eat the trail.
+  window.addEventListener("pointermove", onMove, { passive: true });
+  document.addEventListener("pointerleave", onLeaveWindow);
+  window.addEventListener("resize", resize, { passive: true });
+
+  return () => {
+    window.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerleave", onLeaveWindow);
+    window.removeEventListener("resize", resize);
+    if (raf) cancelAnimationFrame(raf);
+  };
+}

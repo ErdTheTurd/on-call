@@ -1989,19 +1989,26 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 /* Dot grid over the opening screen only, fading out before the stat band.
-   Kept on a layer of its own rather than on the sticky header, which would
-   otherwise carry the dots down over every section as the page scrolls. */
-.site::before {
-  content: "";
+   Canvas draws a quiet grid and a bright trail radius around the pointer
+   (see bindDotField) — clearer than CSS mask composites. */
+.site-dotfield {
   position: absolute;
   inset: 0 0 auto 0;
   height: 760px;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
-  background-size: 24px 24px;
-  -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
   pointer-events: none;
   z-index: 0;
+  -webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
+}
+
+.site-dotfield-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-dotfield { opacity: 0.55; }
 }
 
 .site .hero,
