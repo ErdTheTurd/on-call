@@ -46,7 +46,7 @@ function hero() {
     <section class="hero">
       <span class="pill reveal">Now live for all specialties</span>
       <h1 class="hero-title reveal">
-        Shift trading.<br /><span class="accent">Perfectly scheduled.</span>
+        <em>Shift</em> what's possible.<br /><span class="accent">With MD Shift.</span>
       </h1>
       <p class="hero-sub reveal">
         The platform built for doctors who need flexibility and hospitals that

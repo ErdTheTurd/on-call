@@ -27,7 +27,8 @@ from pathlib import Path
 content = Path(os.environ["TEMPLATE_FILE"]).read_text()
 payload = {
     "mailer_subjects_confirmation": "Your MD Shift verification code",
-    "mailer_templates_confirmation": content,
+    "mailer_templates_confirmation_content": content,
+    "mailer_otp_length": 6,
 }
 ref = os.environ["PROJECT_REF"]
 req = urllib.request.Request(
@@ -43,8 +44,9 @@ with urllib.request.urlopen(req) as resp:
     d = json.load(resp)
 
 subj = d.get("mailer_subjects_confirmation")
-body = d.get("mailer_templates_confirmation") or ""
+body = d.get("mailer_templates_confirmation_content") or ""
 print("confirmation subject:", subj)
+print("otp_length:", d.get("mailer_otp_length"))
 print("template contains {{ .Token }}:", "{{ .Token }}" in body)
 print("OK — confirm signup template updated.")
 PY

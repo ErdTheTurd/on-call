@@ -2187,7 +2187,10 @@ a { color: var(--accent); text-decoration: none; }
   letter-spacing: -0.04em;
   font-weight: 700;
 }
-
+.hero-title em {
+  font-style: italic;
+  font-weight: 600;
+}
 .hero-title .accent { color: var(--blue-bright); }
 
 .hero-sub {
