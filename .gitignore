@@ -8,3 +8,6 @@ Config/Secrets.xcconfig
 
 # Dev artifacts
 .dev-screenshot.png
+
+# Local Resend/Supabase tokens for setup scripts
+.env.resend
