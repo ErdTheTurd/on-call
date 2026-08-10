@@ -11,6 +11,7 @@ struct AuthView: View {
     @State private var selectedRole: UserRole = .doctor
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
+    @State private var pendingVerificationEmail: String? = nil
     @State private var showDevRolePicker = false
     @Namespace private var ns
 
@@ -100,6 +101,17 @@ struct AuthView: View {
                                 .padding(.horizontal, 24)
                                 .padding(.top, 12)
                                 .transition(.opacity)
+                        }
+                        if pendingVerificationEmail != nil {
+                            Button {
+                                resendVerification()
+                            } label: {
+                                Text("Resend verification email")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Color(hex: "4F8EF7"))
+                            }
+                            .padding(.top, 8)
+                            .disabled(isLoading)
                         }
 
                         // Forgot password (sign in only)
@@ -220,6 +232,7 @@ struct AuthView: View {
 
     private func handleSubmit() {
         errorMessage = nil
+        pendingVerificationEmail = nil
         let trimmedEmail = normalizeEmail(email)
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
@@ -251,11 +264,16 @@ struct AuthView: View {
                             await MainActor.run { isLoading = false; errorMessage = "Passwords don't match." }
                             return
                         }
-                        let userID = try await SupabaseAuthService.shared.signUp(email: trimmedEmail, password: password, role: selectedRole)
+                        let result = try await SupabaseAuthService.shared.signUp(email: trimmedEmail, password: password, role: selectedRole)
                         await MainActor.run {
                             isLoading = false
-                            SessionStore.shared.beginSession(userID: userID, email: trimmedEmail, role: selectedRole)
-                            auth.selectRole(selectedRole)
+                            if result.needsEmailVerification {
+                                pendingVerificationEmail = trimmedEmail
+                                errorMessage = AuthServiceError.needsEmailVerification.localizedDescription
+                            } else {
+                                SessionStore.shared.beginSession(userID: result.userID, email: trimmedEmail, role: selectedRole)
+                                auth.selectRole(selectedRole)
+                            }
                         }
                     } else {
                         let (userID, role) = try await SupabaseAuthService.shared.signIn(email: trimmedEmail, password: password)
@@ -273,6 +291,12 @@ struct AuthView: View {
                     // Server unreachable — fall through to local offline auth
                     await MainActor.run { isLoading = false }
                     handleLocalAuth(trimmedEmail: trimmedEmail)
+                } catch AuthServiceError.emailNotConfirmed {
+                    await MainActor.run {
+                        isLoading = false
+                        pendingVerificationEmail = trimmedEmail
+                        errorMessage = AuthServiceError.emailNotConfirmed.localizedDescription
+                    }
                 } catch {
                     await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }
                 }
@@ -281,6 +305,26 @@ struct AuthView: View {
         }
 
         handleLocalAuth(trimmedEmail: trimmedEmail)
+    }
+
+    private func resendVerification() {
+        guard let email = pendingVerificationEmail else { return }
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                try await SupabaseAuthService.shared.resendSignupEmail(email: email)
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Verification email sent again."
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     // MARK: - Local / offline auth

@@ -16,6 +16,14 @@ enum SupabaseConfig {
 
     static var isConfigured: Bool { url != nil && anonKey != nil }
 
+    static var websiteBaseURL: String {
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "WEBSITE_BASE_URL") as? String,
+           !raw.isEmpty, !raw.hasPrefix("$(") {
+            return raw
+        }
+        return "https://mdshift.net"
+    }
+
     static var functionsURL: URL? {
         url?.appendingPathComponent("functions/v1")
     }

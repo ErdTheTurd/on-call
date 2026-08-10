@@ -1,7 +1,7 @@
 import { isConfigured, getSupabase } from "./supabase-client.js";
 import {
   authState, beginSession, registerAccount, signInLocal,
-  signInRemote, signUpRemote, signOut, appStore, syncEverything, startPeriodicSync,
+  signInRemote, signUpRemote, resendSignupEmail, signOut, appStore, syncEverything, startPeriodicSync,
   normalizeEmail
 } from "./store.js";
 import { hydrateLocalProfiles } from "./domain/sync.js";
@@ -25,6 +25,8 @@ const state = {
   email: "",
   error: null,
   loading: false,
+  verifyEmail: null,
+  verifyNotice: null,
   onb: { step: 0, role: "Doctor", specialties: [], verified: false, codeVerified: false },
   ui: { tab: "home", sheet: false, daySheet: null, calendarMonth: new Date().toISOString() },
   admin: emptyAdminState()
@@ -70,7 +72,8 @@ function update(patch) {
     merge("ui", uiPatch);
   }
 
-  if ("authMode" in patch || "role" in patch || "email" in patch || "error" in patch || "loading" in patch) {
+  if ("authMode" in patch || "role" in patch || "email" in patch || "error" in patch || "loading" in patch
+      || "verifyEmail" in patch || "verifyNotice" in patch) {
     Object.assign(state, patch);
   }
   render();
@@ -230,11 +233,21 @@ function render() {
   if (state.route === "auth") {
     root.innerHTML = renderAuthView(state, {});
     bindAuth(root, {
-      onMode: (mode) => update({ authMode: mode, error: null }),
+      onMode: (mode) => update({ authMode: mode, error: null, verifyEmail: null, verifyNotice: null }),
       onRole: (role) => update({ role }),
       onSubmit: handleAuthSubmit,
       onDemo: enterDemo,
-      onBack: () => update({ route: "landing", error: null })
+      onBack: () => update({ route: "landing", error: null, verifyEmail: null, verifyNotice: null }),
+      onResend: async () => {
+        if (!state.verifyEmail) return;
+        update({ loading: true, error: null, verifyNotice: null });
+        try {
+          await resendSignupEmail(state.verifyEmail);
+          update({ loading: false, verifyNotice: "Verification email sent again." });
+        } catch (err) {
+          update({ loading: false, error: err.message || "Could not resend email." });
+        }
+      }
     });
     return;
   }
@@ -325,6 +338,7 @@ function bindDemoRibbon(root) {
 
 async function handleAuthSubmit({ email, password, confirm }) {
   state.error = null;
+  state.verifyNotice = null;
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) { update({ error: "Please enter your email." }); return; }
   if (password.length < 6) { update({ error: "Password must be at least 6 characters." }); return; }
@@ -338,6 +352,15 @@ async function handleAuthSubmit({ email, password, confirm }) {
     if (state.authMode === "signup") {
       if (isConfigured()) {
         const res = await signUpRemote(normalizedEmail, password, state.role);
+        if (res.needsEmailVerification) {
+          update({
+            loading: false,
+            verifyEmail: normalizedEmail,
+            verifyNotice: null,
+            error: null
+          });
+          return;
+        }
         beginSession({ userID: res.userID, email: res.email, role: state.role });
       } else {
         if (signInLocal(normalizedEmail, password)) {
@@ -349,7 +372,7 @@ async function handleAuthSubmit({ email, password, confirm }) {
       }
       state.route = "onboarding";
       state.onb = { step: 0, role: state.role, specialties: [], verified: false, codeVerified: false, email: normalizedEmail };
-      update({ loading: false });
+      update({ loading: false, verifyEmail: null });
       return;
     }
 
@@ -361,11 +384,18 @@ async function handleAuthSubmit({ email, password, confirm }) {
         const auth = authState();
         state.route = auth.kind === "needsOnboarding" ? "onboarding" : (res.role === "Hospital" ? "hospital" : "doctor");
         if (auth.kind === "needsOnboarding") state.onb.role = res.role;
-        update({ loading: false });
+        update({ loading: false, verifyEmail: null });
         return;
       } catch (err) {
-        // When Supabase is configured, never invent a local account — show the real reason.
         const message = err?.message || "Could not sign in.";
+        if (err?.code === "email_not_confirmed" || /email not confirmed/i.test(message)) {
+          update({
+            error: message,
+            loading: false,
+            verifyEmail: normalizedEmail
+          });
+          return;
+        }
         const friendly = /invalid login credentials/i.test(message)
           ? "Wrong email or password. Try erdunn706@gmail.com, or create an account."
           : message;

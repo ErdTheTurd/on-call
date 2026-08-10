@@ -267,10 +267,32 @@ export function signInLocal(email, password) {
 export async function signInRemote(email, password) {
   const supabase = getSupabase();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw error;
+  if (error) {
+    const message = error.message || "Could not sign in.";
+    if (/email not confirmed/i.test(message)) {
+      const err = new Error("Confirm your email before signing in. Check your inbox for the link.");
+      err.code = "email_not_confirmed";
+      err.email = email;
+      throw err;
+    }
+    throw error;
+  }
   const user = data.user;
+  if (user && !user.email_confirmed_at && !user.confirmed_at) {
+    // Defense in depth if the project still issues a session before confirm.
+    try { await supabase.auth.signOut(); } catch { /* ignore */ }
+    const err = new Error("Confirm your email before signing in. Check your inbox for the link.");
+    err.code = "email_not_confirmed";
+    err.email = email;
+    throw err;
+  }
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  const role = profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : "Doctor";
+  let role = profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : null;
+  if (!role) {
+    const metaRole = String(user.user_metadata?.role || "doctor").toLowerCase();
+    role = metaRole.charAt(0).toUpperCase() + metaRole.slice(1);
+    try { await upsertProfile(user.id, user.email || email, metaRole); } catch { /* ignore */ }
+  }
 
   // Bring server profiles into localStorage before routing, otherwise a
   // returning hospital/doctor looks brand-new and lands in onboarding.
@@ -293,11 +315,47 @@ export async function signInRemote(email, password) {
 
 export async function signUpRemote(email, password, role) {
   const supabase = getSupabase();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const redirectTo = `${window.location.origin}${window.location.pathname.replace(/\/?$/, "/")}callback.html`;
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: redirectTo,
+      data: { role: role.toLowerCase() }
+    }
+  });
   if (error) throw error;
-  const userID = data.user.id;
-  await upsertProfile(userID, email, role.toLowerCase());
-  return { userID, email, role };
+  const user = data.user;
+  if (!user?.id) throw new Error("Could not create account.");
+
+  // When confirmations are on, Supabase returns no session until the email link is used.
+  const needsEmailVerification = !data.session || (!user.email_confirmed_at && !user.confirmed_at);
+
+  if (data.session) {
+    try {
+      await upsertProfile(user.id, email, role.toLowerCase());
+    } catch { /* profile may be created after confirm via trigger / next sign-in */ }
+  }
+
+  return {
+    userID: user.id,
+    email: user.email || email,
+    role,
+    needsEmailVerification
+  };
+}
+
+export async function resendSignupEmail(email) {
+  if (!isConfigured()) throw new Error("Supabase is not configured.");
+  const supabase = getSupabase();
+  const redirectTo = `${window.location.origin}${window.location.pathname.replace(/\/?$/, "/")}callback.html`;
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email,
+    options: { emailRedirectTo: redirectTo }
+  });
+  if (error) throw error;
+  return { ok: true };
 }
 
 export function beginSession({ userID, email, role }) {
