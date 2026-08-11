@@ -250,5 +250,5 @@ function bindHeroShiftItalic(root) {
   }
   window.setTimeout(() => {
     el.classList.add("is-italic");
-  }, 3000);
+  }, 2000);
 }
