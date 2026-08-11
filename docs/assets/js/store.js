@@ -437,6 +437,11 @@ export function takeOAuthRole() {
   }
 }
 
+/** OAuth return URL next to the current app page (mdshift lives under /docs/). */
+export function oauthRedirectTo() {
+  return new URL("callback.html", window.location.href).href;
+}
+
 /** Starts Google or Apple OAuth in the browser. Role is applied after redirect. */
 export async function signInWithOAuth(provider, role) {
   if (!isConfigured()) throw new Error("Supabase is not configured.");
@@ -445,7 +450,7 @@ export async function signInWithOAuth(provider, role) {
   }
   stashOAuthRole(role || "Doctor");
   const supabase = getSupabase();
-  const redirectTo = `${window.location.origin}/callback.html`;
+  const redirectTo = oauthRedirectTo();
   const { error } = await supabase.auth.signInWithOAuth({
     provider,
     options: {
