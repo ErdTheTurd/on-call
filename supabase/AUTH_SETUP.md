@@ -103,15 +103,16 @@ Local CLI already points at `supabase/templates/confirmation.html`.
 Auth → URL Configuration  
 https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/url-configuration
 
-- **Site URL:** `https://mdshift.net/docs/` (must NOT be `http://localhost…` — that causes “localhost refused to connect” after Google)
+- **Site URL:** `https://mdshift.net` (must NOT be `http://localhost…` — that causes “localhost refused to connect” after Google)
 - **Redirect URLs** (one per line):
-  - `https://mdshift.net/docs/callback.html`
   - `https://mdshift.net/callback.html`
   - `https://mdshift.net/**`
+  - `https://mdshift.net/docs/callback.html` (legacy; redirects to `/callback.html`)
   - `oncallwizard://auth-callback`
   - `http://127.0.0.1:5500/**` (optional local)
   - `http://localhost:5500/**` (optional local)
 
+The live app is published at the **domain root** (`https://mdshift.net/`), not `/docs`. GitHub Pages deploys the repo’s `docs/` folder as the site root.
 ## 3. Google (required for “Continue with Google”)
 
 Google stays **off** in Supabase until a **Web** Client ID + Secret are pasted.
@@ -164,13 +165,12 @@ export GOOGLE_CLIENT_SECRET=...
 
 ### 3e. If Google ends on “localhost refused to connect”
 
-1. Supabase → URL Configuration → Site URL must be `https://mdshift.net/docs/` (not localhost)
-2. Redirect allow-list must include `https://mdshift.net/docs/callback.html`
-3. Sign in from **https://mdshift.net/docs/** (or a local server that is actually running)
-4. Soft-refresh / hard-refresh so the fixed `oauthRedirectTo()` code is loaded
+1. Supabase → URL Configuration → Site URL must be `https://mdshift.net` (not localhost)
+2. Redirect allow-list must include `https://mdshift.net/callback.html`
+3. Sign in from **https://mdshift.net/** (or a local server that is actually running)
+4. Soft-refresh / hard-refresh so the latest `oauthRedirectTo()` code is loaded
 
-The web app returns to `/docs/callback.html` after Google (not `/callback.html`, which 404s on the live site).
-
+The web app returns to `/callback.html` after Google.
 ## 4. Apple (App ID + Services ID)
 
 Your Xcode bundle ID is **`com.eporthospine.mdshift`**. That string *is* the App ID you register (or edit) in Apple Developer — you do not invent a second “product” ID.
@@ -226,16 +226,46 @@ Xcode already mirrors these in `Config/OnCallWizard.entitlements`. After the App
 3. Register → **download the `.p8` once** (you cannot download again)  
 4. Note **Key ID** and your **Team ID** (top-right of the developer account)
 
-### 4d. Supabase → Apple provider
+### 4d. Supabase → Apple provider (the JWT “Secret Key”)
 
 Auth → Providers → Apple → enable  
 https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/providers
 
-- **Client IDs** (comma-separated):  
-  `com.eporthospine.mdshift,com.eporthospine.mdshift.web`  
-  (Bundle ID + Services ID — adjust if your Services ID string differs)
-- **Secret Key**: JWT from the `.p8` (Supabase’s Apple panel / docs walk through Team ID + Key ID)
-- Save
+Apple does **not** give you a password-style secret. The **Secret Key** field is a **JWT you generate** from your `.p8` file. It lasts ~6 months.
+
+**Fields in Supabase**
+
+| Field | Value |
+|--------|--------|
+| Client IDs | `com.eporthospine.mdshift,com.eporthospine.mdshift.web` (Bundle ID + Services ID) |
+| Secret Key | the long JWT printed by the script below |
+| (if asked) Key ID | e.g. `GK5M7HYGTB` — only needed when generating the JWT |
+
+**Generate the JWT (easiest)**
+
+1. Find your **Team ID** (Apple Developer → Membership, or top-right of the account page — 10 characters)  
+2. Confirm **Services ID** string (e.g. `com.eporthospine.mdshift.web`) — **not** the App bundle ID  
+3. Know your **Key ID** (e.g. `GK5M7HYGTB`) and path to `AuthKey_GK5M7HYGTB.p8`  
+4. Run:
+
+```bash
+chmod +x ./scripts/generate-apple-client-secret.sh
+./scripts/generate-apple-client-secret.sh \
+  --team-id YOUR_TEAM_ID \
+  --key-id GK5M7HYGTB \
+  --services-id com.eporthospine.mdshift.web \
+  --p8 ~/Downloads/AuthKey_GK5M7HYGTB.p8
+```
+
+5. Copy the printed JWT → paste into Supabase Apple **Secret Key** → Save  
+
+Or use Supabase’s web generator on the [Sign in with Apple docs](https://supabase.com/docs/guides/auth/social-login/auth-apple) (Team ID + Services ID + Key ID + upload `.p8`).
+
+**Common mistakes**
+
+- `sub` / Services ID must be the **Services ID**, not `com.eporthospine.mdshift`  
+- Regenerating a new Apple Key means you must generate a **new** JWT (old Key ID in an old JWT will fail)  
+- Native iOS Sign in with Apple can work with only the Bundle ID in Client IDs; the JWT secret is required for **web** Apple OAuth
 
 Or: `APPLE_CLIENT_ID` / `APPLE_SECRET` with `./scripts/configure-oauth-providers.sh`
 
@@ -251,8 +281,8 @@ Or: `APPLE_CLIENT_ID` / `APPLE_SECRET` with `./scripts/configure-oauth-providers
 **Website**
 
 1. Same Supabase Apple provider also lists Services ID `com.eporthospine.mdshift.web`  
-2. Site URL / redirects include `https://mdshift.net/docs/callback.html`  
-3. On https://mdshift.net/docs/ tap **Continue with Apple** → Apple → back to `/docs/callback.html` → app  
+2. Site URL / redirects include `https://mdshift.net/callback.html`  
+3. On https://mdshift.net/ tap **Continue with Apple** → Apple → back to `/callback.html` → app  
 
 **Secret JWT tip:** Supabase’s Apple provider panel can generate the client secret from Team ID + Key ID + `.p8`. If the panel asks for a secret string, use that generated JWT (it expires ~6 months — rotate before then).
 
