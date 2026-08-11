@@ -46,7 +46,7 @@ function hero() {
     <section class="hero">
       <span class="pill reveal">Now live for all specialties</span>
       <h1 class="hero-title reveal">
-        <em>Shift</em> what's possible.<br /><span class="accent">With MD Shift.</span>
+        <span class="hero-shift" data-hero-shift>Shift</span> what's possible.<br /><span class="accent">With MD Shift.</span>
       </h1>
       <p class="hero-sub reveal">
         The platform built for doctors who need flexibility and hospitals that
@@ -237,4 +237,18 @@ export function bindLanding(root, { onSignIn, onDemo }) {
   bindCounters(root);
   bindStickyHeader(root);
   bindDotField(root);
+  bindHeroShiftItalic(root);
+}
+
+function bindHeroShiftItalic(root) {
+  const el = root.querySelector("[data-hero-shift]");
+  if (!el) return;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) {
+    el.classList.add("is-italic");
+    return;
+  }
+  window.setTimeout(() => {
+    el.classList.add("is-italic");
+  }, 3000);
 }
