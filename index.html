@@ -2,13 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="refresh" content="0; url=./docs/" />
+  <meta http-equiv="refresh" content="0; url=https://mdshift.net/" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MD Shift</title>
-  <link rel="canonical" href="./docs/" />
-  <script>location.replace("./docs/");</script>
+  <link rel="canonical" href="https://mdshift.net/" />
+  <link rel="icon" href="./docs/favicon.svg" type="image/svg+xml" />
+  <script>
+    // Repo root is not the Pages publish root anymore — send people to the live site.
+    // Local preview of the app: open docs/index.html (or serve the docs/ folder).
+    location.replace("https://mdshift.net/" + location.search + location.hash);
+  </script>
 </head>
 <body style="margin:0;background:#070B17;color:#fff;font-family:-apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh">
-  <p><a href="./docs/" style="color:#4F8EF7">Open MD Shift</a></p>
+  <p><a href="https://mdshift.net/" style="color:#4F8EF7">Open MD Shift</a></p>
 </body>
 </html>

@@ -161,10 +161,12 @@ site_url = "https://mdshift.net"
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 additional_redirect_urls = [
-  "https://mdshift.net/docs/callback.html",
   "https://mdshift.net/callback.html",
   "https://mdshift.net/**",
+  "https://mdshift.net/docs/callback.html",
+  "https://mdshift.net/docs/**",
   "oncallwizard://auth-callback",
+  "https://erdtheturd.github.io/on-call/callback.html",
   "https://erdtheturd.github.io/on-call/docs/callback.html",
   "http://127.0.0.1:3000/**",
   "http://127.0.0.1:5500/**",
