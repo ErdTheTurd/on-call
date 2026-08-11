@@ -2191,11 +2191,20 @@ a { color: var(--accent); text-decoration: none; }
   letter-spacing: -0.04em;
   font-weight: 700;
 }
-.hero-title em {
+.hero-shift {
+  font-style: normal;
+  font-weight: 700;
+  transition: font-style 600ms ease, font-weight 600ms ease;
+}
+.hero-shift.is-italic {
   font-style: italic;
   font-weight: 600;
 }
 .hero-title .accent { color: var(--blue-bright); }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-shift { transition: none; }
+}
 
 .hero-sub {
   max-width: 560px;
