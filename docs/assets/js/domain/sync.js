@@ -184,6 +184,9 @@ function slotKey(shift) {
 
 /** How far ahead a hospital's board is published. Matches what doctors can browse. */
 const PUBLISH_HORIZON_DAYS = 60;
+/** Cap per sync pass so boot/sign-in never stalls for minutes. */
+const PUBLISH_BATCH = 25;
+const PUBLISH_CONCURRENCY = 5;
 
 /**
  * A hospital's board lives on whichever device created it. Until it is pushed,
@@ -203,9 +206,10 @@ async function publishHospitalBoard(hospitalId, localShifts, remoteShifts) {
   });
   if (!pending.length) return;
 
-  // Sequential and bounded: a first-run board can be hundreds of days.
-  for (const shift of pending.slice(0, 400)) {
-    try { await upsertShift(shift); } catch { /* retried next sync */ }
+  const batch = pending.slice(0, PUBLISH_BATCH);
+  for (let i = 0; i < batch.length; i += PUBLISH_CONCURRENCY) {
+    const chunk = batch.slice(i, i + PUBLISH_CONCURRENCY);
+    await Promise.all(chunk.map((shift) => upsertShift(shift).catch(() => null)));
   }
 }
 
