@@ -1,0 +1,29 @@
+---
+description: Always ship finished work as a GitHub pull request
+alwaysApply: true
+---
+
+# Always open a PR
+
+When you finish a change set that should land in the repo (features, fixes, website/docs, iOS, Supabase), **do not stop at a local commit or a pushed branch**.
+
+## Required finish line
+
+1. Commit on a feature branch (never commit straight to `main` unless the user explicitly says so).
+2. Push the branch to `origin`.
+3. Open a pull request with `gh pr create` (title + summary + test plan).
+4. Return the **PR URL** in your reply to the user.
+
+## Website / `docs/` changes
+
+Treat GitHub Pages / `docs/` the same as app code: every website change ships as a PR (or a stacked series of PRs). Do not leave website work only on the working tree.
+
+## If `gh` is not authenticated
+
+- Attempt `gh auth status`.
+- If logged out, tell the user once to run `gh auth login` (or provide `GH_TOKEN`), then retry `gh pr create`.
+- Still push the branch so compare links work, but keep trying to create the PR — compare links alone are not the finish line.
+
+## Split work
+
+Prefer small, reviewable PRs. When splitting, open every PR in the stack, not just the tip.
