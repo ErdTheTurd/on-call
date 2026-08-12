@@ -6,6 +6,10 @@ import { algorithmRate, computeRate, rateBreakdown, groupPricingComponents } fro
 import * as sync from "./domain/sync.js";
 import { hydrateLocalProfiles } from "./domain/sync.js";
 import { needsMfaChallenge, listTotpFactors } from "./domain/mfa.js";
+import { plusTokenBonus, refreshPlusMembership } from "./domain/plus.js";
+import {
+  recordSavingsEvent, rateSavingsForFill, leadTimeHours, refreshSavingsCache
+} from "./domain/savings.js";
 
 export const KEYS = {
   accounts: "accounts_v2",
@@ -194,6 +198,7 @@ const syncHooks = {
       case "roster": return appStore.roster;
       case "policies": return appStore.policies;
       case "unavailable": return appStore.unavailable;
+      case "trades": return appStore.trades;
       default: return null;
     }
   },
@@ -205,23 +210,71 @@ const syncHooks = {
       case "roster": appStore.saveRoster(value); break;
       case "policies": appStore.savePolicies(value); break;
       case "unavailable": appStore.saveUnavailable(value); break;
+      case "trades": appStore.saveTrades(value); break;
       default: break;
     }
   },
   emit: () => appStore.emit()
 };
 
+/**
+ * Demo walkthroughs are seeded entirely from local storage and are not signed
+ * into Supabase, so every backend read/write is suppressed for them — otherwise
+ * fake shifts and doctors land in the shared tables.
+ * Read straight from storage to avoid a circular import with `domain/demo.js`.
+ */
+function isDemoSession() {
+  try { return localStorage.getItem("oncall_demo_mode") === "1"; } catch { return false; }
+}
+
+export function backendLive() {
+  return isConfigured() && !isDemoSession();
+}
+
+/** Last known health of the shared backend, surfaced as a banner. */
+export const syncStatus = {
+  state: "idle", // idle | ok | error | offline
+  message: "",
+  at: null
+};
+
+function setSyncStatus(state, message = "") {
+  if (syncStatus.state === state && syncStatus.message === message) return;
+  syncStatus.state = state;
+  syncStatus.message = message;
+  syncStatus.at = new Date().toISOString();
+  appStore.emit();
+}
+
 export async function syncEverything() {
-  return sync.syncEverything(syncHooks);
+  if (!backendLive()) {
+    setSyncStatus("offline", isDemoSession() ? "Demo mode — nothing is saved to the cloud." : "");
+    return { ok: true, offline: true };
+  }
+  const result = await sync.syncEverything(syncHooks);
+  if (result?.ok === false) {
+    setSyncStatus("error", result.reason || "Could not reach the server.");
+  } else {
+    setSyncStatus("ok");
+  }
+  try { await refreshPlusMembership(); } catch { /* offline */ }
+  try {
+    const hospitalID = appStore.hospitalProfile?.id;
+    if (hospitalID) await refreshSavingsCache(hospitalID);
+  } catch { /* offline */ }
+  return result;
 }
 
 async function afterMutation(fn) {
-  if (!isConfigured()) return { ok: true, offline: true };
+  if (!backendLive()) return { ok: true, offline: true };
   try {
     await fn();
+    setSyncStatus("ok");
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err?.message || "Sync failed" };
+    const message = err?.message || "Sync failed";
+    setSyncStatus("error", message);
+    return { ok: false, error: message };
   }
 }
 
@@ -437,7 +490,7 @@ export function takeOAuthRole() {
   }
 }
 
-/** OAuth return URL next to the current app page (mdshift lives under /docs/). */
+/** OAuth return URL next to the current app page (site root on mdshift.net). */
 export function oauthRedirectTo() {
   return new URL("callback.html", window.location.href).href;
 }
@@ -599,7 +652,7 @@ export function tokenLimitForDoctor(hospitalID, doctorID) {
  * a doctor's requests to another.
  */
 export function effectiveDailyTokenLimit(doctorID) {
-  if (!doctorID) return DEFAULT_DAILY_TOKENS;
+  if (!doctorID) return DEFAULT_DAILY_TOKENS + plusTokenBonus();
   const policies = appStore.policies || {};
   let limit = null;
 
@@ -610,7 +663,8 @@ export function effectiveDailyTokenLimit(doctorID) {
     limit = limit == null ? candidate : Math.max(limit, candidate);
   }
 
-  return limit == null ? DEFAULT_DAILY_TOKENS : limit;
+  const base = limit == null ? DEFAULT_DAILY_TOKENS : limit;
+  return base + plusTokenBonus();
 }
 
 /** Sets one doctor's allowance at one hospital. Passing null clears it. */
@@ -1045,8 +1099,11 @@ export async function requestToken(date, hospitalID, hospitalName, specialty, do
   tokens.requestedDays = [...(tokens.requestedDays || []), req];
   appStore.saveTokens(tokens);
 
-  const syncRes = await afterMutation(() => sync.submitTokenRequest(req));
-  if (syncRes && syncRes.ok === false && isConfigured()) {
+  const syncRes = await afterMutation(async () => {
+    await sync.linkDoctorToHospital(hospitalID, doctor.id);
+    await sync.submitTokenRequest(req);
+  });
+  if (syncRes && syncRes.ok === false && backendLive()) {
     // Keep the local request — hospital sync may catch up — but tell the user.
     return { ok: true, request: req, warning: syncRes.error };
   }
@@ -1108,8 +1165,10 @@ export async function acceptShift(shift, doctor) {
 
   appStore.saveAssignments([...appStore.assignments, assignment]);
 
+  reportFillSavings(shift, doctor.id);
 
   await afterMutation(async () => {
+    await sync.linkDoctorToHospital(shift.hospitalID, doctor.id);
     await sync.createAssignment(shift.id, doctor.id, {
       hospitalID: shift.hospitalID,
       shiftDate: shift.start,
@@ -1192,11 +1251,16 @@ export async function requestTrade(assignment, toDoctor, { partnerAssignment = n
 
   await afterMutation(() =>
     sync.requestTrade(assignment.shiftID, assignment.doctorID, toDoctor.id, {
+      id: trade.id,
       requestedShiftId: trade.requestedShiftID,
       compensationAmount: amount,
       offeredDate: trade.offeredDate,
       requestedDate: trade.requestedDate,
-      specialty: trade.specialty
+      specialty: trade.specialty,
+      fromDoctorName: appStore.doctorProfile
+        ? `Dr. ${appStore.doctorProfile.lastName}`
+        : null,
+      toDoctorName: toDoctor.name
     })
   );
 
@@ -1309,12 +1373,15 @@ export async function counterTrade(trade, compensationAmount, alternateAssignmen
 
   await afterMutation(() =>
     sync.requestTrade(counter.shiftID, counter.fromDoctorID, counter.toDoctorID, {
+      id: counter.id,
       requestedShiftId: counter.requestedShiftID,
       compensationAmount: amount,
       offeredDate: counter.offeredDate,
       requestedDate: counter.requestedDate,
       specialty: counter.specialty,
-      counterOfTradeId: trade.id
+      counterOfTradeId: trade.id,
+      fromDoctorName: counter.fromDoctorName,
+      toDoctorName: counter.toDoctorName
     })
   );
 
@@ -1328,6 +1395,45 @@ function recordPenalty(entry) {
     createdAt: new Date().toISOString()
   }];
   appStore.savePenaltyLedger(ledger);
+  reportPenaltySavings(entry);
+}
+
+/**
+ * Filling a shift early locks the rate before the escalator climbs, so the gap
+ * between today's rate and the ceiling is cost the hospital never pays.
+ */
+function reportFillSavings(shift, doctorID) {
+  const avoided = rateSavingsForFill(shift);
+  if (avoided <= 0) return;
+  recordSavingsEvent({
+    hospitalID: shift.hospitalID,
+    hospitalName: shift.hospital,
+    shiftID: shift.id,
+    specialty: shift.specialty,
+    kind: "rate_savings",
+    amount: avoided,
+    actorID: doctorID,
+    metadata: {
+      leadTimeHours: leadTimeHours(shift),
+      lockedRate: Math.round(currentRate(shift)),
+      rateUnit: shift.rateUnit
+    }
+  }).catch(() => {});
+}
+
+/** Penalties are money the hospital gets back, so they count as savings. */
+function reportPenaltySavings(entry) {
+  const shift = appStore.assignments.find((a) => a.shiftID === entry.shiftID)?.shift;
+  recordSavingsEvent({
+    hospitalID: entry.hospitalID,
+    hospitalName: shift?.hospital || appStore.hospitalProfile?.name || null,
+    shiftID: entry.shiftID,
+    specialty: shift?.specialty || null,
+    kind: entry.type === "trade" ? "penalty_trade" : "penalty_cancel",
+    amount: entry.amount,
+    actorID: entry.doctorID,
+    metadata: { penaltyType: entry.type }
+  }).catch(() => {});
 }
 
 export function penaltyPreview(action, assignment) {
@@ -1365,14 +1471,19 @@ export function getRateBreakdown(specialty, date, hospitalID) {
   const day = startOfDay(date);
   const obs = pricingObservables(specialty, day, hospitalID);
   const granularity = getPolicy(hospitalID).granularity;
-  return rateBreakdown(specialty, day.toISOString(), hospitalID, obs, granularity);
+  let prefs = { disabled: [], overrides: {} };
+  try {
+    const raw = localStorage.getItem("algo_factor_prefs_v1");
+    if (raw) prefs = JSON.parse(raw);
+  } catch { /* ignore */ }
+  return rateBreakdown(specialty, day.toISOString(), hospitalID, obs, granularity, prefs);
 }
 
 export function startPeriodicSync(intervalMs = 20000) {
   if (typeof window === "undefined") return () => {};
   if (window.__oncallSyncTimer) clearInterval(window.__oncallSyncTimer);
   window.__oncallSyncTimer = setInterval(() => {
-    if (isConfigured() && appStore.session) syncEverything().catch(() => {});
+    if (backendLive() && appStore.session) syncEverything().catch(() => {});
   }, intervalMs);
   return () => clearInterval(window.__oncallSyncTimer);
 }

@@ -155,30 +155,67 @@ export function tabBar(tabs, active, badge = 0) {
 }
 
 const AD_SLOTS = [
-  { title: "LocumTenens.com", copy: "Fill critical gaps this weekend", cta: "Learn more", tint: "#4F8EF7" },
-  { title: "MedMal Shield", copy: "Malpractice coverage from $89/mo", cta: "Get a quote", tint: "#34D399" },
-  { title: "DocuSign Health", copy: "Credential packets in minutes", cta: "Try free", tint: "#A78BFA" },
-  { title: "ShiftPay Capital", copy: "Advance earnings same day", cta: "Apply now", tint: "#FBBF24" }
+  { title: "LocumTenens.com", copy: "Fill critical gaps this weekend", cta: "Learn more", tint: "#4F8EF7", url: "https://www.locumtenens.com/" },
+  { title: "MedMal Direct", copy: "Malpractice quotes for call docs", cta: "Get a quote", tint: "#34D399", url: "https://www.medmaldirect.com/" },
+  { title: "Doximity", copy: "Network with physicians nationwide", cta: "Join free", tint: "#A78BFA", url: "https://www.doximity.com/" },
+  { title: "CME List", copy: "Accredited CME that fits call weeks", cta: "Browse CME", tint: "#FBBF24", url: "https://www.cmelist.com/" }
 ];
 
 /**
- * Sponsored slot from `AdBanner.swift`. iOS rotates slots on a timer; here the
- * slot is derived from the placement so a re-render never swaps the ad
- * mid-read.
+ * Real sponsored slot (click-out) or Google AdSense when configured.
+ * Hidden for MD Shift+ members — pass `show: false` or use `shouldShowAds()`.
  */
-export function adBanner(placement = "dashboard") {
+export function adBanner(placement = "dashboard", opts = {}) {
+  if (opts.show === false) return "";
+  const cfg = window.ON_CALL_CONFIG || {};
+  const client = cfg.adsenseClient || "";
+  const slotId = cfg.adsenseBannerSlot || "";
+
+  if (client && slotId && String(client).startsWith("ca-pub-")) {
+    return `
+      <aside class="ad-banner ad-banner-network" data-ad-placement="${escapeHtml(placement)}">
+        <ins class="adsbygoogle"
+             style="display:block;min-height:72px;width:100%"
+             data-ad-client="${escapeHtml(client)}"
+             data-ad-slot="${escapeHtml(slotId)}"
+             data-ad-format="horizontal"
+             data-full-width-responsive="true"></ins>
+      </aside>`;
+  }
+
   const index = [...placement].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % AD_SLOTS.length;
   const slot = AD_SLOTS[index];
 
   return `
-    <aside class="ad-banner">
+    <a class="ad-banner" href="${escapeHtml(slot.url)}" target="_blank" rel="noopener sponsored"
+       data-ad-placement="${escapeHtml(placement)}" aria-label="Sponsored: ${escapeHtml(slot.title)}">
       <span class="ad-icon" style="background:${slot.tint}26;color:${slot.tint}">${icon("megaphone", { size: 18 })}</span>
       <div class="ad-body">
         <div class="ad-head"><span class="ad-tag">Ad</span><span class="ad-title">${escapeHtml(slot.title)}</span></div>
         <div class="ad-copy">${escapeHtml(slot.copy)}</div>
       </div>
       <span class="ad-cta" style="background:${slot.tint}">${escapeHtml(slot.cta)}</span>
-    </aside>`;
+    </a>`;
+}
+
+/** Load AdSense once when client id is present. */
+export function ensureAdsNetwork() {
+  const cfg = window.ON_CALL_CONFIG || {};
+  const client = cfg.adsenseClient || "";
+  if (!client || !String(client).startsWith("ca-pub-")) return;
+  if (document.querySelector(`script[data-mdshift-adsense="${client}"]`)) {
+    try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch { /* noop */ }
+    return;
+  }
+  const s = document.createElement("script");
+  s.async = true;
+  s.crossOrigin = "anonymous";
+  s.dataset.mdshiftAdsense = client;
+  s.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(client)}`;
+  s.onload = () => {
+    try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch { /* noop */ }
+  };
+  document.head.appendChild(s);
 }
 
 /** Success confirmation matching iOS `ActionSuccessBanner`. */
