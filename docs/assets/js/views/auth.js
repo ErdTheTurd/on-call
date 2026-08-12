@@ -63,8 +63,9 @@ export function renderAuthView(state, handlers) {
   }
 
   if (state.mfaEnroll) {
-    const qr = state.mfaEnroll.qrCode || "";
     const secret = state.mfaEnroll.secret || "";
+    const uri = state.mfaEnroll.uri || "";
+    const qr = state.mfaEnroll.qrCode || "";
     return `
     <div class="auth-screen auth-bg">
       <div class="mesh-blob"></div><div class="mesh-blob"></div><div class="mesh-blob"></div>
@@ -78,11 +79,24 @@ export function renderAuthView(state, handlers) {
       <div class="auth-card-shell" style="padding:28px 24px">
         <h2 style="margin:0 0 8px;font-size:1.35rem">Set up authenticator</h2>
         <p class="subtitle" style="margin:0 0 16px;line-height:1.5">
-          Scan this QR with Google Authenticator, 1Password, or Authy. Then enter the 6-digit code to confirm.
+          Open <strong>Google Authenticator</strong> (or Authy / 1Password), add MD Shift with the key below, then type the 6-digit code your phone shows.
         </p>
-        ${qr ? `<div class="mfa-qr">${qr.startsWith("<svg") || qr.startsWith("data:") ? (qr.startsWith("data:") ? `<img alt="QR code" src="${escapeHtml(qr)}" width="180" height="180" />` : qr) : `<img alt="QR code" src="${escapeHtml(qr)}" width="180" height="180" />`}</div>` : ""}
-        ${secret ? `<p class="subtitle" style="margin:12px 0;font-family:ui-monospace,monospace;letter-spacing:0.08em">${escapeHtml(secret)}</p>` : ""}
-        <form id="mfa-enroll-form" class="otp-form">
+        ${uri ? `
+          <a class="btn-secondary" style="display:flex;justify-content:center;margin-bottom:14px;text-decoration:none"
+             href="${escapeHtml(uri)}">Open authenticator app</a>
+        ` : ""}
+        ${secret ? `
+          <div class="mfa-secret-box">
+            <div class="tertiary" style="font-size:11px;margin-bottom:6px">Manual setup key</div>
+            <code class="mfa-secret">${escapeHtml(secret)}</code>
+            <button type="button" class="btn-ghost" data-copy-secret style="margin-top:8px;width:100%">Copy key</button>
+          </div>
+        ` : ""}
+        <details class="mfa-qr-details">
+          <summary>Prefer a QR code instead?</summary>
+          ${qr ? `<div class="mfa-qr">${qr.startsWith("<svg") || qr.startsWith("data:") ? (qr.startsWith("data:") ? `<img alt="QR code" src="${escapeHtml(qr)}" width="180" height="180" />` : qr) : `<img alt="QR code" src="${escapeHtml(qr)}" width="180" height="180" />`}</div>` : `<p class="subtitle">QR unavailable — use the key above.</p>`}
+        </details>
+        <form id="mfa-enroll-form" class="otp-form" style="margin-top:16px">
           <div class="otp-row" role="group" aria-label="Authenticator confirmation code">
             ${otpInputs(state.mfaCode)}
           </div>
@@ -113,7 +127,8 @@ export function renderAuthView(state, handlers) {
       <div class="auth-card-shell" style="padding:28px 24px">
         <h2 style="margin:0 0 8px;font-size:1.35rem">Enter verification code</h2>
         <p class="subtitle" style="margin:0 0 18px;line-height:1.5">
-          We sent a 6-digit code to <strong>${escapeHtml(verifyEmail)}</strong>.
+          Check <strong>${escapeHtml(verifyEmail)}</strong> for a 6-digit code
+          ${state.verifyNotice ? "" : "(including spam / promotions)"}.
           Enter it here — no link to click.
         </p>
         <form id="otp-form" class="otp-form">
@@ -270,6 +285,17 @@ export function bindAuth(root, {
     btn.addEventListener("click", () => onOAuth?.(btn.dataset.oauth));
   });
   root.querySelector("[data-mfa-skip]")?.addEventListener("click", () => onSkipMfaEnroll?.());
+  root.querySelector("[data-copy-secret]")?.addEventListener("click", async () => {
+    const secret = root.querySelector(".mfa-secret")?.textContent?.trim();
+    if (!secret) return;
+    try {
+      await navigator.clipboard.writeText(secret);
+      const btn = root.querySelector("[data-copy-secret]");
+      if (btn) btn.textContent = "Copied";
+    } catch {
+      window.prompt("Copy this setup key:", secret);
+    }
+  });
 
   const otpForm = root.querySelector("#otp-form");
   if (otpForm) {
