@@ -6,5 +6,10 @@ window.ON_CALL_CONFIG = {
   websiteBaseUrl: "https://mdshift.net",
   appStoreUrl: "",
   appScheme: "oncallwizard",
-  appBundleId: "callsystems.on-call-wizard"
+  appBundleId: "com.eporthospine.mdshift",
+  // MD Shift+ ($9.99/mo) — Stripe Payment Link OR edge function create-plus-checkout
+  stripePlusPaymentLink: "",
+  // Real ads — Google AdSense (web + iOS WKWebView banner page)
+  adsenseClient: "",       // e.g. ca-pub-xxxxxxxxxxxxxxxx
+  adsenseBannerSlot: ""    // Ad unit slot id
 };
