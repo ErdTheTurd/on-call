@@ -170,8 +170,11 @@ export function computeRate(specialty, dateISO, options = {}) {
     granularity = "day",
     baseMarketRate = 120,
     durationHours = 24,
-    observables = NEUTRAL_OBSERVABLES
+    observables = NEUTRAL_OBSERVABLES,
+    disabledFactorIDs = [],
+    factorOverrides = {}
   } = options;
+  const disabled = new Set(disabledFactorIDs);
 
   const day = new Date(dateISO);
   day.setHours(0, 0, 0, 0);
@@ -184,14 +187,23 @@ export function computeRate(specialty, dateISO, options = {}) {
 
   const components = [];
   const factor = (id, category, label, mult, weight = 1.0, display = null) => {
+    let effective = mult;
+    let effectiveWeight = weight;
+    if (disabled.has(id) && id !== "base" && id !== "confidence" && id !== "prior") {
+      effective = 1.0;
+      effectiveWeight = 0;
+    } else if (factorOverrides[id] != null && Number.isFinite(Number(factorOverrides[id]))) {
+      effective = Number(factorOverrides[id]);
+    }
     components.push({
       id,
       category,
       label,
-      displayValue: display ?? fmtMult(mult),
-      multiplier: mult,
-      weight,
-      impact: (mult - 1.0) * weight
+      displayValue: display ?? fmtMult(effective),
+      multiplier: effective,
+      weight: effectiveWeight,
+      impact: (effective - 1.0) * effectiveWeight,
+      enabled: !disabled.has(id)
     });
   };
 
@@ -350,10 +362,22 @@ export function groupPricingComponents(components = []) {
     .map((cat) => [cat, map[cat]]);
 }
 
-export function algorithmRate(specialty, dateISO, hospitalID, observables, granularity = "day") {
-  return computeRate(specialty, dateISO, { hospitalID, observables, granularity }).floor;
+export function algorithmRate(specialty, dateISO, hospitalID, observables, granularity = "day", prefs = null) {
+  return computeRate(specialty, dateISO, {
+    hospitalID,
+    observables,
+    granularity,
+    disabledFactorIDs: prefs?.disabled || [],
+    factorOverrides: prefs?.overrides || {}
+  }).floor;
 }
 
-export function rateBreakdown(specialty, dateISO, hospitalID, observables, granularity = "day") {
-  return computeRate(specialty, dateISO, { hospitalID, observables, granularity });
+export function rateBreakdown(specialty, dateISO, hospitalID, observables, granularity = "day", prefs = null) {
+  return computeRate(specialty, dateISO, {
+    hospitalID,
+    observables,
+    granularity,
+    disabledFactorIDs: prefs?.disabled || [],
+    factorOverrides: prefs?.overrides || {}
+  });
 }
