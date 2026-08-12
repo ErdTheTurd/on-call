@@ -267,8 +267,6 @@ async function boot() {
 
     // Admins never reach a doctor or hospital workspace, so skip the shift sync.
     if (await enterAdminIfPermitted(sessionUser?.id, sessionUser?.email)) return;
-
-    await syncEverything();
   }
 
   const auth = authState();
@@ -282,6 +280,10 @@ async function boot() {
   }
   render();
   appStore.subscribe(() => render());
+  // Never block first paint on sync — publishing a local board can take minutes.
+  if (isConfigured() && !isDemoSession() && appStore.session) {
+    syncEverything().catch(() => {}).finally(() => update({}));
+  }
   startPeriodicSync(20000);
 }
 
