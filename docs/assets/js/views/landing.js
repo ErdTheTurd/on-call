@@ -46,7 +46,12 @@ function hero() {
     <section class="hero">
       <span class="pill reveal">Now live for all specialties</span>
       <h1 class="hero-title reveal">
-        <span class="hero-shift" data-hero-shift>Shift</span> what's possible.<br /><span class="accent">With MD Shift.</span>
+        <span class="hero-shift-hit" data-hero-shift-hit>
+          <span class="hero-shift-stack" data-hero-shift>
+            <span class="hero-shift-roman" aria-hidden="true">Shift</span>
+            <span class="hero-shift-italic">Shift</span>
+          </span>
+        </span> what's possible.<br /><span class="accent">With MD Shift.</span>
       </h1>
       <p class="hero-sub reveal">
         The platform built for doctors who need flexibility and hospitals that
@@ -210,7 +215,10 @@ function footer() {
           </div>`).join("")}
       </div>
       <div class="footer-bottom">
-        <span>© ${new Date().getFullYear()} ${BRAND.name}. All rights reserved.</span>
+        <div class="footer-legal">
+          <span>© ${new Date().getFullYear()} ${BRAND.name}. All rights reserved.</span>
+          <span class="footer-disclaimer">All figures and accounts shown here are made-up mock data for demonstration purposes only.</span>
+        </div>
         <button type="button" class="btn-quiet" data-goto-auth>Log in</button>
       </div>
     </footer>`;
