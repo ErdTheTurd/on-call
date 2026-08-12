@@ -1,8 +1,10 @@
 import { escapeHtml, formatShiftDate, doctorSpecialty } from "../brand.js";
 import {
   navBar, tabBar, shiftRow, tokenBadge, pendingBanner,
-  credentialStatusCard, sectionHeader, emptyState, sheet, verificationBadge, icon, currency
+  credentialStatusCard, sectionHeader, emptyState, sheet, verificationBadge, icon, currency, adBanner, ensureAdsNetwork
 } from "../components.js";
+import { isPlusActive, startPlusCheckout, isMonetizationLive } from "../domain/plus.js";
+import { renderPlusSheet } from "../domain/plus-ui.js";
 import { renderCalendar, doctorDayData, addMonths } from "../calendar.js";
 import { holidayOn, holidayPremiumMultiplier } from "../domain/pricing.js";
 import { currentRate } from "../shift-math.js";
@@ -79,6 +81,7 @@ function renderDoctorHome(state, profile) {
               ? rec.map((s, i) => `${shiftRow(s)}${i < rec.length - 1 ? '<div class="divider"></div>' : ""}`).join("")
               : `<p class="subtitle">No open shifts in your specialty right now. Check back after hospitals post coverage.</p>`}
           </section>
+          ${adBanner("doctor-home", { show: !isPlusActive() })}
           ${tokenReqs.length ? `
             <section class="card stack">
               ${sectionHeader("Requested Days")}
@@ -279,7 +282,10 @@ function renderDoctorMenuSheet(sheetKind) {
   if (sheetKind === "requested") return renderRequestedSheet(requested);
   if (sheetKind === "earnings") return renderEarningsSheet(earnings);
   if (sheetKind === "history") return renderHistorySheet(earnings.history || []);
+  if (sheetKind === "plus") return sheet("MD Shift+", renderPlusSheet("doctor"));
 
+  const plusActive = isPlusActive();
+  const monetizationLive = isMonetizationLive();
   const body = `
     <div class="menu-profile">
       <div class="avatar">${escapeHtml((profile?.firstName?.[0] || "") + (profile?.lastName?.[0] || ""))}</div>
@@ -287,10 +293,18 @@ function renderDoctorMenuSheet(sheetKind) {
         <div style="font-weight:600">${escapeHtml(profile?.firstName || "")} ${escapeHtml(profile?.lastName || "")}${profile ? `, ${profile.credential}` : ""}</div>
         <div class="subtitle">${escapeHtml(appStore.session?.email || profile?.specialties?.[0] || "")}</div>
         ${profile ? verificationBadge(profile.verificationStatus) : ""}
+        ${monetizationLive && plusActive ? `<span class="plus-pill">${icon("sparkles", { size: 12 })} Plus</span>` : ""}
       </div>
       <button type="button" class="menu-signout" data-sign-out>Sign out</button>
     </div>
     <ul class="menu-list">
+      ${monetizationLive ? `
+      <section><div class="section-label">MD Shift+</div>
+        <button class="menu-item plus-menu-item" type="button" data-open-sheet="plus">
+          ${icon("sparkles")}<span>${plusActive ? "Manage MD Shift+" : "Get MD Shift+"}
+          <span class="menu-item-sub">${plusActive ? "Ad-free · extra tokens" : "$9.99/mo · ad-free + perks"}</span></span>
+        </button>
+      </section>` : ""}
       <section><div class="section-label">Earnings</div>
         <div class="card" style="margin:0 16px 8px;padding:14px">
           <div style="display:flex;justify-content:space-between">
@@ -487,7 +501,7 @@ function renderTradeSheet(assignmentId, state = {}) {
         <section class="card stack">
           <div class="counter-row">
             <span class="subtitle" style="font-weight:600">Compensation to them</span>
-            <strong style="color:var(--accent)">$${Math.round(compensation).toLocaleString()}</strong>
+            <strong style="color:var(--accent)" data-trade-comp-label>$${Math.round(compensation).toLocaleString()}</strong>
           </div>
           <input type="range" min="0" max="1000" step="25" value="${Math.round(compensation)}" data-trade-comp />
           <button type="button" class="btn-primary" data-trade-to="${selectedPartner.id}" data-assignment="${assignmentId}">
@@ -521,6 +535,17 @@ export function bindDoctor(root, state, update) {
   root.querySelectorAll("[data-open-sheet]").forEach((btn) => {
     btn.addEventListener("click", () => update({ sheet: btn.dataset.openSheet || true }));
   });
+  root.querySelectorAll("[data-plus-checkout]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const res = await startPlusCheckout();
+      if (!res.ok) {
+        btn.disabled = false;
+        alert(res.error || "Could not start checkout.");
+      }
+    });
+  });
+  ensureAdsNetwork();
   root.querySelectorAll("[data-open-day]").forEach((btn) => {
     btn.addEventListener("click", () => update({ daySheet: btn.dataset.openDay }));
   });
@@ -616,12 +641,24 @@ export function bindDoctor(root, state, update) {
     });
   });
   root.querySelectorAll("[data-cancel-shift]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (btn.disabled) {
+        const reason = btn.closest("section")?.querySelector(".subtitle")?.textContent;
+        alert(reason || "Canceling is blocked this close to shift start.");
+        return;
+      }
       const a = appStore.assignments.find((x) => x.id === btn.dataset.cancelShift);
-      if (!a || !confirm("Cancel this shift?")) return;
+      if (!a) return;
+      const feeHint = btn.textContent.includes("fee") ? `\n\n${btn.textContent.trim()}` : "";
+      if (!window.confirm(`Cancel this shift?${feeHint}`)) return;
       const res = await cancelShift(a);
-      if (!res.ok) alert(res.error);
-      else if (res.penalty > 0) alert(`Canceled. Penalty: $${res.penalty}`);
+      if (!res.ok) alert(res.error || "Could not cancel.");
+      else {
+        if (res.penalty > 0) alert(`Canceled. Penalty: $${res.penalty}`);
+        update({ tab: state.tab || "shifts" });
+      }
     });
   });
   root.querySelectorAll("[data-trade-shift]").forEach((btn) => {
@@ -634,8 +671,13 @@ export function bindDoctor(root, state, update) {
   root.querySelectorAll("[data-select-trade-partner]").forEach((btn) => {
     btn.addEventListener("click", () => update({ tradePartnerId: btn.dataset.selectTradePartner }));
   });
-  root.querySelector("[data-trade-comp]")?.addEventListener("input", (e) => {
+  root.querySelector("[data-trade-comp]")?.addEventListener("change", (e) => {
     update({ tradeComp: Number(e.target.value) || 0 });
+  });
+  // Live label without full re-render (avoids choppy slider).
+  root.querySelector("[data-trade-comp]")?.addEventListener("input", (e) => {
+    const label = root.querySelector("[data-trade-comp-label]");
+    if (label) label.textContent = `$${Math.round(Number(e.target.value) || 0)}`;
   });
   root.querySelectorAll("[data-trade-to]").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -685,8 +727,12 @@ export function bindDoctor(root, state, update) {
     btn.addEventListener("click", () => update({ counterAltShiftId: btn.dataset.counterAlt }));
   });
   root.querySelectorAll("[data-counter-comp]").forEach((el) => {
-    el.addEventListener("input", () => {
+    el.addEventListener("change", () => {
       update({ counterComp: Number(el.value) || 0 });
+    });
+    el.addEventListener("input", () => {
+      const label = el.closest(".card, .stack, div")?.querySelector("strong");
+      if (label) label.textContent = `$${Math.round(Number(el.value) || 0).toLocaleString()}`;
     });
   });
   root.querySelectorAll("[data-send-counter]").forEach((btn) => {
