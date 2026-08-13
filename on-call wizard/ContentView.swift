@@ -1371,19 +1371,8 @@ struct ShiftDetailView: View {
                     throw TradeError.tokenNotApproved
                 }
                 try await Services.doctor.accept(shift: shift)
-                await assignedStore.assign(shift, doctorID: doctorID)
-                if SupabaseConfig.isConfigured {
-                    _ = try? await SupabaseHTTPClient.shared.invokeFunction(
-                        name: "accept-shift",
-                        body: [
-                            "shift_id": shift.id.uuidString,
-                            "doctor_id": doctorID.uuidString,
-                            "hospital_id": shift.hospitalID.uuidString,
-                            "shift_date": ISO8601DateFormatter().string(from: shift.date.onlyDate())
-                        ],
-                        accessToken: SupabaseAuthService.shared.accessToken
-                    )
-                }
+                // Persists locally and pushes assignment (+ roster link) to Supabase.
+                try await Repositories.assignments.assign(shift, doctorID: doctorID)
                 await MainActor.run {
                     isAccepting = false; didAccept = true
                 }
@@ -1653,6 +1642,45 @@ struct HospitalDashboardView: View {
                             PendingVerificationBanner(status: p.verificationStatus, flags: p.verificationFlags)
                         }
 
+                        if let hospitalID,
+                           !tokens.pendingRequests(forHospitalID: hospitalID).isEmpty {
+                            let pending = tokens.pendingRequests(forHospitalID: hospitalID)
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Approve coverage requests (\(pending.count))")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Brand.textPrimary)
+                                Text("Doctors are waiting. Approve here or open Schedule Admin from the menu.")
+                                    .font(.caption)
+                                    .foregroundStyle(Brand.textSecondary)
+                                ForEach(pending.prefix(6)) { req in
+                                    HStack(spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(req.doctorName)
+                                                .font(.subheadline.weight(.semibold))
+                                            Text("\(req.specialty) · \(req.date.formatted(date: .abbreviated, time: .omitted))")
+                                                .font(.caption)
+                                                .foregroundStyle(Brand.textSecondary)
+                                        }
+                                        Spacer()
+                                        Button("Deny") { tokens.deny(id: req.id) }
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(Brand.danger)
+                                        Button("Approve") { tokens.approve(id: req.id) }
+                                            .font(.caption.weight(.bold))
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(Brand.success)
+                                    }
+                                }
+                                NavigationLink {
+                                    ScheduleAdminView(profile: profile)
+                                } label: {
+                                    Text("Open Schedule Admin")
+                                        .font(.subheadline.weight(.semibold))
+                                }
+                            }
+                            .cardStyle()
+                        }
+
                         VStack(alignment: .leading, spacing: 10) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Coverage calendar")
@@ -1738,11 +1766,11 @@ struct HospitalDashboardView: View {
                                         hint: "Last 30 days"
                                     )
                                 }.buttonStyle(.plain)
-                                Button { selectedTab = 2 } label: {
+                                Button { showDashboard = true } label: {
                                     StatBadge(
-                                        value: "\(roster.doctors.filter(\.isAutoApproved).count)",
-                                        label: "Auto‑approved",
-                                        hint: "Ready doctors"
+                                        value: "\(hospitalID.map { tokens.pendingRequests(forHospitalID: $0).count } ?? 0)",
+                                        label: "Pending",
+                                        hint: "Need your OK"
                                     )
                                 }.buttonStyle(.plain)
                                 Button { selectedTab = 1 } label: {
@@ -1826,7 +1854,7 @@ struct ScheduleAdminView: View {
 
     private var rows: [AdminRow] {
         guard let hospitalID = profile?.id else { return [] }
-        return tokens.pendingRequests(forHospitalID: hospitalID).map { AdminRow(request: $0) }
+        return tokens.requests(forHospitalID: hospitalID).map { AdminRow(request: $0) }
     }
 
     var filtered: [AdminRow] {

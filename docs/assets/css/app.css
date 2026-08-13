@@ -62,10 +62,14 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 .app-shell {
-  min-height: 100dvh;
+  /* Bound height so .main-scroll (not the page) is the scrollport —
+     otherwise overflow-y:auto never engages and long hospital Home pages clip. */
+  height: 100dvh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
   position: relative;
+  overflow: hidden;
   padding-bottom: calc(var(--tab-bar-height) + var(--safe-bottom));
 }
 
@@ -553,16 +557,18 @@ a { color: var(--accent); text-decoration: none; }
   place-items: center;
 }
 
-/* Main scroll area */
+/* Main scroll area — sole vertical scrollport inside .app-shell */
 .main-scroll {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
   width: 100%;
   max-width: var(--app-max-width);
   margin: 0 auto;
   padding: 18px var(--page-pad) 28px;
-  contain: content;
-  overscroll-behavior: contain;
 }
 
 .stack { display: grid; gap: var(--section-spacing); }
