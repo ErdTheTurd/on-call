@@ -57,7 +57,7 @@ final class LocalTokenRepository: TokenRepositoryProtocol {
 
     func fetchRequests(hospitalID: UUID?) async throws -> [TokenStore.TokenRequest] {
         if let hospitalID {
-            return TokenStore.shared.pendingRequests(forHospitalID: hospitalID)
+            return TokenStore.shared.requests(forHospitalID: hospitalID)
         }
         return TokenStore.shared.requestedDays
     }

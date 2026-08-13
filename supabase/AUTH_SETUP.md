@@ -79,22 +79,36 @@ Local CLI config already points SMTP at Resend via `env(RESEND_API_KEY)` in
 
 Already on for this project (`mailer_autoconfirm = false`).
 
-Update the hosted **Confirm signup** template so the body shows the token only
-(or run `./scripts/configure-otp-email-template.sh`):
+**Your email will not send until Resend SMTP + domain DNS are done (section 0).**  
+Editing the template alone does not deliver mail. A subject like “sign-in **link**” is also the wrong tone — we use a **6-digit code**, not a clickable magic link.
 
-1. Auth → Email Templates → Confirm signup  
-   https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/templates
-2. Subject: `Your MD Shift verification code`
-3. Body (no confirmation URL):
+Update the hosted **Confirm signup** template (Auth → Email Templates → **Confirm signup** — not Magic Link):  
+https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/templates
 
-```html
-<h2>MD Shift verification</h2>
-<p>Enter this 6-digit code in the MD Shift app or website:</p>
-<p style="font-size:28px;letter-spacing:6px;font-weight:700;">{{ .Token }}</p>
-<p>This code expires in about an hour.</p>
+**Subject:**
+```
+Your MD Shift verification code
 ```
 
+**Body** (paste exactly — show the code, no confirmation URL):
+
+```html
+<h2>Your MD Shift verification code</h2>
+<p>Enter this 6-digit code in the MD Shift app or website. This code can only be used once. If you have any questions, feel free to contact us at erdunn706@gmail.com!</p>
+<p style="font-size:32px;letter-spacing:8px;font-weight:700;">{{ .Token }}</p>
+<p>This code expires in about an hour. If you did not create an account, you can ignore this email.</p>
+```
+
+Or run `./scripts/configure-otp-email-template.sh` (needs `SUPABASE_ACCESS_TOKEN`).
+
 Local CLI already points at `supabase/templates/confirmation.html`.
+
+**Still not sending?** Checklist:
+1. Resend domain shows **Verified** (SPF on mdshift.net must not be `v=spf1 -all`)
+2. Supabase Auth → SMTP enabled with `smtp.resend.com` / user `resend` / API key as password
+3. Sender is on the verified domain (e.g. `noreply@mdshift.net`)
+4. Smoke-test: `./scripts/test-resend-send.sh`
+5. Check Resend → Logs for bounces/rejects; Supabase Auth → Logs for mailer errors
 
 ---
 

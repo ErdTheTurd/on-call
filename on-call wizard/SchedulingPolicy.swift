@@ -9,7 +9,7 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
     public var granularity: Granularity = .day
 
     /// When false, verified doctors are auto-approved and the pricing algorithm drives scheduling.
-    public var administratorApproveShifts: Bool = false
+    public var administratorApproveShifts: Bool = true
 
     public struct PenaltyBracket: Codable, Sendable, Equatable {
         public var hoursBeforeStart: Int
@@ -75,7 +75,7 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
 
     public init(
         granularity: Granularity = .day,
-        administratorApproveShifts: Bool = false,
+        administratorApproveShifts: Bool = true,
         cancellationPenaltyScale: [PenaltyBracket] = [
             .init(hoursBeforeStart: 24, penaltyPercent: 2.0)
         ],
@@ -126,7 +126,7 @@ public struct SchedulingPolicy: Codable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         granularity = try c.decodeIfPresent(Granularity.self, forKey: .granularity) ?? .day
-        administratorApproveShifts = try c.decodeIfPresent(Bool.self, forKey: .administratorApproveShifts) ?? false
+        administratorApproveShifts = try c.decodeIfPresent(Bool.self, forKey: .administratorApproveShifts) ?? true
         cancellationPenaltyScale = try c.decodeIfPresent([PenaltyBracket].self, forKey: .cancellationPenaltyScale) ?? Self().cancellationPenaltyScale
         cancellationPenaltyScale = Self.normalizeCancellationScale(cancellationPenaltyScale)
         tradePenaltyScale = try c.decodeIfPresent([PenaltyBracket].self, forKey: .tradePenaltyScale) ?? Self().tradePenaltyScale
