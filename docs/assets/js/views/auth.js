@@ -216,7 +216,7 @@ export function renderAuthView(state, handlers) {
           <p class="demo-note">Opens mock sample data — not a live hospital account.</p>
         </div>
       </div>
-      <p class="auth-footer">By continuing you agree to our Terms of Service and Privacy Policy.</p>
+      <p class="auth-footer">By continuing you agree to our Terms of Service and <a href="/privacypolicy/" target="_blank" rel="noopener">Privacy Policy</a>.</p>
     </div>`;
 }
 
