@@ -2,8 +2,9 @@ import { bindReveals, bindCounters, bindStickyHeader, bindDotField } from "../li
 import { BRAND, brandLockup } from "../brand.js";
 
 /**
- * Public marketing page. No product state is read here — every figure is
- * illustrative, so the page renders identically for a first-time visitor.
+ * Public marketing page. No product state is read here.
+ * Growth figures are framed as expectations (not live counts). Demo CTAs open
+ * mock sample data so the product is walkable before real accounts exist.
  */
 export function renderLanding() {
   return `
@@ -44,7 +45,7 @@ function header() {
 function hero() {
   return `
     <section class="hero">
-      <span class="pill reveal">Now live for all specialties</span>
+      <span class="pill reveal">Live now · demos use mock sample data</span>
       <h1 class="hero-title reveal">
         <span class="hero-shift-hit" data-hero-shift-hit>
           <span class="hero-shift-stack" data-hero-shift>
@@ -61,7 +62,7 @@ function hero() {
         <button type="button" class="btn-solid lg" data-demo-role="Doctor">For doctors ${arrow()}</button>
         <button type="button" class="btn-outline lg" data-demo-role="Hospital">For hospitals ${arrow()}</button>
       </div>
-      <p class="hero-note reveal">Opens a live account with sample data. Nothing to sign up for.</p>
+      <p class="hero-note reveal">Opens mock sample data — no signup required. Create a real account when you're ready.</p>
     </section>`;
 }
 
@@ -73,22 +74,20 @@ function arrow() {
 }
 
 function statBand() {
+  // Expectational targets — never imply these are live production counts.
   const stats = [
-    { to: 10, suffix: "k", label: "Doctors active" },
-    { to: 500, label: "Hospitals onboarded" },
-    { to: 2, decimals: 1, suffix: "M", label: "Shifts traded" }
+    { lead: "Expecting", value: "over 10k", label: "doctors on the platform" },
+    { lead: "Expecting", value: "500+", label: "hospitals onboarded" },
+    { lead: "Built for", value: "scale", label: "high-volume shift trading" }
   ];
 
   return `
-    <section class="stat-band">
+    <section class="stat-band" aria-label="Growth targets">
       <div class="stat-band-inner">
         ${stats.map((s) => `
           <div class="stat reveal">
-            <div class="stat-value">
-              <span data-count-to="${s.to}"
-                    ${s.decimals ? `data-count-decimals="${s.decimals}"` : ""}
-                    ${s.suffix ? `data-count-suffix="${s.suffix}"` : ""}>0</span><span class="plus">+</span>
-            </div>
+            <div class="stat-lead">${s.lead}</div>
+            <div class="stat-value"><span class="stat-emphasis">${s.value}</span></div>
             <div class="stat-label">${s.label}</div>
           </div>`).join("")}
       </div>
@@ -117,7 +116,7 @@ function bothSides() {
             { day: "Sat", tone: "" }, { day: "Sun", tone: "" }
           ])}
           <p class="week-note">Friday is out for swap</p>
-          <button type="button" class="btn-solid" data-demo-role="Doctor">Get started as a doctor ${arrow()}</button>
+          <button type="button" class="btn-solid" data-demo-role="Doctor">Explore doctor demo ${arrow()}</button>
         </article>
 
         <article class="split-card reveal" id="for-hospitals">
@@ -133,7 +132,7 @@ function bothSides() {
             { day: "Sat", tone: "" }, { day: "Sun", tone: "" }
           ])}
           <p class="week-note gap"><span class="gap-dot"></span>1 coverage gap detected</p>
-          <button type="button" class="btn-solid" data-demo-role="Hospital">Get started as a hospital ${arrow()}</button>
+          <button type="button" class="btn-solid" data-demo-role="Hospital">Explore hospital demo ${arrow()}</button>
         </article>
       </div>
     </section>`;
@@ -183,11 +182,11 @@ function closing() {
       <div class="cta-band reveal">
         <div>
           <h2>Ready to fix your scheduling?</h2>
-          <p>Join 10,000+ doctors and 500+ hospitals already on ${BRAND.name}.</p>
+          <p>We're expecting over 10,000 doctors and 500+ hospitals on ${BRAND.name}. Explore with mock sample data, or create a real account.</p>
         </div>
         <div class="cta-actions">
-          <button type="button" class="btn-solid lg" data-demo-role="Hospital">Start free trial</button>
-          <button type="button" class="btn-outline lg" data-demo-role="Doctor">Request a demo</button>
+          <button type="button" class="btn-solid lg" data-demo-role="Hospital">Explore hospital demo</button>
+          <button type="button" class="btn-outline lg" data-demo-role="Doctor">Explore doctor demo</button>
         </div>
       </div>
     </section>`;
@@ -217,7 +216,7 @@ function footer() {
       <div class="footer-bottom">
         <div class="footer-legal">
           <span>© ${new Date().getFullYear()} ${BRAND.name}. All rights reserved.</span>
-          <span class="footer-disclaimer">All figures and accounts shown here are made-up mock data for demonstration purposes only.</span>
+          <span class="footer-disclaimer">Growth targets are expectations, not live counts. Demo walks use mock sample data. Real accounts sync to your hospital when you sign up.</span>
         </div>
         <button type="button" class="btn-quiet" data-goto-auth>Log in</button>
       </div>

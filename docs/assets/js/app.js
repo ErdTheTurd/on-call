@@ -417,7 +417,7 @@ function render() {
 function demoRibbon() {
   if (!isDemoSession()) return "";
   return `<div class="demo-ribbon">
-    <span>Demo — sample data</span>
+    <span>Demo — mock sample data (not live hospital volume)</span>
     <button type="button" data-exit-demo>Exit</button>
   </div>`;
 }

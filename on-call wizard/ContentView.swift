@@ -227,6 +227,9 @@ struct DoctorRootView: View {
             CredentialsView(profile: profile)
                 .tabItem { Label("Credentials", systemImage: "checkmark.seal.fill") }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            MockSampleDataBanner()
+        }
         .sheet(isPresented: $showDashboard) {
             DoctorDashboardView(profile: profile, onSignOut: onSignOut)
         }
@@ -1510,6 +1513,9 @@ struct HospitalRootView: View {
                 .environmentObject(rosterStore)
                 .tabItem { Label("Doctors", systemImage: "person.3.fill") }
                 .tag(2)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            MockSampleDataBanner()
         }
         .onAppear {
             if let profile {
