@@ -213,7 +213,7 @@ export function renderAuthView(state, handlers) {
           <button type="button" class="btn-secondary" data-demo="Hospital">
             ${icon("hospital")} Explore as a hospital
           </button>
-          <p class="demo-note">Sample data, no account needed.</p>
+          <p class="demo-note">Opens mock sample data — not a live hospital account.</p>
         </div>
       </div>
       <p class="auth-footer">By continuing you agree to our Terms of Service and Privacy Policy.</p>

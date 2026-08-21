@@ -2344,6 +2344,15 @@ a.ad-banner:hover {
 .stat { text-align: center; }
 .stat + .stat { border-left: 1px solid var(--line); }
 
+.stat-lead {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--body-dim);
+}
+
 .stat-value {
   font-size: clamp(32px, 4vw, 44px);
   font-weight: 700;
@@ -2351,7 +2360,8 @@ a.ad-banner:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.stat-value .plus { color: var(--blue-bright); }
+.stat-value .plus,
+.stat-emphasis { color: var(--blue-bright); }
 .stat-label { margin-top: 5px; font-size: 13.5px; color: var(--body); }
 
 /* Sections */
