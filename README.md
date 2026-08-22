@@ -12,18 +12,17 @@ iOS app for on-call scheduling with a Supabase backend (Postgres, Auth, Edge Fun
 
 ## Quick start
 
-### 1. Configure secrets
+### 1. Configure secrets (optional)
+
+`Config/Shared.xcconfig` is committed with the live Supabase anon URL/key, so Archive works after a fresh clone with no extra files.
+
+For local overrides only:
 
 ```bash
 cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig
 ```
 
-Edit `Config/Secrets.xcconfig`:
-
-- **Local Supabase** (after step 2): use `http:/$()/127.0.0.1:54321` and the default local anon key (see example in `Secrets.xcconfig`).
-- **Remote Supabase**: paste your project URL and anon key from the [Supabase dashboard](https://supabase.com/dashboard).
-
-`Secrets.xcconfig` is gitignored and wired into the Xcode project via `INFOPLIST_KEY_*` entries.
+Edit `Config/Secrets.xcconfig` if you need local Supabase (`http:/$()/127.0.0.1:54321`) or private API keys. `Secrets.xcconfig` is gitignored and optionally included by `Shared.xcconfig`.
 
 ### 2. Start the backend (optional)
 
@@ -82,7 +81,7 @@ Open `docs/index.html` locally or deploy via GitHub Pages.
    ./scripts/bin/supabase functions deploy
    ```
 4. Paste the **same** Project URL + anon key into:
-   - `Config/Secrets.xcconfig` (iOS — copy from `Secrets.example.xcconfig`)
+   - `Config/Shared.xcconfig` (iOS defaults) and optionally `Config/Secrets.xcconfig` for local overrides
    - `docs/assets/js/config.js` (website — copy from `config.example.js`)
 5. Auth → URL Configuration:
    - Site URL: `https://erdtheturd.github.io/on-call`
@@ -115,8 +114,9 @@ supabase/
   migrations/            Database schema
   functions/             Edge functions (accept-shift, cancel-shift, trades, notifications)
 Config/
+  Shared.xcconfig        Committed Supabase / site defaults
   Secrets.example.xcconfig
-  Secrets.xcconfig       Local secrets (gitignored)
+  Secrets.xcconfig       Optional local overrides (gitignored)
   OnCallWizard.entitlements
 scripts/bin/supabase     Bundled Supabase CLI (macOS arm64)
 ```
@@ -134,4 +134,4 @@ Deploy to a linked remote project:
 
 - **Simulator not found**: list devices with `xcrun simctl list devices available` and pick one from the output (e.g. `iPhone 17`).
 - **`supabase start` fails**: install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and ensure it is running.
-- **Supabase not configured in app**: confirm `Config/Secrets.xcconfig` exists and rebuild; check `SupabaseConfig.isConfigured` reads non-empty `SUPABASE_URL` / `SUPABASE_ANON_KEY` in the built Info.plist.
+- **Supabase not configured in app**: confirm `Config/Shared.xcconfig` has non-empty `SUPABASE_URL` / `SUPABASE_ANON_KEY`, rebuild, and check those keys in the built Info.plist. Optional overrides live in gitignored `Config/Secrets.xcconfig`.

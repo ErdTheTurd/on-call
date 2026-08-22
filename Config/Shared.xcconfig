@@ -1,0 +1,14 @@
+// Committed defaults so Archive works after a fresh clone.
+// xcconfig treats // as comments — URLs MUST use https:/$()/host (NOT https://host).
+SUPABASE_URL = https:/$()/yrnndfpvovuvjlzgivgu.supabase.co
+SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlybm5kZnB2b3Z1dmpsemdpdmd1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MzAzMDMsImV4cCI6MjEwMTIwNjMwM30.ld7CblP1CDs_LKEmS_yfCjsi1FASsFQ2iiNAWqymrbI
+WEBSITE_BASE_URL = https:/$()/mdshift.net
+RESEND_API_KEY =
+RESEND_FROM_EMAIL = noreply@mdshift.net
+SENDGRID_API_KEY =
+STRIPE_PUBLISHABLE_KEY =
+STRIPE_PLUS_PAYMENT_LINK =
+
+// Do NOT #include Secrets.xcconfig here. A downloaded Secrets file that uses
+// raw https://… silently truncates URLs (// starts a comment) and breaks Archive.
+// For local overrides, edit this file or point the Xcode config at Secrets.xcconfig.
