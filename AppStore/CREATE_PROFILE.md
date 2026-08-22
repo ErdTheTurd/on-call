@@ -19,7 +19,7 @@ Archive fails with Automatic signing when the team has **no registered devices**
 5. Profile name (must match exactly):
 
    ```
-   MD Shift Demo App Store
+   Md Shift Demo
    ```
 
 6. Generate → **Download** → double-click the `.mobileprovision` file (installs into Xcode).
