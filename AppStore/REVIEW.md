@@ -1,4 +1,4 @@
-# MD Shift — App Store review kit
+# MD Shift Demo — App Store review kit
 
 Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/` (`*-1284x2778.png`).
 
@@ -6,7 +6,7 @@ Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/
 
 | Field | Value |
 | --- | --- |
-| Name | MD Shift |
+| Name | MD Shift Demo |
 | Bundle ID | `com.eporthospine.mdshift` |
 | SKU | `mdshift-ios` (or your ASC SKU) |
 | Primary category | Medical |
@@ -38,7 +38,7 @@ Fill open call faster. Doctors claim shifts at locked rates; hospitals set Smart
 ## Description
 
 ```
-MD Shift helps hospitals fill on-call coverage and helps doctors find shifts without the usual email chaos.
+MD Shift Demo helps hospitals fill on-call coverage and helps doctors find shifts without the usual email chaos.
 
 Hospitals
 • See fill rate, open nights, and pending approvals in one place
@@ -51,7 +51,7 @@ Doctors
 • Manage assigned call, trades, and availability
 • Keep credentials and NPI verification in one profile
 
-Explore mode includes sample data so you can walk the product before creating a live roster. MD Shift is a scheduling tool — not emergency dispatch. Use your hospital’s normal channels for clinical emergencies.
+Explore mode includes sample data so you can walk the product before creating a live roster. MD Shift Demo is a scheduling tool — not emergency dispatch. Use your hospital’s normal channels for clinical emergencies.
 
 Support: https://mdshift.net/support/
 Privacy: https://mdshift.net/privacypolicy/
@@ -66,13 +66,13 @@ on-call,hospital,physician,shift,coverage,scheduling,locum,NPI,medical staffing,
 ## What’s New (1.0)
 
 ```
-First release of MD Shift — hospital on-call coverage, doctor shift claims, trades, and verification.
+First release of MD Shift Demo — hospital on-call coverage, doctor shift claims, trades, and verification.
 ```
 
 ## App Review Information — Notes (paste as-is)
 
 ```
-MD Shift schedules hospital on-call coverage for doctors and hospitals.
+MD Shift Demo schedules hospital on-call coverage for doctors and hospitals.
 
 HOW TO REVIEW (recommended)
 1. On the sign-in screen, tap “Explore as doctor” or “Explore as hospital”.

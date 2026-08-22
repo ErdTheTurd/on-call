@@ -46,7 +46,7 @@ struct AppStoreShowcaseView: View {
                     .tabViewStyle(.page(indexDisplayMode: .never))
                 }
             }
-            .navigationTitle("MD Shift")
+            .navigationTitle(Brand.appName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
