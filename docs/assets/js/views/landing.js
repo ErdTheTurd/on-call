@@ -1,17 +1,14 @@
-import { bindReveals, bindCounters, bindStickyHeader, bindDotField } from "../lib/motion.js";
+import { bindReveals, bindCounters, bindStickyHeader } from "../lib/motion.js";
 import { BRAND, brandLockup } from "../brand.js";
 
 /**
  * Public marketing page. No product state is read here.
- * Growth figures are framed as expectations (not live counts). Demo CTAs open
- * mock sample data so the product is walkable before real accounts exist.
+ * Stat figures animate for presence; they are illustrative targets, not live counts.
+ * Demo CTAs open mock sample data so the product is walkable before real accounts exist.
  */
 export function renderLanding() {
   return `
     <div class="site" id="top">
-      <div class="site-dotfield" aria-hidden="true">
-        <canvas class="site-dotfield-canvas"></canvas>
-      </div>
       ${header()}
       ${hero()}
       ${statBand()}
@@ -74,11 +71,11 @@ function arrow() {
 }
 
 function statBand() {
-  // Expectational targets — never imply these are live production counts.
+  // Animated roll-in for presence. Figures are illustrative targets — not live counts.
   const stats = [
-    { lead: "Expecting", value: "over 10k", label: "doctors on the platform" },
-    { lead: "Expecting", value: "500+", label: "hospitals onboarded" },
-    { lead: "Built for", value: "scale", label: "high-volume shift trading" }
+    { to: 10, suffix: "k", label: "Doctors (target)" },
+    { to: 500, label: "Hospitals (target)" },
+    { to: 2, decimals: 1, suffix: "M", label: "Shifts traded (target)" }
   ];
 
   return `
@@ -86,8 +83,11 @@ function statBand() {
       <div class="stat-band-inner">
         ${stats.map((s) => `
           <div class="stat reveal">
-            <div class="stat-lead">${s.lead}</div>
-            <div class="stat-value"><span class="stat-emphasis">${s.value}</span></div>
+            <div class="stat-value">
+              <span data-count-to="${s.to}"
+                    ${s.decimals ? `data-count-decimals="${s.decimals}"` : ""}
+                    ${s.suffix ? `data-count-suffix="${s.suffix}"` : ""}>0</span><span class="plus">+</span>
+            </div>
             <div class="stat-label">${s.label}</div>
           </div>`).join("")}
       </div>
@@ -243,7 +243,6 @@ export function bindLanding(root, { onSignIn, onDemo }) {
   bindReveals(root);
   bindCounters(root);
   bindStickyHeader(root);
-  bindDotField(root);
   bindHeroShiftItalic(root);
 }
 

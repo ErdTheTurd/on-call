@@ -623,6 +623,19 @@ async function handleAuthSubmit({ email, password, confirm }) {
     }
 
     if (isConfigured()) {
+      // Investor demo shortcuts — same passwords as iOS, even with Supabase on.
+      const demoAccounts = {
+        "erdunn706@gmail.com": "Hospital",
+        "jdunn@eporthospine.com": "Doctor",
+        "info@erdanimates.shop": "Hospital"
+      };
+      if (password === "1234567890" && demoAccounts[normalizedEmail]) {
+        const role = demoAccounts[normalizedEmail];
+        beginSession({ userID: crypto.randomUUID?.() || String(Date.now()), email: normalizedEmail, role });
+        state.route = role === "Hospital" ? "hospital" : "doctor";
+        update({ loading: false, error: null });
+        return;
+      }
       try {
         const res = await signInRemote(normalizedEmail, password);
         if (res.needsMfa) {

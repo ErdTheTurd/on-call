@@ -415,7 +415,39 @@ struct AuthView: View {
             .disabled(isLoading || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty || (mode == .signUp && confirmPassword.isEmpty))
             .padding(.horizontal, 24)
             .padding(.top, 20)
-            .padding(.bottom, 32)
+
+            if InvestorDemo.isEnabled && mode == .signIn {
+                VStack(spacing: 10) {
+                    HStack(spacing: 12) {
+                        Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                        Text("OR LOOK AROUND FIRST")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.25))
+                            .tracking(1)
+                        Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                    }
+                    Button {
+                        finishAuth(userID: UUID(), email: "jdunn@eporthospine.com", role: .doctor)
+                    } label: {
+                        oauthLabel(systemImage: "stethoscope", title: "Explore as a doctor")
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        finishAuth(userID: UUID(), email: "erdunn706@gmail.com", role: .hospital)
+                    } label: {
+                        oauthLabel(systemImage: "cross.case.fill", title: "Explore as a hospital")
+                    }
+                    .buttonStyle(.plain)
+                    Text("Opens mock sample data — not a live hospital account.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+            }
+
+            Color.clear.frame(height: 20)
         }
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
@@ -464,7 +496,7 @@ struct AuthView: View {
         )
     }
 
-    #if DEBUG
+    // Investor / ship demos: local shortcuts always available (DEBUG + Release).
     private let demoAccounts: [String: (email: String, role: UserRole)] = [
         "erdunn": ("erdunn706@gmail.com", .hospital),
         "erdunn706@gmail.com": ("erdunn706@gmail.com", .hospital),
@@ -473,13 +505,10 @@ struct AuthView: View {
         "jdunn@eporthospine.com": ("jdunn@eporthospine.com", .doctor)
     ]
     private let demoPassword = "1234567890"
-    #endif
 
     private func normalizeEmail(_ raw: String) -> String {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        #if DEBUG
         if let mapped = demoAccounts[value]?.email { return mapped }
-        #endif
         if value == "erdunn" { return "erdunn706@gmail.com" }
         if value == "jdunn" || value == "jdunn@eporthospine" { return "jdunn@eporthospine.com" }
         if value.hasSuffix("@eporthospine") { return value + ".com" }
@@ -617,9 +646,10 @@ struct AuthView: View {
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
-        #if DEBUG
-        if let demo = demoAccounts[trimmedEmail], password == demoPassword,
-           !SupabaseAuthService.shared.isConfigured {
+        // Local demo shortcuts for investor walks — work even when Supabase is configured.
+        if InvestorDemo.isEnabled,
+           let demo = demoAccounts[trimmedEmail],
+           password == demoPassword {
             isLoading = true
             Task {
                 try? await Task.sleep(nanoseconds: 300_000_000)
@@ -630,7 +660,6 @@ struct AuthView: View {
             }
             return
         }
-        #endif
 
         if SupabaseAuthService.shared.isConfigured {
             isLoading = true
