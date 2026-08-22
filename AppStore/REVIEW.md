@@ -145,29 +145,33 @@ Regenerate:
 python3 scripts/generate-app-store-screenshots.py --also-1242
 ```
 
-## Build & upload (Xcode)
+## Build & upload (no physical iPhone required)
 
-Archive failed from CLI until at least one iPhone is registered to team **8LVD2L956K** (Apple: “no devices… provisioning profile”).
+You do **not** need a phone to submit. Release builds use **Manual** signing with the **MD Shift App Store** profile (App Store profiles are not device-bound). Automatic Debug signing still needs a device UDID if you want to run on hardware.
 
-**Fix once (pick one):**
+### One-time profile setup
 
-1. Plug in an iPhone → unlock → Trust → in Xcode select the phone as run destination → Run once (registers the device), **or**
-2. [developer.apple.com](https://developer.apple.com/account/resources/devices/list) → add a device UDID, then create an **App Store** distribution profile for `com.eporthospine.mdshift`.
+Follow **[CREATE_PROFILE.md](CREATE_PROFILE.md)** — create/install an App Store provisioning profile named exactly `MD Shift App Store`.
 
-Then:
+Also ensure an **Apple Distribution** cert exists: Xcode → Settings → Accounts → team **8LVD2L956K** → Manage Certificates → **+** → Apple Distribution.
+
+### Archive & upload
 
 1. Open `on-call wizard.xcodeproj`
-2. Target **on-call wizard** → Signing & Capabilities → Team selected, Automatic on
-3. Scheme **on-call wizard** → destination **Any iOS Device (arm64)**
-4. Product → **Archive**
-5. Organizer → **Distribute App** → App Store Connect → Upload
-6. App Store Connect → select build → paste listing from this file → Submit for Review
-
-CLI after a device is registered:
+2. Destination: **Any iOS Device (arm64)** (not a Simulator)
+3. **Product → Archive**
+4. Organizer → **Distribute App** → App Store Connect → Upload  
+   (or export with `AppStore/ExportOptions.plist`)
+5. App Store Connect → select build → paste listing from this file → Submit for Review
 
 ```bash
 xcodebuild -scheme "on-call wizard" -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath build/MDShift.xcarchive \
-  -allowProvisioningUpdates archive
+  archive
+
+xcodebuild -exportArchive \
+  -archivePath build/MDShift.xcarchive \
+  -exportPath build/export \
+  -exportOptionsPlist AppStore/ExportOptions.plist
 ```
