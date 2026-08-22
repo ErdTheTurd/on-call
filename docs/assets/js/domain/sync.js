@@ -172,6 +172,47 @@ export async function fetchAllShifts(hospitalID) {
   return (data || []).map(mapShiftRow);
 }
 
+/** A shift's natural identity: one hospital, one specialty, one calendar day. */
+function slotKey(shift) {
+  const day = new Date(shift.start);
+  return [
+    shift.hospitalID,
+    shift.specialty,
+    day.getFullYear(), day.getMonth(), day.getDate()
+  ].join("|");
+}
+
+/** How far ahead a hospital's board is published. Matches what doctors can browse. */
+const PUBLISH_HORIZON_DAYS = 60;
+/** Cap per sync pass so boot/sign-in never stalls for minutes. */
+const PUBLISH_BATCH = 25;
+const PUBLISH_CONCURRENCY = 5;
+
+/**
+ * A hospital's board lives on whichever device created it. Until it is pushed,
+ * no doctor on any other device can see a single open day — so publish the
+ * near-term board on every sync, skipping days the server already has.
+ */
+async function publishHospitalBoard(hospitalId, localShifts, remoteShifts) {
+  const now = Date.now();
+  const horizon = now + PUBLISH_HORIZON_DAYS * 86400000;
+  const known = new Set(remoteShifts.map(slotKey));
+
+  const pending = localShifts.filter((s) => {
+    if (s.hospitalID !== hospitalId) return false;
+    const at = new Date(s.start).getTime();
+    if (!(at >= now - 86400000 && at <= horizon)) return false;
+    return !known.has(slotKey(s));
+  });
+  if (!pending.length) return;
+
+  const batch = pending.slice(0, PUBLISH_BATCH);
+  for (let i = 0; i < batch.length; i += PUBLISH_CONCURRENCY) {
+    const chunk = batch.slice(i, i + PUBLISH_CONCURRENCY);
+    await Promise.all(chunk.map((shift) => upsertShift(shift).catch(() => null)));
+  }
+}
+
 export async function upsertShift(shift) {
   if (!isConfigured()) return shift;
   const supabase = getSupabase();
@@ -195,11 +236,18 @@ export async function upsertShift(shift) {
   return shift;
 }
 
-export async function fetchAssignments(doctorID) {
+/**
+ * @param doctorID  set for a doctor session
+ * @param hospitalID set for a hospital session, which needs every doctor's
+ *   assignment to know what is covered — but only at its own hospital.
+ */
+export async function fetchAssignments(doctorID, hospitalID = null) {
   if (!isConfigured()) return [];
   const supabase = getSupabase();
-  let q = supabase.from("assignments").select("*, shifts(*)").order("assigned_at", { ascending: false });
+  const embed = hospitalID ? "*, shifts!inner(*)" : "*, shifts(*)";
+  let q = supabase.from("assignments").select(embed).order("assigned_at", { ascending: false });
   if (doctorID) q = q.eq("doctor_id", doctorID);
+  if (hospitalID) q = q.eq("shifts.hospital_id", hospitalID);
   const { data, error } = await q.limit(200);
   if (error) throw error;
   return (data || []).map((row) => mapAssignmentRow(row, row.shifts ? mapShiftRow(row.shifts) : null));
@@ -332,6 +380,17 @@ export async function upsertRosterLink(hospitalId, doctorId, autoApprove) {
   if (error) throw error;
 }
 
+/** Adds a doctor to a hospital's roster without disturbing an existing auto-approve flag. */
+export async function linkDoctorToHospital(hospitalId, doctorId) {
+  if (!isConfigured() || !hospitalId || !doctorId) return;
+  const supabase = getSupabase();
+  const { error } = await supabase.from("hospital_doctors").upsert(
+    { hospital_id: hospitalId, doctor_id: doctorId, auto_approve: false },
+    { onConflict: "hospital_id,doctor_id", ignoreDuplicates: true }
+  );
+  if (error) throw error;
+}
+
 export async function fetchPolicy(hospitalId) {
   if (!isConfigured()) return defaultPolicy();
   const supabase = getSupabase();
@@ -391,6 +450,10 @@ export async function requestTrade(shiftId, fromDoctorId, toDoctorId, extras = {
     from_doctor_id: fromDoctorId,
     to_doctor_id: toDoctorId
   };
+  // The client owns the id so it can respond to its own trade later.
+  if (extras.id) body.id = extras.id;
+  if (extras.fromDoctorName) body.from_doctor_name = extras.fromDoctorName;
+  if (extras.toDoctorName) body.to_doctor_name = extras.toDoctorName;
   if (extras.requestedShiftId) body.requested_shift_id = extras.requestedShiftId;
   if (extras.compensationAmount != null) body.compensation_amount = extras.compensationAmount;
   if (extras.offeredDate) body.offered_date = extras.offeredDate;
@@ -400,6 +463,36 @@ export async function requestTrade(shiftId, fromDoctorId, toDoctorId, extras = {
   const { data, error } = await supabase.functions.invoke("request-trade", { body });
   if (error) throw error;
   return data;
+}
+
+/** Trades in either direction for this doctor, so a partner's request shows up here. */
+export async function fetchTrades(doctorId) {
+  if (!isConfigured() || !doctorId) return null;
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("trade_requests")
+    .select("*")
+    .or(`from_doctor_id.eq.${doctorId},to_doctor_id.eq.${doctorId}`)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+
+  return (data || []).map((row) => ({
+    id: row.id,
+    shiftID: row.shift_id,
+    fromDoctorID: row.from_doctor_id,
+    toDoctorID: row.to_doctor_id,
+    fromDoctorName: row.from_doctor_name || null,
+    toDoctorName: row.to_doctor_name || null,
+    requestedShiftID: row.requested_shift_id || null,
+    offeredDate: row.offered_date || null,
+    requestedDate: row.requested_date || null,
+    specialty: row.specialty || null,
+    compensationAmount: Number(row.compensation_amount) || 0,
+    counterOfTradeId: row.counter_of_trade_id || null,
+    state: row.state,
+    createdAt: row.created_at
+  }));
 }
 
 export async function respondTrade(tradeId, accept) {
@@ -434,18 +527,20 @@ export async function syncEverything(hooks) {
   const hospitalId = hospital?.id;
 
   try {
-    const [shifts, assignments, tokens, roster, policy, unavailable] = await Promise.all([
+    const [shifts, assignments, tokens, roster, policy, unavailable, trades] = await Promise.all([
       fetchAllShifts(hospitalId),
-      fetchAssignments(doctor?.id),
+      fetchAssignments(hospitalId ? null : doctor?.id, hospitalId || null),
       fetchTokenRequests(hospitalId, doctor?.id),
       hospitalId ? fetchRoster(hospitalId) : Promise.resolve(null),
       hospitalId ? fetchPolicy(hospitalId) : Promise.resolve(null),
-      hospitalId ? fetchUnavailable(hospitalId) : Promise.resolve(null)
+      hospitalId ? fetchUnavailable(hospitalId) : Promise.resolve(null),
+      doctor?.id ? fetchTrades(doctor.id) : Promise.resolve(null)
     ]);
 
+    const localShifts = hooks.readLocal("shifts") || [];
+
     if (shifts.length) {
-      const local = hooks.readLocal("shifts") || [];
-      const byId = new Map(local.map((s) => [s.id, s]));
+      const byId = new Map(localShifts.map((s) => [s.id, s]));
       const remoteMerged = shifts.map((remote) => {
         const prev = byId.get(remote.id);
         if (!prev) {
@@ -461,11 +556,18 @@ export async function syncEverything(hooks) {
           usesAlgorithmPricing: remote.usesAlgorithmPricing == null ? true : remote.usesAlgorithmPricing
         };
       });
+      // Two devices posting the same day generate different shift ids. Let the
+      // remote row win on its slot so the board does not show the day twice.
+      const remoteSlots = new Set(shifts.map(slotKey));
       const merged = [
-        ...local.filter((s) => !shifts.some((r) => r.id === s.id)),
+        ...localShifts.filter((s) => !shifts.some((r) => r.id === s.id) && !remoteSlots.has(slotKey(s))),
         ...remoteMerged
       ];
       hooks.writeLocal("shifts", merged);
+    }
+
+    if (hospitalId) {
+      await publishHospitalBoard(hospitalId, localShifts, shifts);
     }
 
     if (assignments.length) {
@@ -483,7 +585,22 @@ export async function syncEverything(hooks) {
     }
 
     if (roster) {
-      hooks.writeLocal("roster", roster);
+      // Merge rather than replace: locally known doctors (and demo seeds) stay
+      // until the hospital's remote roster actually contains them.
+      const local = hooks.readLocal("roster") || [];
+      const byId = new Map(local.map((d) => [d.id, d]));
+      for (const remote of roster) byId.set(remote.id, { ...byId.get(remote.id), ...remote });
+      hooks.writeLocal("roster", [...byId.values()]);
+    }
+
+    if (trades) {
+      // Split by direction here so a partner's request lands in this doctor's inbox.
+      const mine = doctor.id;
+      const live = trades.filter((t) => t.state === "pending");
+      hooks.writeLocal("trades", {
+        incoming: live.filter((t) => t.toDoctorID === mine),
+        outgoing: live.filter((t) => t.fromDoctorID === mine)
+      });
     }
 
     if (policy && hospitalId) {

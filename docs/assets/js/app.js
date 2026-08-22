@@ -3,13 +3,14 @@ import {
   authState, beginSession, registerAccount, signInLocal,
   signInRemote, signUpRemote, resendSignupEmail, verifySignupOtp,
   signInWithOAuth, completeOAuthSession, completeMfaSession, signOut, appStore, syncEverything, startPeriodicSync,
-  normalizeEmail
+  normalizeEmail, syncStatus
 } from "./store.js";
 import { enrollTotp, verifyTotp, challengeAndVerifyFirstTotp } from "./domain/mfa.js";
 import { hydrateLocalProfiles } from "./domain/sync.js";
 import { renderAuthView, bindAuth } from "./views/auth.js";
 import { renderAdminApp, bindAdmin } from "./views/admin.js";
 import { isAdminUser, fetchApplications, setApplicationStatus } from "./domain/approvals.js";
+import { fetchSavingsEvents, groupSavingsByHospital } from "./domain/savings.js";
 import { startDemo, isDemoSession, clearDemoFlag } from "./domain/demo.js";
 import { renderLanding, bindLanding } from "./views/landing.js";
 import {
@@ -19,6 +20,7 @@ import {
 import { renderDoctorApp, bindDoctor } from "./views/doctor.js";
 import { renderHospitalApp, bindHospital } from "./views/hospital.js";
 import { lookupNPI, verifyDoctorCredentials, validateInstitutionalEmail } from "./domain/verification.js";
+import { refreshPlusMembership, setPlusMembership } from "./domain/plus.js";
 
 const state = {
   route: "boot",
@@ -42,8 +44,9 @@ const state = {
 function emptyAdminState() {
   return {
     loading: true, error: null, items: [], email: "",
-    filter: "review", kind: "all", search: "",
-    busyKey: null, confirmKey: null, toast: null, menuOpen: false
+    section: "approvals", filter: "review", kind: "all", search: "",
+    busyKey: null, confirmKey: null, toast: null, menuOpen: false,
+    savings: { loading: false, error: null, rows: [], loadedAt: null }
   };
 }
 
@@ -125,6 +128,33 @@ async function loadApplications() {
   }
 }
 
+async function loadHospitalSavings() {
+  update({ admin: { savings: { ...state.admin.savings, loading: true, error: null } } });
+  try {
+    const events = await fetchSavingsEvents();
+    update({
+      admin: {
+        savings: {
+          loading: false,
+          error: null,
+          rows: groupSavingsByHospital(events),
+          loadedAt: new Date().toISOString()
+        }
+      }
+    });
+  } catch (err) {
+    update({
+      admin: {
+        savings: {
+          ...state.admin.savings,
+          loading: false,
+          error: err.message || "Could not reach Supabase."
+        }
+      }
+    });
+  }
+}
+
 function decisionLabel(status) {
   return {
     verified: "approved",
@@ -154,6 +184,22 @@ async function decideApplication(key, status) {
 }
 
 async function boot() {
+  const bootParams = new URLSearchParams(location.search);
+  const plusParam = bootParams.get("plus");
+  if (plusParam === "success") {
+    try {
+      const membership = await refreshPlusMembership();
+      // Optimistic if webhook is still catching up
+      if (!membership.active) setPlusMembership({ active: true, until: null });
+    } catch { /* ignore */ }
+    history.replaceState({}, "", location.pathname);
+  } else if (plusParam === "cancel") {
+    history.replaceState({}, "", location.pathname);
+  }
+  if (bootParams.get("open") === "plus") {
+    state.sheet = "plus";
+  }
+
   // A demo runs entirely on local sample data — never sync it to the real project.
   if (isConfigured() && !isDemoSession()) {
     let sessionUser = null;
@@ -221,8 +267,6 @@ async function boot() {
 
     // Admins never reach a doctor or hospital workspace, so skip the shift sync.
     if (await enterAdminIfPermitted(sessionUser?.id, sessionUser?.email)) return;
-
-    await syncEverything();
   }
 
   const auth = authState();
@@ -236,6 +280,10 @@ async function boot() {
   }
   render();
   appStore.subscribe(() => render());
+  // Never block first paint on sync — publishing a local board can take minutes.
+  if (isConfigured() && !isDemoSession() && appStore.session) {
+    syncEverything().catch(() => {}).finally(() => update({}));
+  }
   startPeriodicSync(20000);
 }
 
@@ -321,6 +369,11 @@ function render() {
       },
       onDecide: decideApplication,
       onRefresh: loadApplications,
+      onSection: (section) => {
+        update({ admin: { section, confirmKey: null, toast: null } });
+        if (section === "savings" && !state.admin.savings.loadedAt) loadHospitalSavings();
+      },
+      onSavingsRefresh: loadHospitalSavings,
       onSignOut: () => {
         signOut();
         state.route = "auth";
@@ -341,7 +394,7 @@ function render() {
 
   if (state.route === "doctor") {
     if (!DOCTOR_TABS.includes(state.ui.tab)) state.ui.tab = "home";
-    root.innerHTML = demoRibbon() + renderDoctorApp(state.ui);
+    root.innerHTML = demoRibbon() + syncBanner() + renderDoctorApp(state.ui);
     bindDemoRibbon(root);
     bindDoctor(root, state.ui, (p) => {
       if (p.route) state.route = p.route;
@@ -352,7 +405,7 @@ function render() {
 
   if (state.route === "hospital") {
     if (!HOSPITAL_TABS.includes(state.ui.tab)) state.ui.tab = "dashboard";
-    root.innerHTML = demoRibbon() + renderHospitalApp(state.ui);
+    root.innerHTML = demoRibbon() + syncBanner() + renderHospitalApp(state.ui);
     bindDemoRibbon(root);
     bindHospital(root, state.ui, (p) => {
       if (p.route) state.route = p.route;
@@ -364,8 +417,17 @@ function render() {
 function demoRibbon() {
   if (!isDemoSession()) return "";
   return `<div class="demo-ribbon">
-    <span>Demo — sample data</span>
+    <span>Demo — mock sample data (not live hospital volume)</span>
     <button type="button" data-exit-demo>Exit</button>
+  </div>`;
+}
+
+/** A silent sync failure means two devices quietly disagree — say so. */
+function syncBanner() {
+  if (isDemoSession() || syncStatus.state !== "error") return "";
+  return `<div class="sync-banner" role="status">
+    <span>Changes are saved on this device only — we can't reach the server.</span>
+    <button type="button" data-sync-retry>Retry</button>
   </div>`;
 }
 
@@ -374,6 +436,9 @@ function bindDemoRibbon(root) {
     signOut();
     window.scrollTo(0, 0);
     update({ route: "landing" });
+  });
+  root.querySelector("[data-sync-retry]")?.addEventListener("click", () => {
+    syncEverything().catch(() => {}).finally(() => update({}));
   });
 }
 
@@ -518,12 +583,28 @@ async function handleAuthSubmit({ email, password, confirm }) {
         const res = await signUpRemote(normalizedEmail, password, state.role);
         if (res.needsEmailVerification) {
           update({
-            loading: false,
+            loading: true,
             verifyEmail: normalizedEmail,
             verifyNotice: null,
             otpCode: "",
             error: null
           });
+          try {
+            // signUp usually sends once; this makes the UI honest if SMTP is flaky.
+            await resendSignupEmail(normalizedEmail);
+            update({
+              loading: false,
+              verifyEmail: normalizedEmail,
+              verifyNotice: "Code sent. Check your inbox (and spam)."
+            });
+          } catch {
+            update({
+              loading: false,
+              verifyEmail: normalizedEmail,
+              verifyNotice: null,
+              error: "Account created, but email delivery failed. Tap Resend code."
+            });
+          }
           return;
         }
         beginSession({ userID: res.userID, email: res.email, role: state.role });
@@ -559,13 +640,29 @@ async function handleAuthSubmit({ email, password, confirm }) {
         return;
       } catch (err) {
         const message = err?.message || "Could not sign in.";
-        if (err?.code === "email_not_confirmed" || /email not confirmed|6-digit code/i.test(message)) {
+        if (err?.code === "email_not_confirmed" || /email not confirmed/i.test(message)) {
           update({
             error: null,
-            loading: false,
+            loading: true,
             verifyEmail: normalizedEmail,
-            otpCode: ""
+            otpCode: "",
+            verifyNotice: null
           });
+          try {
+            await resendSignupEmail(normalizedEmail);
+            update({
+              loading: false,
+              verifyEmail: normalizedEmail,
+              verifyNotice: "Code sent. Check your inbox (and spam)."
+            });
+          } catch (sendErr) {
+            update({
+              loading: false,
+              verifyEmail: normalizedEmail,
+              error: sendErr?.message || "Could not send a code. Tap Resend, or check Supabase email settings.",
+              verifyNotice: null
+            });
+          }
           return;
         }
         const friendly = /invalid login credentials/i.test(message)

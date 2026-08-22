@@ -17,6 +17,11 @@ const KINDS = [
   { id: "hospital", label: "Hospitals" }
 ];
 
+const SECTIONS = [
+  { id: "approvals", label: "Approvals" },
+  { id: "savings", label: "Hospital savings" }
+];
+
 function matchesFilter(app, filter) {
   if (filter === "review") return NEEDS_REVIEW.has(app.status);
   return app.status === filter;
@@ -100,7 +105,82 @@ function applicationCard(app, admin) {
     </section>`;
 }
 
+function currency(value) {
+  return `$${Math.round(Number(value) || 0).toLocaleString("en-US")}`;
+}
+
+/**
+ * Savings roll-up across every hospital. Rows come straight from
+ * `hospital_savings_events`, so what an admin sees here is exactly what the
+ * hospital sees on its own dashboard.
+ */
+function renderSavingsSection(admin) {
+  const savings = admin.savings || {};
+  if (savings.loading) {
+    return `<div class="approval-loading"><span class="spinner"></span><p class="subtitle">Loading savings…</p></div>`;
+  }
+  if (savings.error) {
+    return `
+      <section class="card">
+        <div style="font-weight:600;margin-bottom:6px">Couldn't load savings</div>
+        <p class="subtitle">${escapeHtml(savings.error)}</p>
+        <button type="button" class="btn-secondary" style="margin-top:12px" data-savings-retry>Try again</button>
+      </section>`;
+  }
+
+  const rows = savings.rows || [];
+  if (!rows.length) {
+    return emptyState(
+      "No savings tracked yet",
+      "Hospitals appear here once doctors fill shifts early or late cancellations are recovered.",
+      "check"
+    );
+  }
+
+  const totals = rows.reduce((acc, r) => ({
+    total: acc.total + r.total,
+    penalties: acc.penalties + r.penalties,
+    rateSavings: acc.rateSavings + r.rateSavings,
+    events: acc.events + r.events
+  }), { total: 0, penalties: 0, rateSavings: 0, events: 0 });
+
+  return `
+    <section class="card analytics-grid">
+      <div class="analytics-cell">
+        <div class="label">Total saved</div>
+        <div class="value accent large">${currency(totals.total)}</div>
+      </div>
+      <div class="analytics-cell">
+        <div class="label">Hospitals saving</div>
+        <div class="value large">${rows.length}</div>
+      </div>
+      <div class="analytics-cell">
+        <div class="label">Escalation avoided</div>
+        <div class="value accent">${currency(totals.rateSavings)}</div>
+      </div>
+      <div class="analytics-cell">
+        <div class="label">Penalties recovered</div>
+        <div class="value">${currency(totals.penalties)}</div>
+      </div>
+    </section>
+    ${rows.map((r) => `
+      <section class="card savings-row">
+        <div style="min-width:0;flex:1">
+          <div style="font-weight:600">${escapeHtml(r.hospitalName)}</div>
+          <div class="subtitle">
+            ${currency(r.rateSavings)} early-fill · ${currency(r.penalties)} recovered · ${r.events} event${r.events === 1 ? "" : "s"}
+          </div>
+          ${r.lastAt ? `<div class="tertiary" style="font-size:11px">Last ${new Date(r.lastAt).toLocaleDateString()}</div>` : ""}
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:1.35rem;font-weight:700;color:var(--success)">${currency(r.total)}</div>
+          <div class="tertiary" style="font-size:11px">saved</div>
+        </div>
+      </section>`).join("")}`;
+}
+
 export function renderAdminApp(admin) {
+  const section = admin.section || "approvals";
   const filter = admin.filter || "review";
   const kind = admin.kind || "all";
   const search = (admin.search || "").trim().toLowerCase();
@@ -134,29 +214,36 @@ export function renderAdminApp(admin) {
   return `
     <div class="app-shell">
       <div class="bg-gradient"><div class="blob-bottom"></div></div>
-      ${navBar("Approvals", "admin-menu")}
+      ${navBar(section === "savings" ? "Savings" : "Approvals", "admin-menu")}
       <main class="main-scroll stack" style="padding:0 var(--page-pad) 40px">
         ${admin.toast ? `<div class="approval-toast">${icon("check")} ${escapeHtml(admin.toast)}</div>` : ""}
 
-        <div class="stat-row approvals-stats">
-          ${FILTERS.map((f) => `
-            <button type="button" class="stat-badge ${filter === f.id ? "selected" : ""}" data-approvals-filter="${f.id}">
-              <div class="value">${countFor(items, f.id)}</div>
-              <div class="label">${escapeHtml(f.label)}</div>
-            </button>`).join("")}
-        </div>
-
         <div class="chip-grid">
-          ${KINDS.map((k) => `
-            <button type="button" class="chip ${kind === k.id ? "active" : ""}" data-approvals-kind="${k.id}">${escapeHtml(k.label)}</button>`).join("")}
+          ${SECTIONS.map((s) => `
+            <button type="button" class="chip ${section === s.id ? "active" : ""}" data-admin-section="${s.id}">${escapeHtml(s.label)}</button>`).join("")}
         </div>
 
-        <div class="search-field">
-          <span>${icon("doctors")}</span>
-          <input type="search" placeholder="Search name, email or NPI…" data-approvals-search value="${escapeHtml(admin.search || "")}" />
-        </div>
+        ${section === "savings" ? renderSavingsSection(admin) : `
+          <div class="stat-row approvals-stats">
+            ${FILTERS.map((f) => `
+              <button type="button" class="stat-badge ${filter === f.id ? "selected" : ""}" data-approvals-filter="${f.id}">
+                <div class="value">${countFor(items, f.id)}</div>
+                <div class="label">${escapeHtml(f.label)}</div>
+              </button>`).join("")}
+          </div>
 
-        ${body}
+          <div class="chip-grid">
+            ${KINDS.map((k) => `
+              <button type="button" class="chip ${kind === k.id ? "active" : ""}" data-approvals-kind="${k.id}">${escapeHtml(k.label)}</button>`).join("")}
+          </div>
+
+          <div class="search-field">
+            <span>${icon("doctors")}</span>
+            <input type="search" placeholder="Search name, email or NPI…" data-approvals-search value="${escapeHtml(admin.search || "")}" />
+          </div>
+
+          ${body}
+        `}
       </main>
       ${admin.menuOpen ? renderAdminMenu(admin) : ""}
     </div>`;
@@ -183,7 +270,12 @@ function renderAdminMenu(admin) {
 }
 
 export function bindAdmin(root, admin, handlers) {
-  const { onPatch, onDecide, onRefresh, onSignOut } = handlers;
+  const { onPatch, onDecide, onRefresh, onSignOut, onSection, onSavingsRefresh } = handlers;
+
+  root.querySelectorAll("[data-admin-section]").forEach((btn) => {
+    btn.addEventListener("click", () => onSection(btn.dataset.adminSection));
+  });
+  root.querySelector("[data-savings-retry]")?.addEventListener("click", () => onSavingsRefresh());
 
   root.querySelector("[data-action='admin-menu']")?.addEventListener("click", () => onPatch({ menuOpen: true }));
   root.querySelectorAll("[data-close-admin-menu]").forEach((el) => {

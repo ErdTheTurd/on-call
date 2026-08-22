@@ -1,12 +1,14 @@
 import Foundation
 import Combine
+import SwiftUI
 
-// MARK: - Investor Demo Mode
-// Flip `isEnabled` to `false` when wiring live data / shipping to production.
+// MARK: - Investor / ship demo mode
+// Ship WITH mock data so demos stay full. Banners in the UI make that clear.
+// Flip `isEnabled` to `false` only when you want empty production-only stores.
 // All mock calendar fills, ads placeholders, and demo seeding gate on this flag.
 
 enum InvestorDemo {
-    /// Master switch — set to `false` to disable all investor mock data.
+    /// Master switch — leave `true` for ship demos with mock sample data.
     static let isEnabled = true
 
     private static let seededKey = "investor_demo_seeded_v2"
@@ -146,6 +148,23 @@ enum InvestorDemo {
                 let candidates = roster.filter { $0.specialty == shift.specialty }
                 guard let doctor = candidates.randomElement() else { continue }
                 AssignedShiftsStore.shared.seedAssignmentIfNeeded(shift: shift, doctorID: doctor.id)
+            }
+        }
+    }
+}
+
+/// Persistent reminder that seeded roster/calendar content is mock sample data.
+struct MockSampleDataBanner: View {
+    var body: some View {
+        Group {
+            if InvestorDemo.isEnabled {
+                Text("Mock sample data — for demos. Not live hospital volume.")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Brand.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .background(Brand.accentSoft)
             }
         }
     }

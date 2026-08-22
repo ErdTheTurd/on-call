@@ -94,8 +94,14 @@ Once both are configured, doctors/hospitals signing in on either surface see the
 
 In GitHub → **Settings → Pages**, set **Source** to **Deploy from branch**, branch **main**, folder **/docs**.
 
-Site URL: **https://erdtheturd.github.io/on-call/**
+That publishes the contents of `docs/` at the **domain root**:
 
+- **https://mdshift.net/** — app + landing  
+- **https://mdshift.net/callback.html** — OAuth return  
+
+(Do not use folder `/` — that forces the awkward `/docs/` URL path.)
+
+Site URL: **https://mdshift.net/**
 ### Universal Links (optional)
 
 Replace `TEAMID` in `docs/.well-known/apple-app-site-association` with your Apple Team ID, then rebuild the iOS app. Custom scheme: `oncallwizard://`.

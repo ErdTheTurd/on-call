@@ -3,7 +3,7 @@
 export function defaultPolicy() {
   return {
     granularity: "day",
-    administratorApproveShifts: false,
+    administratorApproveShifts: true,
     cancellationPenaltyScale: [{ hoursBeforeStart: 24, penaltyPercent: 2.0 }],
     tradePenaltyScale: [
       { hoursBeforeStart: 24, penaltyPercent: 0.25 },

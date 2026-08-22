@@ -1,12 +1,17 @@
 import { escapeHtml, SPECIALTIES, startOfDay, formatShiftDate } from "../brand.js";
 import {
   navBar, tabBar, shiftRow, pendingBanner, sectionHeader, emptyState, sheet,
-  verificationBadge, icon, statBadge, adBanner, currency
+  verificationBadge, icon, statBadge, adBanner, currency, ensureAdsNetwork
 } from "../components.js";
+import { isPlusActive, startPlusCheckout, isMonetizationLive } from "../domain/plus.js";
+import { renderPlusSheet } from "../domain/plus-ui.js";
+import { getSavingsEvents, summarizeSavings } from "../domain/savings.js";
 import { renderCalendar, hospitalDayData, addMonths } from "../calendar.js";
 import { hospitalDaySummary, hospitalAnalytics, billingSummary } from "../domain/insights.js";
 import { bracketLabel } from "../domain/policy.js";
-import { groupPricingComponents } from "../domain/pricing.js";
+import {
+  getAlgoPrefs, setFactorEnabled, setFactorOverride, groupedCatalog, isFactorEnabled
+} from "../domain/algo-prefs.js";
 import {
   appStore, ensureDemoShifts, openShiftCount, fillRatePercent, signOut,
   autoApprovedCount, tokenRequestsForHospital, approveToken, denyToken,
@@ -101,11 +106,33 @@ function renderHospitalDashboard(state, profile) {
   // opens on today — the day a scheduler cares about most.
   const insightDate = selected || startOfDay(new Date());
   const insight = profile ? hospitalDaySummary(insightDate, profile.id) : null;
+  const allPending = profile
+    ? tokenRequestsForHospital(profile.id).filter((r) => r.status === "pending")
+    : [];
 
   return `
     ${navBar(profile?.name || "Home")}
     <main class="main-scroll stack">
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
+      ${allPending.length ? `
+        <section class="card stack pending-approvals-card">
+          ${sectionHeader(`Approve coverage requests (${allPending.length})`, "checkCircle")}
+          <p class="subtitle" style="margin:0">Doctors are waiting. Approve here, or open Schedule Admin from the menu.</p>
+          <div class="pending-approvals-list">
+            ${allPending.slice(0, 8).map((t) => `
+              <div class="token-mini pending-approval-row">
+                <div style="flex:1;min-width:0">
+                  <div style="font-weight:600">${escapeHtml(t.doctorName || "Doctor")}</div>
+                  <div class="subtitle">${escapeHtml(t.specialty || "")} · ${formatShiftDate(t.date)}${t.hospitalName ? ` · ${escapeHtml(t.hospitalName)}` : ""}</div>
+                </div>
+                <span class="row-actions">
+                  <button type="button" class="approve" data-approve-token="${t.id}">Approve</button>
+                  <button type="button" class="deny" data-deny-token="${t.id}">Deny</button>
+                </span>
+              </div>`).join("")}
+          </div>
+          ${allPending.length > 8 ? `<button type="button" class="btn-secondary" data-open-sheet="schedule">See all in Schedule Admin</button>` : ""}
+        </section>` : ""}
       <section class="card stack">
         ${sectionHeader("At a glance")}
         <div class="stat-row">
@@ -116,10 +143,10 @@ function renderHospitalDashboard(state, profile) {
             attrs: 'data-open-sheet="analytics"'
           })}
           ${statBadge({
-            value: autoApprovedCount(),
-            label: "Auto‑approved",
-            hint: "Ready doctors",
-            attrs: 'data-nav-tab="doctors"'
+            value: allPending.length,
+            label: "Pending",
+            hint: "Need your OK",
+            attrs: 'data-open-sheet="schedule"'
           })}
           ${statBadge({
             value: openDayCount,
@@ -142,13 +169,7 @@ function renderHospitalDashboard(state, profile) {
         </div>
         <div class="stack">
           ${insight ? renderDayInsight(insight, profile, insightDate) : ""}
-          ${insight && insight.pendingRequestCount ? `
-            <section class="card stack">
-              ${sectionHeader(`Pending tokens (${insight.pendingRequestCount})`)}
-              <p class="subtitle">Doctors are waiting on a decision for this day.</p>
-              <button type="button" class="btn-primary" data-open-sheet="schedule">Review in Schedule Admin</button>
-            </section>` : ""}
-          ${adBanner("dashboard")}
+          ${adBanner("dashboard", { show: !isPlusActive() })}
         </div>
       </div>
     </main>`;
@@ -235,7 +256,6 @@ function renderAlterShifts(state, profile) {
     ? Number(state.alterFlatRate)
     : (existing?.escalationMode?.rate || Math.max(rateFloor, isHourly ? 200 : 2000));
 
-  const grouped = groupPricingComponents(breakdown.components || []);
   const savedFlash = !!state.alterSaved;
 
   return `
@@ -277,14 +297,35 @@ function renderAlterShifts(state, profile) {
             <button type="button" class="btn-ghost" style="justify-self:start;padding-left:0" data-recalc-rate>↻ Recalculate</button>
 
             <div class="algo-breakdown">
-              <div class="algo-breakdown-title">Algorithm breakdown</div>
-              ${grouped.map(([category, items]) => `
+              <div class="algo-breakdown-title">Algorithm variables</div>
+              <p class="tertiary" style="font-size:12px;margin:0 0 8px">Toggle on/off. Drag a slider to fine-tune scale (0.1–2.0).</p>
+              ${groupedCatalog().map(([category, items]) => `
                 <div class="algo-cat">${escapeHtml(category)}</div>
-                ${items.map((item) => `
-                  <div class="factor-row">
-                    <span>${escapeHtml(item.label)}</span>
-                    <span class="${item.multiplier > 1 ? "factor-up" : item.multiplier < 1 ? "factor-down" : "factor-neutral"}">${escapeHtml(item.displayValue)}</span>
-                  </div>`).join("")}
+                ${items.map((item) => {
+                  const component = (breakdown.components || []).find((c) => c.id === item.id);
+                  const on = isFactorEnabled(item.id);
+                  const shown = on
+                    ? (component?.multiplier ?? 1)
+                    : 1;
+                  const prefs = getAlgoPrefs();
+                  const override = prefs.overrides?.[item.id];
+                  return `
+                    <div class="algo-factor-row ${on ? "" : "is-off"}">
+                      <label class="algo-factor-toggle">
+                        <input type="checkbox" data-algo-toggle="${escapeHtml(item.id)}" ${on ? "checked" : ""} />
+                        <span>
+                          <strong>${escapeHtml(item.label)}</strong>
+                          <span class="tertiary">${on ? (component?.displayValue || shown.toFixed(3)) : "Off"}</span>
+                        </span>
+                      </label>
+                      ${on ? `
+                        <input type="range" min="0.1" max="2" step="0.05"
+                          value="${(override ?? shown).toFixed(2)}"
+                          data-algo-scale="${escapeHtml(item.id)}"
+                          aria-label="Scale for ${escapeHtml(item.label)}" />
+                      ` : ""}
+                    </div>`;
+                }).join("")}
               `).join("")}
             </div>
           ` : `
@@ -374,7 +415,7 @@ function renderDoctors(state, profile) {
         </div>
         <button type="button" class="btn-secondary" style="width:auto;min-width:180px" data-seed-mocks>Seed demo doctors</button>
       </div>
-      ${adBanner("doctors")}
+      ${adBanner("doctors", { show: !isPlusActive() })}
       <section class="card stack">
         <label class="switch-row spread">
           <span>Auto-approved only</span>
@@ -425,10 +466,16 @@ function renderHospitalSheet(state, profile) {
   if (kind === "policy") return renderPolicySheet(profile, state);
   if (kind === "analytics") return renderAnalyticsSheet(profile);
   if (kind === "billing") return renderBillingSheet(profile);
+  if (kind === "plus") return sheet("MD Shift+", renderPlusSheet("hospital"));
   if (kind === "schedule") return renderScheduleAdminSheet(profile, state);
   if (kind === "openshifts") return renderOpenShiftsSheet(profile);
   if (kind === "doctor-detail") return renderDoctorDetailSheet(state.doctorDetailId, profile);
 
+  const plusActive = isPlusActive();
+  const monetizationLive = isMonetizationLive();
+  const pendingCount = profile
+    ? tokenRequestsForHospital(profile.id).filter((r) => r.status === "pending").length
+    : 0;
   const body = `
     ${profile ? `
       <div class="menu-profile">
@@ -437,14 +484,23 @@ function renderHospitalSheet(state, profile) {
           <div style="font-weight:600">${escapeHtml(profile.name)}</div>
           <div class="subtitle">${escapeHtml(appStore.session?.email || `NPI: ${profile.npi}`)}</div>
           ${verificationBadge(profile.verificationStatus)}
+          ${monetizationLive && plusActive ? `<span class="plus-pill">${icon("sparkles", { size: 12 })} Plus</span>` : ""}
         </div>
         <button type="button" class="menu-signout" data-sign-out>Sign out</button>
       </div>` : ""}
     <ul class="menu-list">
+      ${monetizationLive ? `
+      <section><div class="section-label">MD Shift+</div>
+        <button class="menu-item plus-menu-item" type="button" data-open-sheet="plus">
+          ${icon("sparkles")}<span>${plusActive ? "Manage MD Shift+" : "Get MD Shift+"}
+          <span class="menu-item-sub">${plusActive ? "Ad-free · priority posting" : "$9.99/mo · ad-free + perks"}</span></span>
+        </button>
+      </section>` : ""}
       <section><div class="section-label">Management</div>
+        <button class="menu-item" type="button" data-open-sheet="schedule">${icon("checkCircle")}<span>Schedule Admin${pendingCount ? ` (${pendingCount})` : ""}
+          <span class="menu-item-sub">Approve or deny doctor day requests</span></span></button>
         <button class="menu-item" type="button" data-open-sheet="openshifts">${icon("calendar")}<span>Open Shifts</span></button>
         <button class="menu-item" type="button" data-nav-tab="alter">${icon("clock")}<span>Alter Shifts</span></button>
-        <button class="menu-item" type="button" data-open-sheet="schedule">${icon("checkCircle")}<span>Schedule Admin</span></button>
         <button class="menu-item" type="button" data-open-sheet="policy">${icon("slider")}<span>Policy Settings</span></button>
         <button class="menu-item" type="button" data-open-sheet="analytics">${icon("chart")}<span>Analytics</span></button>
         <button class="menu-item" type="button" data-open-sheet="billing">${icon("card")}<span>Billing</span></button>
@@ -456,8 +512,8 @@ function renderHospitalSheet(state, profile) {
           <input type="checkbox" data-hospital-flag="autoPay" ${profile?.autoPay ? "checked" : ""} /></label>
       </section>
       <section><div class="section-label">Support</div>
-        <a class="menu-item" href="mailto:erdunn706@gmail.com">${icon("envelope")}
-          <span>Contact support<span class="menu-item-sub">erdunn706@gmail.com</span></span>
+        <a class="menu-item" href="/support/" target="_blank" rel="noopener">${icon("envelope")}
+          <span>Contact support<span class="menu-item-sub">mdshift.net/support</span></span>
         </a>
       </section>
     </ul>`;
@@ -628,6 +684,60 @@ function renderPolicySheet(profile, state) {
   return sheet("Policy Settings", body);
 }
 
+/**
+ * Savings the hospital can audit: every dollar here is a logged event, not a
+ * derived estimate, and the same rows are what MD Shift sees.
+ */
+function renderSavingsCard(profile) {
+  const events = getSavingsEvents(profile?.id);
+  const s = summarizeSavings(events);
+
+  if (!s.events) {
+    return `
+      <section class="card stack">
+        ${sectionHeader("Verified savings", "dollar")}
+        <p class="subtitle" style="margin:0">
+          Nothing tracked yet. Savings start accruing when doctors fill shifts early
+          (locking the rate before it escalates) and when late cancellations are recovered.
+        </p>
+      </section>`;
+  }
+
+  return `
+    <section class="card stack">
+      ${sectionHeader("Verified savings", "dollar")}
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+        <span class="subtitle">Total saved${s.trackedSince ? ` since ${s.trackedSince.toLocaleDateString()}` : ""}</span>
+        <span style="font-size:1.8rem;font-weight:700;color:var(--success)">${currency(s.total)}</span>
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
+        <span>Escalation avoided by early fills</span>
+        <strong style="color:var(--success)">${currency(s.rateSavings)}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
+        <span>Late cancel &amp; trade penalties recovered</span>
+        <strong style="color:var(--warning)">${currency(s.penalties)}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
+        <span>Average per day</span>
+        <strong>${currency(s.perDay)}</strong>
+      </div>
+      <p class="tertiary" style="font-size:12px;margin:0">
+        Based on ${s.events} tracked event${s.events === 1 ? "" : "s"}.
+      </p>
+    </section>
+    ${s.bySpecialty.length ? `
+      <section class="card stack">
+        ${sectionHeader("Saved by specialty")}
+        ${s.bySpecialty.map(([sp, amt]) => `
+          <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
+            <span>${escapeHtml(sp)}</span>
+            <strong style="color:var(--success)">${currency(amt)}</strong>
+          </div>`).join("")}
+      </section>` : ""}`;
+}
+
 function renderAnalyticsSheet(profile) {
   const a = hospitalAnalytics(profile?.id);
   const body = `
@@ -664,21 +774,7 @@ function renderAnalyticsSheet(profile) {
           <div class="bucket-row"><span>&gt; 3 mo</span><strong>${a.cancelBuckets[2]}</strong></div>
         </section>
       </div>
-      <section class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-        <div>
-          <div style="font-weight:600">Amount Saved per Day</div>
-          <div class="subtitle">Penalty revenue recovered overall</div>
-        </div>
-        <div style="font-size:1.6rem;font-weight:700;color:var(--success)">${currency(a.savingsPerDay)}</div>
-      </section>
-      <section class="card stack">
-        ${sectionHeader("By Specialty")}
-        ${a.specialtyRevenues.map(([sp, amt]) => `
-          <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px">
-            <span>${escapeHtml(sp)}</span>
-            <strong style="color:var(--success)">${currency(amt)}/day</strong>
-          </div>`).join("")}
-      </section>
+      ${renderSavingsCard(profile)}
       <section class="card stat-row">
         <div class="stat-badge"><div class="value">${a.openShifts}</div><div class="label">Open</div></div>
         <div class="stat-badge"><div class="value">${a.fillRate}%</div><div class="label">Fill rate</div></div>
@@ -791,6 +887,17 @@ export function bindHospital(root, state, update) {
   root.querySelectorAll("[data-open-sheet]").forEach((btn) => {
     btn.addEventListener("click", () => update({ sheet: btn.dataset.openSheet || true }));
   });
+  root.querySelectorAll("[data-plus-checkout]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const res = await startPlusCheckout();
+      if (!res.ok) {
+        btn.disabled = false;
+        alert(res.error || "Could not start checkout.");
+      }
+    });
+  });
+  ensureAdsNetwork();
   root.querySelectorAll("[data-tab], [data-nav-tab]").forEach((btn) => {
     btn.addEventListener("click", () => update({
       tab: btn.dataset.tab || btn.dataset.navTab,
@@ -855,10 +962,29 @@ export function bindHospital(root, state, update) {
   });
 
   root.querySelectorAll("[data-approve-token]").forEach((btn) => {
-    btn.addEventListener("click", async () => { await approveToken(btn.dataset.approveToken); });
+    btn.addEventListener("click", async () => {
+      await approveToken(btn.dataset.approveToken);
+      update({ sheet: state.sheet || false });
+    });
   });
   root.querySelectorAll("[data-deny-token]").forEach((btn) => {
-    btn.addEventListener("click", async () => { await denyToken(btn.dataset.denyToken); });
+    btn.addEventListener("click", async () => {
+      await denyToken(btn.dataset.denyToken);
+      update({ sheet: state.sheet || false });
+    });
+  });
+
+  root.querySelectorAll("[data-algo-toggle]").forEach((el) => {
+    el.addEventListener("change", () => {
+      setFactorEnabled(el.dataset.algoToggle, el.checked);
+      update({ alterRateFloor: null, alterSaved: false });
+    });
+  });
+  root.querySelectorAll("[data-algo-scale]").forEach((el) => {
+    el.addEventListener("change", () => {
+      setFactorOverride(el.dataset.algoScale, el.value);
+      update({ alterRateFloor: null, alterSaved: false });
+    });
   });
   root.querySelectorAll("[data-toggle-unavail]").forEach((btn) => {
     btn.addEventListener("click", async () => {

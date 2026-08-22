@@ -79,107 +79,226 @@ Local CLI config already points SMTP at Resend via `env(RESEND_API_KEY)` in
 
 Already on for this project (`mailer_autoconfirm = false`).
 
-Update the hosted **Confirm signup** template so the body shows the token only
-(or run `./scripts/configure-otp-email-template.sh`):
+**Your email will not send until Resend SMTP + domain DNS are done (section 0).**  
+Editing the template alone does not deliver mail. A subject like “sign-in **link**” is also the wrong tone — we use a **6-digit code**, not a clickable magic link.
 
-1. Auth → Email Templates → Confirm signup  
-   https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/templates
-2. Subject: `Your MD Shift verification code`
-3. Body (no confirmation URL):
+Update the hosted **Confirm signup** template (Auth → Email Templates → **Confirm signup** — not Magic Link):  
+https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/templates
 
-```html
-<h2>MD Shift verification</h2>
-<p>Enter this 6-digit code in the MD Shift app or website:</p>
-<p style="font-size:28px;letter-spacing:6px;font-weight:700;">{{ .Token }}</p>
-<p>This code expires in about an hour.</p>
+**Subject:**
+```
+Your MD Shift verification code
 ```
 
+**Body** (paste exactly — show the code, no confirmation URL):
+
+```html
+<h2>Your MD Shift verification code</h2>
+<p>Enter this 6-digit code in the MD Shift app or website. This code can only be used once. If you have any questions, feel free to contact us at erdunn706@gmail.com!</p>
+<p style="font-size:32px;letter-spacing:8px;font-weight:700;">{{ .Token }}</p>
+<p>This code expires in about an hour. If you did not create an account, you can ignore this email.</p>
+```
+
+Or run `./scripts/configure-otp-email-template.sh` (needs `SUPABASE_ACCESS_TOKEN`).
+
 Local CLI already points at `supabase/templates/confirmation.html`.
+
+**Still not sending?** Checklist:
+1. Resend domain shows **Verified** (SPF on mdshift.net must not be `v=spf1 -all`)
+2. Supabase Auth → SMTP enabled with `smtp.resend.com` / user `resend` / API key as password
+3. Sender is on the verified domain (e.g. `noreply@mdshift.net`)
+4. Smoke-test: `./scripts/test-resend-send.sh`
+5. Check Resend → Logs for bounces/rejects; Supabase Auth → Logs for mailer errors
 
 ---
 
 ## 2. Redirect URLs
 
-Auth → URL Configuration:
+Auth → URL Configuration  
+https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/url-configuration
 
-- Site URL: `https://mdshift.net`
-- Redirect URLs:
-  - `https://mdshift.net/**`
+- **Site URL:** `https://mdshift.net` (must NOT be `http://localhost…` — that causes “localhost refused to connect” after Google)
+- **Redirect URLs** (one per line):
   - `https://mdshift.net/callback.html`
-  - `oncallwizard://auth-callback` (iOS OAuth)
+  - `https://mdshift.net/**`
+  - `https://mdshift.net/docs/callback.html` (legacy; redirects to `/callback.html`)
+  - `oncallwizard://auth-callback`
+  - `http://127.0.0.1:5500/**` (optional local)
+  - `http://localhost:5500/**` (optional local)
 
+The live app is published at the **domain root** (`https://mdshift.net/`), not `/docs`. GitHub Pages deploys the repo’s `docs/` folder as the site root.
 ## 3. Google (required for “Continue with Google”)
 
-Google is still **off** until Client ID + Secret are pasted into Supabase.
+Google stays **off** in Supabase until a **Web** Client ID + Secret are pasted.
+The iOS client ID alone cannot enable the provider (iOS clients have no secret).
 
-### 3a. Google Cloud Console
+### 3a. Show “MD Shift” on the Google screen
 
-1. Open https://console.cloud.google.com/apis/credentials
-2. Create / select a project
-3. Configure **OAuth consent screen** (External is fine while testing)
-4. **Create credentials** → **OAuth client ID** → type **Web application**
-5. Authorized JavaScript origins:
+1. Open [Google Auth Platform → Branding](https://console.cloud.google.com/auth/branding) (or APIs & Services → OAuth consent screen)
+2. **App name:** `MD Shift`
+3. Support email: your address → Save
+
+Google will still say “continue to `….supabase.co`” on the account picker — that is the Auth callback host, not your product name. Changing that string requires a [Supabase custom domain](https://supabase.com/docs/guides/platform/custom-domains). The **App name** above is what users recognize as MD Shift.
+
+### 3b. iOS client (already set in the app)
+
+Client ID (in `Config/AppInfo.plist`):
+
+`260587604070-m7jj35o7risf6ql8ctldqiet9k3f3cd3.apps.googleusercontent.com`
+
+In Google Cloud, that iOS client’s Bundle ID must match Xcode:
+
+`com.eporthospine.mdshift`
+
+### 3c. Web client (required for Supabase)
+
+1. Open https://console.cloud.google.com/apis/credentials  
+2. **Create credentials** → **OAuth client ID** → type **Web application**  
+3. Authorized JavaScript origins:
    - `https://mdshift.net`
-   - `http://127.0.0.1:3000` (local)
-6. Authorized redirect URIs — **exact**:
+   - `http://127.0.0.1:5500` (local, if you use Live Server)
+4. Authorized redirect URIs — **exact**:
    - `https://yrnndfpvovuvjlzgivgu.supabase.co/auth/v1/callback`
-7. Copy **Client ID** and **Client Secret**
+5. Copy **Client ID** and **Client Secret**
 
-### 3b. Supabase
+### 3d. Supabase
 
 1. Auth → Providers → Google  
    https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/providers
 2. Enable Google
-3. Paste Client ID + Client Secret → Save
+3. Paste the **Web** Client ID + Client Secret → Save
 
-Or with a PAT:
+Or:
 
 ```bash
 export SUPABASE_ACCESS_TOKEN=sbp_...
-export GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+export GOOGLE_CLIENT_ID=....apps.googleusercontent.com   # Web client
 export GOOGLE_CLIENT_SECRET=...
 ./scripts/configure-oauth-providers.sh
 ```
 
-### 3c. Redirect URLs (Auth → URL Configuration)
+### 3e. If Google ends on “localhost refused to connect”
 
-Must include:
+1. Supabase → URL Configuration → Site URL must be `https://mdshift.net` (not localhost)
+2. Redirect allow-list must include `https://mdshift.net/callback.html`
+3. Sign in from **https://mdshift.net/** (or a local server that is actually running)
+4. Soft-refresh / hard-refresh so the latest `oauthRedirectTo()` code is loaded
 
-- `https://mdshift.net/callback.html`
-- `https://mdshift.net/**`
-- `oncallwizard://auth-callback` (iOS)
+The web app returns to `/callback.html` after Google.
+## 4. Apple (App ID + Services ID)
 
-## 4. Apple (required for “Continue with Apple”)
+Your Xcode bundle ID is **`com.eporthospine.mdshift`**. That string *is* the App ID you register (or edit) in Apple Developer — you do not invent a second “product” ID.
 
-### 4a. Apple Developer
+### 4a. App ID (Identifiers → App IDs)
 
-Bundle ID: `callsystems.on-call-wizard`
+1. Open https://developer.apple.com/account/resources/identifiers/list  
+2. Click **+** → **App IDs** → Continue  
+3. Type: **App** → Continue  
+4. Description: `MD Shift`  
+5. Bundle ID: **Explicit** → `com.eporthospine.mdshift`  
+   - If this App ID already exists, open it instead of creating a duplicate  
+6. Capabilities — enable only what the app uses today (see checklist below) → Save / Register
 
-1. Identifiers → App ID → enable **Sign In with Apple**
-2. Create a **Services ID** (for web/OAuth), e.g. `callsystems.on-call-wizard.web`
+Xcode already mirrors these in `Config/OnCallWizard.entitlements`. After the App ID is saved, refresh signing in Xcode (Signing & Capabilities).
+
+#### App ID capability checklist
+
+**Enable now**
+
+| Capability | Why |
+|---|---|
+| **Sign In with Apple** | Native Apple auth + Supabase `id_token` grant |
+| **Associated Domains** | Universal Links for `mdshift.net` (and legacy `erdtheturd.github.io`) |
+
+**Leave off until you ship the feature**
+
+- **Push Notifications** — local alerts only today; no APNs entitlement yet  
+- **In-App Purchase** — only if doctor subscriptions are sold through the App Store  
+- **App Groups / iCloud / HealthKit / Background Modes** — unused  
+- **Apple Pay** — only if PassKit payments ship in-app (hospital Stripe can stay on web)
+
+**Outside the Capabilities checkboxes (still required for auth)**
+
+- Google Cloud iOS OAuth client Bundle ID = `com.eporthospine.mdshift`  
+- Apple **Services ID** (next section) for web OAuth + Supabase callback  
+- Apple **Key** (`.p8`) for the Supabase Apple secret JWT
+
+### 4b. Services ID (for web / Supabase OAuth)
+
+1. Identifiers → **+** → **Services IDs** → Continue  
+2. Description: `MD Shift Web`  
+3. Identifier: e.g. `com.eporthospine.mdshift.web` (must be unique)  
+4. Enable **Sign In with Apple** → Configure:
    - Domains: `yrnndfpvovuvjlzgivgu.supabase.co`
-   - Return URL: `https://yrnndfpvovuvjlzgivgu.supabase.co/auth/v1/callback`
-3. Keys → create a key with Sign In with Apple → download `.p8` once
-4. Note Team ID, Key ID, Services ID
-5. Generate the client secret JWT (Supabase docs / dashboard helper)
+   - Return URLs: `https://yrnndfpvovuvjlzgivgu.supabase.co/auth/v1/callback`
+5. Save
 
-### 4b. Supabase
+### 4c. Key (.p8)
+
+1. Keys → **+** → name `MD Shift Apple Auth`  
+2. Enable **Sign In with Apple** → Configure → choose your App ID  
+3. Register → **download the `.p8` once** (you cannot download again)  
+4. Note **Key ID** and your **Team ID** (top-right of the developer account)
+
+### 4d. Supabase → Apple provider (the JWT “Secret Key”)
 
 Auth → Providers → Apple → enable  
 https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/providers
 
-- **Client IDs** (comma-separated so web + iOS both work):  
-  `callsystems.on-call-wizard,callsystems.on-call-wizard.web`  
-  (Bundle ID first, then your Services ID — adjust the Services ID to whatever you created)
-- **Secret Key**: the JWT generated from your `.p8` (Team ID + Key ID + Services ID/Bundle ID per Apple docs)
-- Save
+Apple does **not** give you a password-style secret. The **Secret Key** field is a **JWT you generate** from your `.p8` file. It lasts ~6 months.
+
+**Fields in Supabase**
+
+| Field | Value |
+|--------|--------|
+| Client IDs | `com.eporthospine.mdshift,com.eporthospine.mdshift.web` (Bundle ID + Services ID) |
+| Secret Key | the long JWT printed by the script below |
+| (if asked) Key ID | e.g. `GK5M7HYGTB` — only needed when generating the JWT |
+
+**Generate the JWT (easiest)**
+
+1. Find your **Team ID** (Apple Developer → Membership, or top-right of the account page — 10 characters)  
+2. Confirm **Services ID** string (e.g. `com.eporthospine.mdshift.web`) — **not** the App bundle ID  
+3. Know your **Key ID** (e.g. `GK5M7HYGTB`) and path to `AuthKey_GK5M7HYGTB.p8`  
+4. Run:
+
+```bash
+chmod +x ./scripts/generate-apple-client-secret.sh
+./scripts/generate-apple-client-secret.sh \
+  --team-id YOUR_TEAM_ID \
+  --key-id GK5M7HYGTB \
+  --services-id com.eporthospine.mdshift.web \
+  --p8 ~/Downloads/AuthKey_GK5M7HYGTB.p8
+```
+
+5. Copy the printed JWT → paste into Supabase Apple **Secret Key** → Save  
+
+Or use Supabase’s web generator on the [Sign in with Apple docs](https://supabase.com/docs/guides/auth/social-login/auth-apple) (Team ID + Services ID + Key ID + upload `.p8`).
+
+**Common mistakes**
+
+- `sub` / Services ID must be the **Services ID**, not `com.eporthospine.mdshift`  
+- Regenerating a new Apple Key means you must generate a **new** JWT (old Key ID in an old JWT will fail)  
+- Native iOS Sign in with Apple can work with only the Bundle ID in Client IDs; the JWT secret is required for **web** Apple OAuth
 
 Or: `APPLE_CLIENT_ID` / `APPLE_SECRET` with `./scripts/configure-oauth-providers.sh`
 
-### 4c. Xcode
+### 4f. End-to-end checklist (app + site)
 
-Sign in with Apple capability is already in `Config/OnCallWizard.entitlements`.
-URL scheme `oncallwizard` is in `Config/AppInfo.plist` for Google OAuth return.
+**iOS app**
+
+1. App ID `com.eporthospine.mdshift` has Sign In with Apple (+ Associated Domains)  
+2. Xcode Signing & Capabilities shows Sign in with Apple  
+3. Supabase Apple provider enabled with Client IDs including `com.eporthospine.mdshift`  
+4. Tap **Continue with Apple** in the app → native sheet → lands in MD Shift  
+
+**Website**
+
+1. Same Supabase Apple provider also lists Services ID `com.eporthospine.mdshift.web`  
+2. Site URL / redirects include `https://mdshift.net/callback.html`  
+3. On https://mdshift.net/ tap **Continue with Apple** → Apple → back to `/callback.html` → app  
+
+**Secret JWT tip:** Supabase’s Apple provider panel can generate the client secret from Team ID + Key ID + `.p8`. If the panel asks for a secret string, use that generated JWT (it expires ~6 months — rotate before then).
 
 ## 5. Authenticator 2FA (TOTP)
 
