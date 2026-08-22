@@ -512,8 +512,8 @@ function renderHospitalSheet(state, profile) {
           <input type="checkbox" data-hospital-flag="autoPay" ${profile?.autoPay ? "checked" : ""} /></label>
       </section>
       <section><div class="section-label">Support</div>
-        <a class="menu-item" href="mailto:erdunn706@gmail.com">${icon("envelope")}
-          <span>Contact support<span class="menu-item-sub">erdunn706@gmail.com</span></span>
+        <a class="menu-item" href="/support/" target="_blank" rel="noopener">${icon("envelope")}
+          <span>Contact support<span class="menu-item-sub">mdshift.net/support</span></span>
         </a>
       </section>
     </ul>`;

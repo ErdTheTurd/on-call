@@ -215,7 +215,7 @@ function footer() {
       </div>
       <div class="footer-bottom">
         <div class="footer-legal">
-          <span>© ${new Date().getFullYear()} ${BRAND.name}. All rights reserved. · <a href="/privacypolicy/">Privacy Policy</a></span>
+          <span>© ${new Date().getFullYear()} ${BRAND.name}. All rights reserved. · <a href="/support/">Support</a> · <a href="/privacypolicy/">Privacy Policy</a></span>
           <span class="footer-disclaimer">Growth targets are expectations, not live counts. Demo walks use mock sample data. Real accounts sync to your hospital when you sign up.</span>
         </div>
         <button type="button" class="btn-quiet" data-goto-auth>Log in</button>
