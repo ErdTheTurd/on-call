@@ -213,7 +213,7 @@ export function renderAuthView(state, handlers) {
           <button type="button" class="btn-secondary" data-demo="Hospital">
             ${icon("hospital")} Explore as a hospital
           </button>
-          <p class="demo-note">Demo logins: <code>erdunn</code> / <code>jdunn</code> · password <code>1234567890</code></p>
+          <p class="demo-note">Sample data, no account needed.</p>
         </div>
       </div>
       <p class="auth-footer">By continuing you agree to our Terms of Service and <a href="/privacypolicy/" target="_blank" rel="noopener">Privacy Policy</a>.</p>

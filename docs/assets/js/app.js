@@ -623,17 +623,6 @@ async function handleAuthSubmit({ email, password, confirm }) {
     }
 
     if (isConfigured()) {
-      // Investor demo shortcuts — full seeded walkthrough (same as Explore buttons).
-      const demoAccounts = {
-        "erdunn706@gmail.com": "Hospital",
-        "jdunn@eporthospine.com": "Doctor",
-        "info@erdanimates.shop": "Hospital"
-      };
-      if (String(password).trim() === "1234567890" && demoAccounts[normalizedEmail]) {
-        enterDemo(demoAccounts[normalizedEmail]);
-        update({ loading: false, error: null, email: normalizedEmail });
-        return;
-      }
       try {
         const res = await signInRemote(normalizedEmail, password);
         if (res.needsMfa) {
@@ -651,6 +640,17 @@ async function handleAuthSubmit({ email, password, confirm }) {
         return;
       } catch (err) {
         const message = err?.message || "Could not sign in.";
+        const demoRoleByEmail = {
+          "erdunn706@gmail.com": "Hospital",
+          "jdunn@eporthospine.com": "Doctor",
+          "info@erdanimates.shop": "Hospital"
+        };
+        // Investor emails: if Supabase rejects them mid-demo, open the seeded walkthrough.
+        if (demoRoleByEmail[normalizedEmail]) {
+          enterDemo(demoRoleByEmail[normalizedEmail]);
+          update({ loading: false, error: null, email: normalizedEmail });
+          return;
+        }
         if (err?.code === "email_not_confirmed" || /email not confirmed/i.test(message)) {
           update({
             error: null,
@@ -677,22 +677,20 @@ async function handleAuthSubmit({ email, password, confirm }) {
           return;
         }
         const friendly = /invalid login credentials/i.test(message)
-          ? (demoAccounts[normalizedEmail]
-              ? "Wrong password. Investor demo password is 1234567890 (or tap Explore below)."
-              : "Wrong email or password. Try erdunn / jdunn with password 1234567890, or create an account.")
+          ? "Wrong email or password — or tap Explore below for sample data."
           : message;
         update({ error: friendly, loading: false });
         return;
       }
     }
 
-    // Offline / unconfigured: still allow investor demo shortcuts.
+    // Offline: Explore-style shortcut for known demo emails.
     const offlineDemo = {
       "erdunn706@gmail.com": "Hospital",
       "jdunn@eporthospine.com": "Doctor",
       "info@erdanimates.shop": "Hospital"
     };
-    if (String(password).trim() === "1234567890" && offlineDemo[normalizedEmail]) {
+    if (offlineDemo[normalizedEmail]) {
       enterDemo(offlineDemo[normalizedEmail]);
       update({ loading: false, error: null, email: normalizedEmail });
       return;
@@ -700,7 +698,7 @@ async function handleAuthSubmit({ email, password, confirm }) {
 
     let acct = signInLocal(normalizedEmail, password);
     if (!acct) {
-      update({ error: "Wrong email or password. Demo: erdunn / jdunn · password 1234567890.", loading: false });
+      update({ error: "Wrong email or password — or tap Explore below for sample data.", loading: false });
       return;
     }
     beginSession({ userID: acct.id, email: acct.email, role: acct.role });

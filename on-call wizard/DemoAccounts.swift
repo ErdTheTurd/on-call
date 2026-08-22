@@ -1,11 +1,11 @@
 import Foundation
 
-/// Investor walkthrough accounts — local shortcuts that always work, with or without Supabase.
+/// Investor walkthrough helpers — Explore buttons + quiet email shortcuts.
 @MainActor
 enum DemoAccounts {
+    /// Offline / unconfigured fallback only. Real accounts use Supabase passwords.
     static let password = "1234567890"
 
-    /// Stable ids so re-login keeps the same local profile / seeded data.
     private static let doctorUserID = UUID(uuidString: "00000000-0000-4000-9000-000000000001")!
     private static let hospitalUserID = UUID(uuidString: "00000000-0000-4000-9000-000000000002")!
     private static let hospitalID = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
@@ -29,18 +29,27 @@ enum DemoAccounts {
         return value
     }
 
-    static func match(email raw: String, password rawPassword: String) -> (email: String, role: UserRole)? {
+    static func role(forEmail raw: String) -> UserRole? {
+        let email = normalize(raw)
+        return aliases[email]?.role
+            ?? aliases.first(where: { $0.value.email == email })?.value.role
+    }
+
+    /// Quiet offline shortcut (password `1234567890`) when Supabase is down or not configured.
+    static func matchOffline(email raw: String, password rawPassword: String) -> (email: String, role: UserRole)? {
         guard InvestorDemo.isEnabled else { return nil }
         let email = normalize(raw)
         let password = rawPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard password == Self.password else { return nil }
-        guard let entry = aliases[email] ?? aliases.first(where: { $0.value.email == email })?.value else {
-            return nil
-        }
-        return (entry.email, entry.role)
+        guard let role = role(forEmail: email) else { return nil }
+        return (email, role)
     }
 
-    /// Signs into a fully seeded local session (profiles + mock coverage).
+    /// Known demo emails — used to fall back to a seeded walkthrough if Supabase rejects them mid-demo.
+    static func isKnownDemoEmail(_ raw: String) -> Bool {
+        role(forEmail: raw) != nil
+    }
+
     static func enter(email: String, role: UserRole, auth: AuthService) {
         let userID = role == .doctor ? doctorUserID : hospitalUserID
         seedProfile(email: email, role: role, userID: userID)

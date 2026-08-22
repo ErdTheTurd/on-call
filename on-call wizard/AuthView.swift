@@ -438,9 +438,9 @@ struct AuthView: View {
                         oauthLabel(systemImage: "cross.case.fill", title: "Explore as a hospital")
                     }
                     .buttonStyle(.plain)
-                    Text("Demo logins: erdunn / jdunn · password \(DemoAccounts.password)")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.45))
+                    Text("Sample data, no account needed.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.white.opacity(0.35))
                         .multilineTextAlignment(.center)
                 }
                 .padding(.horizontal, 24)
@@ -633,19 +633,8 @@ struct AuthView: View {
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
-        // Local demo shortcuts for investor walks — seed full mock session.
-        if let demo = DemoAccounts.match(email: email, password: password) {
-            isLoading = true
-            Task {
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                await MainActor.run {
-                    isLoading = false
-                    DemoAccounts.enter(email: demo.email, role: demo.role, auth: auth)
-                }
-            }
-            return
-        }
-
+        // Prefer real Supabase auth (how it used to work). Seeded local demos are
+        // Explore buttons, or a quiet fallback when the network / password fails.
         if SupabaseAuthService.shared.isConfigured {
             isLoading = true
             Task {
@@ -690,7 +679,7 @@ struct AuthView: View {
                                     thenFinish: result.userID,
                                     email: result.email,
                                     role: result.role,
-                                    suggest: result.suggestMfaEnroll
+                                    suggest: false
                                 )
                             }
                         }
@@ -699,23 +688,47 @@ struct AuthView: View {
                     where [.cannotConnectToHost, .notConnectedToInternet,
                            .networkConnectionLost, .timedOut,
                            .cannotFindHost, .dnsLookupFailed].contains(urlErr.code) {
-                    await MainActor.run { isLoading = false }
-                    handleLocalAuth(trimmedEmail: trimmedEmail)
+                    await MainActor.run {
+                        if enterDemoFallbackIfPossible(email: trimmedEmail) { return }
+                        isLoading = false
+                        handleLocalAuth(trimmedEmail: trimmedEmail)
+                    }
                 } catch AuthServiceError.emailNotConfirmed {
                     await MainActor.run {
+                        // Mid-demo: don't strand investors on OTP — open the seeded walkthrough.
+                        if enterDemoFallbackIfPossible(email: trimmedEmail) { return }
                         isLoading = false
                         pendingVerificationEmail = trimmedEmail
                         otpCode = ""
                         errorMessage = nil
                     }
                 } catch {
-                    await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }
+                    await MainActor.run {
+                        if enterDemoFallbackIfPossible(email: trimmedEmail) { return }
+                        isLoading = false
+                        errorMessage = error.localizedDescription
+                    }
                 }
             }
             return
         }
 
+        if let demo = DemoAccounts.matchOffline(email: email, password: password) {
+            DemoAccounts.enter(email: demo.email, role: demo.role, auth: auth)
+            return
+        }
+
         handleLocalAuth(trimmedEmail: trimmedEmail)
+    }
+
+    /// If this is a known investor email, open the seeded demo instead of a hard error.
+    @discardableResult
+    private func enterDemoFallbackIfPossible(email: String) -> Bool {
+        guard InvestorDemo.isEnabled,
+              let role = DemoAccounts.role(forEmail: email) else { return false }
+        isLoading = false
+        DemoAccounts.enter(email: DemoAccounts.normalize(email), role: role, auth: auth)
+        return true
     }
 
     private func resendVerification() {
