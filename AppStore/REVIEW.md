@@ -145,25 +145,37 @@ Regenerate:
 python3 scripts/generate-app-store-screenshots.py --also-1242
 ```
 
-## Build & upload (Xcode)
+## Build & upload (no physical iPhone required)
 
-Archive failed from CLI until at least one iPhone is registered to team **8LVD2L956K** (Apple: “no devices… provisioning profile”).
+You do **not** need a phone to submit. You need an **Apple Distribution** certificate and an **App Store** provisioning profile (those are not device-bound). Xcode failed earlier because it tried to make a *Development* profile, which does require a device.
 
-**Fix once (pick one):**
+### Option A — easiest (Xcode creates the Distribution cert)
 
-1. Plug in an iPhone → unlock → Trust → in Xcode select the phone as run destination → Run once (registers the device), **or**
-2. [developer.apple.com](https://developer.apple.com/account/resources/devices/list) → add a device UDID, then create an **App Store** distribution profile for `com.eporthospine.mdshift`.
+1. Xcode → **Settings…** → **Accounts**
+2. Select your Apple ID → team **8LVD2L956K** → **Manage Certificates…**
+3. Click **+** → **Apple Distribution** → Done  
+   (You should now see “Apple Distribution: …” in addition to Development.)
+4. Destination: **Any iOS Device (arm64)** (not a Simulator)
+5. **Product → Archive**
+6. Organizer → **Distribute App** → App Store Connect → Upload
 
-Then:
+If Archive still says “no devices… provisioning profile”, use Option B.
 
-1. Open `on-call wizard.xcodeproj`
-2. Target **on-call wizard** → Signing & Capabilities → Team selected, Automatic on
-3. Scheme **on-call wizard** → destination **Any iOS Device (arm64)**
-4. Product → **Archive**
-5. Organizer → **Distribute App** → App Store Connect → Upload
-6. App Store Connect → select build → paste listing from this file → Submit for Review
+### Option B — manual App Store profile (still no phone)
 
-CLI after a device is registered:
+1. [Certificates](https://developer.apple.com/account/resources/certificates/list) → **+** → **Apple Distribution**  
+   Upload `AppStore/certs/CertificateSigningRequest.certSigningRequest` (already generated on this Mac), download the `.cer`, double-click to install.
+2. [Identifiers](https://developer.apple.com/account/resources/identifiers/list) → ensure App ID `com.eporthospine.mdshift` exists (create if missing; enable Sign In with Apple + Associated Domains to match entitlements).
+3. [Profiles](https://developer.apple.com/account/resources/profiles/list) → **+** → **App Store Connect** → select that App ID → select your Distribution cert → download.
+4. Double-click the `.mobileprovision` to install.
+5. Xcode target → Signing & Capabilities → **Release**: uncheck Automatic, pick the App Store profile.
+6. **Product → Archive** → upload.
+
+### Option C — borrow a UDID only for Automatic Development (optional)
+
+If you want Automatic signing for Debug without owning a phone: ask anyone with an iPhone for Settings → General → About → **UDID** (or find it in Finder when they plug in once), add it under [Devices](https://developer.apple.com/account/resources/devices/list). Not required for App Store upload if Option A/B works.
+
+### CLI after Distribution cert exists
 
 ```bash
 xcodebuild -scheme "on-call wizard" -configuration Release \

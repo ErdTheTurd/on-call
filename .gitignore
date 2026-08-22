@@ -6,6 +6,7 @@ build/
 
 # Local secrets (never commit)
 Config/Secrets.xcconfig
+AppStore/certs/
 
 # Dev artifacts
 .dev-screenshot.png
