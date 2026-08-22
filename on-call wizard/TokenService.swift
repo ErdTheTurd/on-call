@@ -99,6 +99,30 @@ public final class TokenStore: ObservableObject {
         applyDailyLimit(limit)
     }
 
+    /// Repoints requests filed under a pre-Supabase doctor id. See `DoctorIdentity`.
+    public func remapDoctor(from previous: UUID, to next: UUID) {
+        var changed = false
+        requestedDays = requestedDays.map { req in
+            guard req.doctorID == previous else { return req }
+            changed = true
+            return TokenRequest(
+                id: req.id,
+                doctorID: next,
+                doctorName: req.doctorName,
+                credential: req.credential,
+                hospitalID: req.hospitalID,
+                date: req.date,
+                status: req.status,
+                hospitalName: req.hospitalName,
+                specialty: req.specialty,
+                requestedAt: req.requestedAt,
+                approvedAt: req.approvedAt,
+                shiftRate: req.shiftRate
+            )
+        }
+        if changed { save() }
+    }
+
     public func applyDailyLimit(_ limit: Int) {
         let clamped = SchedulingPolicy.clampDailyTokens(limit)
         guard clamped != dailyLimit else { return }

@@ -30,12 +30,46 @@ public final class DoctorRosterStore: ObservableObject {
         save()
     }
 
+    /// Folds in the hospital's credentialed doctors from Supabase. Remote wins on
+    /// name/verification; locally seeded demo doctors are left untouched.
+    public func mergeRemote(_ remote: [DoctorSummary]) {
+        guard !remote.isEmpty else { return }
+        for doc in remote {
+            if let idx = doctors.firstIndex(where: { $0.id == doc.id }) {
+                doctors[idx] = doc
+            } else {
+                doctors.append(doc)
+            }
+        }
+        save()
+    }
+
+    /// Repoints a roster entry held under a pre-Supabase doctor id. See `DoctorIdentity`.
+    public func remapDoctor(from previous: UUID, to next: UUID) {
+        guard let idx = doctors.firstIndex(where: { $0.id == previous }) else { return }
+        let old = doctors[idx]
+        doctors[idx] = DoctorSummary(
+            id: next,
+            name: old.name,
+            credential: old.credential,
+            specialty: old.specialty,
+            npi: old.npi,
+            isAutoApproved: old.isAutoApproved,
+            verificationStatus: old.verificationStatus
+        )
+        save()
+    }
+
     public func toggleAutoApprove(id: UUID) {
         guard let idx = doctors.firstIndex(where: { $0.id == id }) else { return }
         doctors[idx].isAutoApproved.toggle()
         save()
         if doctors[idx].isAutoApproved {
             TokenStore.shared.autoApprovePending(forDoctorID: id)
+        }
+        if let hospitalID = SessionStore.shared.currentHospitalID {
+            let autoApprove = doctors[idx].isAutoApproved
+            Task { await SupabaseRosterRepository.setAutoApprove(hospitalID: hospitalID, doctorID: id, autoApprove: autoApprove) }
         }
     }
 

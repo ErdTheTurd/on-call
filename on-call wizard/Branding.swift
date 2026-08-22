@@ -88,6 +88,11 @@ extension View {
 // MARK: - Brand Tokens
 
 enum Brand {
+    /// Public product name. Same app as the Xcode project “on-call wizard” /
+    /// former “On Call” label — one product, one brand.
+    static let appName = "MD Shift"
+    static let plusName = "MD Shift+"
+
     // ── Backgrounds ──────────────────────────────────────────────────────────
     static let bg = Color(UIColor { tc in
         tc.userInterfaceStyle == .dark
@@ -372,7 +377,7 @@ struct MonthNavButton: View {
 // MARK: - Contact Support
 
 struct ContactSupportFooter: View {
-    private let supportURL = URL(string: "https://mdshift.net/support/")!
+    private let supportURL = WebsiteConfig.supportURL
 
     var body: some View {
         Button {
@@ -401,7 +406,7 @@ struct ContactSupportFooter: View {
 
 /// List row for hamburger dashboards (hospital / doctor).
 struct ContactSupportRow: View {
-    private let supportURL = URL(string: "https://mdshift.net/support/")!
+    private let supportURL = WebsiteConfig.supportURL
 
     var body: some View {
         Button {

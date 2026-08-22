@@ -17,8 +17,13 @@ public final class SessionStore: ObservableObject {
     public var doctorProfile: DoctorProfile? { DoctorProfile.load() }
     public var hospitalProfile: HospitalProfile? { HospitalProfile.load() }
 
+    /// Supabase keys doctors by the auth user id, so that id wins whenever we have
+    /// one — otherwise every write we make references a doctor the server doesn't know.
     public var currentDoctorID: UUID {
-        doctorProfile?.id ?? currentUserID ?? UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
+        doctorProfile?.userID
+            ?? currentUserID
+            ?? doctorProfile?.id
+            ?? UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
     }
 
     public var currentHospitalID: UUID? {
@@ -43,6 +48,7 @@ public final class SessionStore: ObservableObject {
         currentRole = role
         UserDefaults.standard.set(userID.uuidString, forKey: currentUserKey)
         UserDefaults.standard.set(currentEmail, forKey: currentEmailKey)
+        DoctorIdentity.reconcile()
     }
 
     public func endSession() {
@@ -55,7 +61,10 @@ public final class SessionStore: ObservableObject {
 
     public func linkDoctorProfile(_ profile: inout DoctorProfile) {
         if profile.userID == nil { profile.userID = currentUserID }
-        if profile.id == UUID(uuidString: "00000000-0000-4000-8000-000000000000") {
+        // Match `doctor_profiles.profile_id` so Supabase writes resolve.
+        if let authID = profile.userID {
+            profile.id = authID
+        } else if profile.id == UUID(uuidString: "00000000-0000-4000-8000-000000000000") {
             profile.id = UUID()
         }
     }

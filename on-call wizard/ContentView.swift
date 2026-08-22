@@ -11,6 +11,8 @@ struct IdentifiableDate: Identifiable {
 
 struct ContentView: View {
     @StateObject private var auth = AuthService.shared
+    @StateObject private var syncCoordinator = DataSyncCoordinator.shared
+    @StateObject private var tokens = TokenStore.shared
     @EnvironmentObject private var deepLinks: DeepLinkRouter
     @State private var bannerRoute: DeepLinkRoute?
 
@@ -40,6 +42,23 @@ struct ContentView: View {
                     .padding(.top, 12)
                     Spacer()
                 }
+            }
+
+            if auth.state.isAuthenticated,
+               syncCoordinator.lastError != nil || tokens.lastPushError != nil {
+                VStack {
+                    Spacer()
+                    SyncOfflineBanner(
+                        isSyncing: syncCoordinator.isSyncing,
+                        detail: tokens.lastPushError ?? syncCoordinator.lastError
+                    ) {
+                        tokens.lastPushError = nil
+                        Task { await DataSyncCoordinator.shared.syncAll() }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 68)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.82), value: auth.state)
@@ -72,6 +91,49 @@ struct ContentView: View {
     }
 }
 
+/// A silent sync failure means this device and the hospital's board quietly
+/// disagree. Say so, and give the user one obvious way to fix it.
+struct SyncOfflineBanner: View {
+    let isSyncing: Bool
+    var detail: String? = nil
+    let onRetry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.icloud")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Saved on this device only")
+                    .font(.footnote.weight(.semibold))
+                Text(detail?.isEmpty == false ? detail! : "We can't reach the server right now.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+            Spacer(minLength: 8)
+            Button(action: onRetry) {
+                if isSyncing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Retry").font(.caption.weight(.bold))
+                }
+            }
+            .disabled(isSyncing)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+                .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+        )
+    }
+}
+
 // MARK: - Role Selection
 
 struct RoleSelectionView: View {
@@ -83,7 +145,7 @@ struct RoleSelectionView: View {
             VStack(spacing: 12) {
                 Image(systemName: "stethoscope.circle.fill")
                     .font(.system(size: 72)).symbolRenderingMode(.hierarchical).foregroundStyle(Color.accentColor)
-                Text("MD Shift")
+                Text(Brand.appName)
                     .font(.system(.largeTitle, design: .rounded, weight: .bold))
                 Text("Dynamic marketplace for on‑call coverage")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -267,6 +329,25 @@ struct DoctorDashboardView: View {
                             .padding(.vertical, 6)
                         }
                         .listRowBackground(Color.clear)
+                    }
+
+                    if PlusMembershipStore.isMonetizationLive {
+                        Section("MD Shift+") {
+                            NavigationLink {
+                                PlusUpgradeView(role: .doctor)
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(PlusMembershipStore.shared.isActive ? "Manage MD Shift+" : "Get MD Shift+")
+                                        Text(PlusMembershipStore.shared.isActive ? "Ad-free · extra tokens" : "\(PlusMembershipStore.priceLabel) · ad-free + perks")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "sparkles")
+                                }
+                            }
+                        }
                     }
 
                     Section("Schedule") {
@@ -580,7 +661,7 @@ struct EarningsHistoryView: View {
                             Text("No earnings yet — accept shifts after hospital approval.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         } else {
-                            HStack(spacing: 20) {
+                        HStack(spacing: 20) {
                                 StatPill(label: "Earned", value: NumberFormat.currency(totalEarned))
                                 StatPill(label: "Shifts", value: "\(completed.count + assignments.activeAssignedShifts().count)")
                                 StatPill(label: "Avg/shift", value: completed.isEmpty ? "—" : NumberFormat.currency(totalEarned / Double(max(1, completed.count))))
@@ -598,15 +679,15 @@ struct EarningsHistoryView: View {
                                 .padding(.vertical, 8)
                         } else {
                             ForEach(Array(completed.prefix(5).enumerated()), id: \.element.id) { i, assigned in
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
                                         Text(assigned.shift.hospital).font(.headline)
                                         Text(assigned.shift.displayDateLabel).font(.subheadline).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(NumberFormat.currency(assigned.shift.totalEarnings)).font(.headline).foregroundStyle(Color.accentColor)
                                 }
-                                .padding(.vertical, 6)
+                                Spacer()
+                                    Text(NumberFormat.currency(assigned.shift.totalEarnings)).font(.headline).foregroundStyle(Color.accentColor)
+                            }
+                            .padding(.vertical, 6)
                                 if i < min(4, completed.count - 1) { Divider() }
                             }
                         }
@@ -730,6 +811,8 @@ struct DoctorHomeView: View {
                             .buttonStyle(.plain)
                         }
                         .padding(.horizontal, 2)
+
+                        AdBannerView(placement: "doctor-home")
 
                         // Calendar
                         VStack(alignment: .leading, spacing: 0) {
@@ -1099,7 +1182,7 @@ struct UpcomingShiftHighlights: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             } else {
                 ForEach(recommended) { shift in
-                    ShiftRow(shift: shift)
+                ShiftRow(shift: shift)
                     if shift.id != recommended.last?.id { Divider() }
                 }
             }
@@ -1194,8 +1277,8 @@ struct ShiftsBrowseView: View {
                                 systemImage: "calendar.badge.exclamationmark"
                             )
                         } else {
-                            ForEach(filtered) { shift in
-                                Button { selectedShift = shift } label: { ShiftRow(shift: shift).cardStyle() }.buttonStyle(.plain)
+                        ForEach(filtered) { shift in
+                            Button { selectedShift = shift } label: { ShiftRow(shift: shift).cardStyle() }.buttonStyle(.plain)
                             }
                         }
                     }
@@ -1306,7 +1389,7 @@ struct ShiftDetailView: View {
                                 if shift.granularity == .day {
                                     DetailRow(label: "Days away", value: shift.daysUntilStart < 1 ? "< 1 day" : "\(Int(shift.daysUntilStart))d")
                                 } else {
-                                    DetailRow(label: "Time away", value: shift.hoursUntilStart < 1 ? "< 1 hour" : "\(Int(shift.hoursUntilStart))h")
+                                DetailRow(label: "Time away", value: shift.hoursUntilStart < 1 ? "< 1 hour" : "\(Int(shift.hoursUntilStart))h")
                                 }
                             case .flat(let r):
                                 DetailRow(label: "Rate type", value: "Fixed — \(NumberFormat.currency(r))\(shift.rateUnitLabel)")
@@ -1329,12 +1412,12 @@ struct ShiftDetailView: View {
                                         }
                                     }
                                 } else {
-                                    ForEach([("72h+",shift.rateFloor*1.00),("48h",shift.rateFloor*1.15),("24h",shift.rateFloor*1.35),("12h",shift.rateFloor*1.60),("6h",shift.rateFloor*1.85),("<2h",shift.rateFloor*2.20)], id: \.0) { label, rate in
-                                        HStack {
-                                            Text(label).foregroundStyle(.secondary).font(.subheadline)
-                                            Spacer()
+                                ForEach([("72h+",shift.rateFloor*1.00),("48h",shift.rateFloor*1.15),("24h",shift.rateFloor*1.35),("12h",shift.rateFloor*1.60),("6h",shift.rateFloor*1.85),("<2h",shift.rateFloor*2.20)], id: \.0) { label, rate in
+                                    HStack {
+                                        Text(label).foregroundStyle(.secondary).font(.subheadline)
+                                        Spacer()
                                             Text("\(NumberFormat.currency(rate))/hr").font(.subheadline.weight(.semibold))
-                                                .foregroundStyle(rate > shift.rateFloor * 1.5 ? Color.red : Color.accentColor)
+                                            .foregroundStyle(rate > shift.rateFloor * 1.5 ? Color.red : Color.accentColor)
                                         }
                                     }
                                 }
@@ -1571,16 +1654,40 @@ struct HospitalDashboardSheet: View {
                         }
                         .listRowBackground(Color.clear)
                     }
+                    if PlusMembershipStore.isMonetizationLive {
+                        Section("MD Shift+") {
+                            NavigationLink {
+                                PlusUpgradeView(role: .hospital)
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(PlusMembershipStore.shared.isActive ? "Manage MD Shift+" : "Get MD Shift+")
+                                        Text(PlusMembershipStore.shared.isActive ? "Ad-free · priority posting" : "\(PlusMembershipStore.priceLabel) · ad-free + perks")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "sparkles")
+                                }
+                            }
+                        }
+                    }
+
                     Section("Management") {
+                        NavigationLink {
+                            ScheduleAdminView(profile: profile)
+                        } label: {
+                            Label("Schedule Admin", systemImage: "checkmark.seal.fill")
+                        }
                         NavigationLink {
                             HospitalAnalyticsView(profile: profile)
                         } label: {
-                            Label("Analytics", systemImage: "chart.bar.fill")
+                        Label("Analytics", systemImage: "chart.bar.fill")
                         }
                         NavigationLink {
                             HospitalBillingView(profile: profile)
                         } label: {
-                            Label("Billing", systemImage: "creditcard.fill")
+                        Label("Billing", systemImage: "creditcard.fill")
                         }
                         NavigationLink {
                             HospitalPolicySettingsView(hospitalProfile: profile)
@@ -1764,7 +1871,7 @@ struct HospitalDashboardView: View {
                             Text("At a glance")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Brand.textPrimary)
-                            HStack(spacing: 12) {
+                        HStack(spacing: 12) {
                                 Button { showDashboard = true } label: {
                                     StatBadge(
                                         value: "\(hospitalService.fillRatePercent)%",
@@ -2116,7 +2223,7 @@ struct ScheduleCardRow: View {
                     .background(Brand.border)
                 HStack(spacing: 10) {
                     Button(action: onDeny) {
-                        HStack(spacing: 6) {
+        HStack(spacing: 6) {
                             Image(systemName: "xmark")
                                 .font(.system(size: 12, weight: .bold))
                             Text("Deny")
@@ -2569,15 +2676,15 @@ struct AlterShiftsView: View {
         if let ask = currentAskingPrice {
             return "Ask \(NumberFormat.currency(ask))"
         }
-        if let sr = suggestedRate {
+                                if let sr = suggestedRate {
             return "Ask \(NumberFormat.currency(sr.floor))"
         }
         return "Ask —"
     }
 
     private var algoEstimateSummary: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Current asking")
                         .font(.caption2.weight(.semibold))
@@ -2587,7 +2694,7 @@ struct AlterShiftsView: View {
                         .foregroundStyle(Brand.textPrimary)
                         .contentTransition(.numericText())
                 }
-                Spacer()
+                                            Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Algo estimate")
                         .font(.caption2.weight(.semibold))
@@ -2597,12 +2704,12 @@ struct AlterShiftsView: View {
                         .foregroundStyle(Brand.accent)
                         .contentTransition(.numericText())
                 }
-            }
-            HStack {
+                                        }
+                                        HStack {
                 Text("Est. total payout")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Brand.textSecondary)
-                Spacer()
+                                            Spacer()
                 Text("\(NumberFormat.currency(algoEstimateTotal))\(isHourly ? " (12h)" : "/day")")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(Brand.success)
@@ -3015,11 +3122,11 @@ private struct PricingFactorControlsView: View {
             }
         )
         return VStack(alignment: .leading, spacing: 6) {
-            HStack {
+                                            HStack {
                 Text("Scale")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Spacer()
+                                                Spacer()
                 Text(String(format: "%.2f", binding.wrappedValue))
                     .font(.caption.weight(.bold))
                     .foregroundStyle(Brand.textPrimary)
@@ -3077,7 +3184,7 @@ private struct PricingFactorControlsView: View {
             if policy.caseVolumeRewardEnabled {
                 HStack {
                     Text("Compensation scale")
-                        .font(.caption)
+                                    .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
                     Text("+\(policy.caseVolumeRewardScale)%")
@@ -3152,6 +3259,7 @@ struct HospitalAnalyticsView: View {
     @ObservedObject private var store = AssignedShiftsStore.shared
     @ObservedObject private var ledger = PenaltyLedgerStore.shared
     @ObservedObject private var hospitalService = Services.hospital
+    @ObservedObject private var savings = SavingsReporter.shared
 
     var body: some View {
         ZStack {
@@ -3160,6 +3268,7 @@ struct HospitalAnalyticsView: View {
                 VStack(spacing: 14) {
                     topStatsCard
                     timeBucketsRow
+                    verifiedSavingsCard
                     savingsSummaryCard
                     specialtyListCard
                     DoctorStockBoard(profile: profile)
@@ -3168,6 +3277,50 @@ struct HospitalAnalyticsView: View {
             }
         }
         .navigationTitle("Analytics")
+        .task {
+            if let hid = profile?.id { await savings.refresh(hospitalID: hid) }
+        }
+    }
+
+    /// Auditable savings — every dollar is a logged event, and MD Shift sees the same rows.
+    private var verifiedSavingsCard: some View {
+        let summary = profile.map { savings.summary(for: $0.id) } ?? SavingsReporter.Summary()
+        return VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: "Verified savings", systemImage: "checkmark.seal.fill")
+            if summary.count == 0 {
+                Text("Nothing tracked yet. Savings accrue when doctors fill shifts early — locking the rate before it escalates — and when late cancellations are recovered.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Brand.textSecondary)
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Total saved")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Brand.textSecondary)
+                    Spacer()
+                    Text(NumberFormat.currency(summary.total))
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(Brand.success)
+                }
+                Divider().overlay(Brand.border)
+                savingsLine("Escalation avoided by early fills", summary.rateSavings, Brand.success)
+                savingsLine("Late cancel & trade penalties recovered", summary.penalties, Brand.warning)
+                savingsLine("Average per day", summary.perDay, Brand.textPrimary)
+                Text("Based on \(summary.count) tracked event\(summary.count == 1 ? "" : "s").")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Brand.textTertiary)
+            }
+        }
+        .cardStyle()
+    }
+
+    private func savingsLine(_ label: String, _ amount: Double, _ color: Color) -> some View {
+        HStack {
+            Text(label).font(.system(size: 13)).foregroundStyle(Brand.textSecondary)
+            Spacer()
+            Text(NumberFormat.currency(amount))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(color)
+        }
     }
 
     // MARK: Data
@@ -3312,8 +3465,8 @@ struct HospitalAnalyticsView: View {
             Text(NumberFormat.currency(savingsPerDay))
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(Brand.success)
-        }
-        .cardStyle()
+                        }
+                        .cardStyle()
     }
 
     // Inline specialty list — each row navigates to the chart
@@ -3328,7 +3481,7 @@ struct HospitalAnalyticsView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Brand.textSecondary)
                     .padding(.vertical, 8)
-            } else {
+                            } else {
                 ForEach(Array(revenues.enumerated()), id: \.offset) { i, item in
                     VStack(spacing: 0) {
                         if i > 0 { SubtleDivider().padding(.vertical, 10) }
@@ -3360,9 +3513,9 @@ struct HospitalAnalyticsView: View {
                         .buttonStyle(.plain)
                     }
                 }
-            }
-        }
-        .cardStyle()
+                            }
+                        }
+                        .cardStyle()
     }
 
     private var specialtyRevenues: [(String, Double)] {
@@ -4080,14 +4233,14 @@ private struct DoctorRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
+        HStack(spacing: 12) {
                 ZStack {
                     Circle().fill(Color.accentColor.opacity(0.12)).frame(width: 42, height: 42)
                     Text(String(doctor.name.prefix(1))).font(.headline).foregroundStyle(Color.accentColor)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text("\(doctor.name), \(doctor.credential)").font(.headline)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("\(doctor.name), \(doctor.credential)").font(.headline)
                         if doctor.isAutoApproved {
                             Label("Auto", systemImage: "bolt.fill")
                                 .font(.caption2.weight(.bold))
@@ -4101,15 +4254,15 @@ private struct DoctorRow: View {
                         Text(doctor.specialty).font(.subheadline).foregroundStyle(.secondary)
                         VerificationBadge(status: doctor.verificationStatus, compact: true)
                     }
-                }
-                Spacer()
-                Button { withAnimation(.spring(response: 0.3)) { onToggleApprove() } } label: {
+            }
+            Spacer()
+            Button { withAnimation(.spring(response: 0.3)) { onToggleApprove() } } label: {
                     Image(systemName: doctor.isAutoApproved ? "star.fill" : "star")
                         .foregroundStyle(doctor.isAutoApproved ? Color.yellow : Color.secondary)
                         .font(.title3)
-                }
-                .buttonStyle(.plain)
             }
+            .buttonStyle(.plain)
+        }
             if let hospitalID {
                 DoctorTokenAllowanceStepper(hospitalID: hospitalID, doctorID: doctor.id, compact: true)
             }

@@ -469,6 +469,155 @@ final class DataSyncCoordinator: ObservableObject {
     }
 }
 
+// MARK: - Hospital roster (Supabase)
+
+enum SupabaseRosterRepository {
+    static func link(hospitalID: UUID, doctorID: UUID) async {
+        guard SupabaseConfig.isConfigured else { return }
+        let row: [String: Any] = [
+            "hospital_id": hospitalID.uuidString,
+            "doctor_id": doctorID.uuidString,
+            "auto_approve": false
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: row) else { return }
+        _ = try? await SupabaseHTTPClient.shared.request(
+            path: "rest/v1/hospital_doctors",
+            method: "POST",
+            body: body,
+            accessToken: SupabaseAuthService.shared.accessToken,
+            prefer: "resolution=ignore-duplicates,return=minimal"
+        )
+    }
+
+    static func fetch(hospitalID: UUID) async -> [DoctorSummary] {
+        guard SupabaseConfig.isConfigured else { return [] }
+        let path = "rest/v1/hospital_doctors?select=auto_approve,doctor_profiles(*)&hospital_id=eq.\(hospitalID.uuidString)"
+        guard
+            let data = try? await SupabaseHTTPClient.shared.request(
+                path: path,
+                accessToken: SupabaseAuthService.shared.accessToken
+            ),
+            let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return [] }
+
+        return rows.compactMap { row -> DoctorSummary? in
+            guard
+                let d = row["doctor_profiles"] as? [String: Any],
+                let id = UUID(uuidString: d["profile_id"] as? String ?? "")
+            else { return nil }
+            let first = d["first_name"] as? String ?? ""
+            let last = d["last_name"] as? String ?? ""
+            let specialties = d["specialties"] as? [String] ?? []
+            let statusRaw = d["verification_status"] as? String ?? "unverified"
+            return DoctorSummary(
+                id: id,
+                name: "\(first) \(last)".trimmingCharacters(in: .whitespaces),
+                credential: d["credential"] as? String ?? "MD",
+                specialty: specialties.first ?? "Internal Medicine",
+                npi: d["npi"] as? String ?? "",
+                isAutoApproved: row["auto_approve"] as? Bool ?? false,
+                verificationStatus: VerificationStatus(rawValue: statusRaw) ?? .unverified
+            )
+        }
+    }
+
+    static func setAutoApprove(hospitalID: UUID, doctorID: UUID, autoApprove: Bool) async {
+        guard SupabaseConfig.isConfigured else { return }
+        guard let body = try? JSONSerialization.data(withJSONObject: ["auto_approve": autoApprove]) else { return }
+        _ = try? await SupabaseHTTPClient.shared.request(
+            path: "rest/v1/hospital_doctors?hospital_id=eq.\(hospitalID.uuidString)&doctor_id=eq.\(doctorID.uuidString)",
+            method: "PATCH",
+            body: body,
+            accessToken: SupabaseAuthService.shared.accessToken,
+            prefer: "return=minimal"
+        )
+    }
+}
+
+// MARK: - Trade sync (Supabase)
+
+/// Shared `trade_requests` table + edge functions so partners see trades across devices.
+@MainActor
+final class SupabaseTradeRepository {
+    static let shared = SupabaseTradeRepository()
+
+    private static let iso = ISO8601DateFormatter()
+
+    func push(_ trade: ShiftTradeRequest) async {
+        guard SupabaseConfig.isConfigured else { return }
+        var body: [String: Any] = [
+            "id": trade.id.uuidString,
+            "shift_id": trade.shiftID.uuidString,
+            "from_doctor_id": trade.fromDoctorID.uuidString,
+            "to_doctor_id": trade.toDoctorID.uuidString,
+            "compensation_amount": trade.compensationAmount
+        ]
+        if let requested = trade.requestedShiftID { body["requested_shift_id"] = requested.uuidString }
+        if let counter = trade.counterOfTradeID { body["counter_of_trade_id"] = counter.uuidString }
+        if let name = trade.fromDoctorName { body["from_doctor_name"] = name }
+        if let name = trade.toDoctorName { body["to_doctor_name"] = name }
+        if let date = trade.offeredDate { body["offered_date"] = Self.iso.string(from: date) }
+        if let date = trade.requestedDate { body["requested_date"] = Self.iso.string(from: date) }
+        if let specialty = trade.specialty { body["specialty"] = specialty }
+
+        _ = try? await SupabaseHTTPClient.shared.invokeFunction(
+            name: "request-trade",
+            body: body,
+            accessToken: SupabaseAuthService.shared.accessToken
+        )
+    }
+
+    func respond(tradeID: UUID, accept: Bool) async {
+        guard SupabaseConfig.isConfigured else { return }
+        _ = try? await SupabaseHTTPClient.shared.invokeFunction(
+            name: "respond-trade",
+            body: ["trade_id": tradeID.uuidString, "accept": accept],
+            accessToken: SupabaseAuthService.shared.accessToken
+        )
+    }
+
+    func fetch(doctorID: UUID) async -> [ShiftTradeRequest] {
+        guard SupabaseConfig.isConfigured else { return [] }
+        let filter = "or=(from_doctor_id.eq.\(doctorID.uuidString),to_doctor_id.eq.\(doctorID.uuidString))"
+        guard let data = try? await SupabaseHTTPClient.shared.request(
+            path: "rest/v1/trade_requests?select=*&\(filter)&order=created_at.desc&limit=200",
+            accessToken: SupabaseAuthService.shared.accessToken
+        ), let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+
+        return rows.compactMap { row in
+            guard
+                let id = UUID(uuidString: row["id"] as? String ?? ""),
+                let shiftID = UUID(uuidString: row["shift_id"] as? String ?? ""),
+                let from = UUID(uuidString: row["from_doctor_id"] as? String ?? ""),
+                let to = UUID(uuidString: row["to_doctor_id"] as? String ?? "")
+            else { return nil }
+
+            let state = ShiftTradeRequest.State(rawValue: row["state"] as? String ?? "pending") ?? .pending
+            let date = { (key: String) -> Date? in
+                guard let raw = row[key] as? String else { return nil }
+                return Self.iso.date(from: raw) ?? Self.iso.date(from: raw + "Z")
+            }
+
+            return ShiftTradeRequest(
+                id: id,
+                fromDoctorID: from,
+                toDoctorID: to,
+                shiftID: shiftID,
+                requestedShiftID: UUID(uuidString: row["requested_shift_id"] as? String ?? ""),
+                compensationAmount: (row["compensation_amount"] as? NSNumber)?.doubleValue ?? 0,
+                counterOfTradeID: UUID(uuidString: row["counter_of_trade_id"] as? String ?? ""),
+                createdAt: date("created_at") ?? Date(),
+                state: state,
+                fromDoctorName: row["from_doctor_name"] as? String,
+                toDoctorName: row["to_doctor_name"] as? String,
+                offeredDate: date("offered_date"),
+                requestedDate: date("requested_date"),
+                specialty: row["specialty"] as? String
+            )
+        }
+    }
+}
+
 enum Repositories {
     static var shifts: ShiftRepositoryProtocol {
         SupabaseConfig.isConfigured ? SupabaseShiftRepository.shared : LocalShiftRepository.shared

@@ -62,12 +62,50 @@ public final class AssignedShiftsStore: ObservableObject {
         let assigned = AssignedShift(shift: shift, doctorID: docID)
         assignedShifts.append(assigned)
         save()
+        // Filling early locks the rate before it escalates; the gap is real avoided cost.
+        SavingsReporter.shared.recordFill(shift: shift, doctorID: docID)
         tradeService.upsertShift(shift.toDoctorShift(doctorID: docID))
         let policy = SchedulingPolicyStore.shared.policy(for: shift.hospitalID)
         tradeService.upsertPolicy(policy, for: shift.hospitalID)
     }
 
     /// Synchronous seed helper for investor demo. Skips if shift already assigned.
+    /// Folds server assignments into the local store without re-running accept side
+    /// effects (savings reporting, trade registration) that already happened elsewhere.
+    public func mergeRemote(_ remote: [AssignedShift]) {
+        guard !remote.isEmpty else { return }
+        var changed = false
+        for item in remote {
+            if let idx = assignedShifts.firstIndex(where: { $0.id == item.id || $0.shift.id == item.shift.id }) {
+                if assignedShifts[idx].status != item.status || assignedShifts[idx].doctorID != item.doctorID {
+                    assignedShifts[idx].status = item.status
+                    assignedShifts[idx].doctorID = item.doctorID
+                    changed = true
+                }
+            } else {
+                assignedShifts.append(item)
+                changed = true
+            }
+        }
+        if changed {
+            save()
+            syncFromService()
+        }
+    }
+
+    /// Repoints shifts held under a pre-Supabase doctor id. See `DoctorIdentity`.
+    public func remapDoctor(from previous: UUID, to next: UUID) {
+        var changed = false
+        for idx in assignedShifts.indices where assignedShifts[idx].doctorID == previous {
+            assignedShifts[idx].doctorID = next
+            changed = true
+        }
+        if changed {
+            save()
+            syncFromService()
+        }
+    }
+
     public func seedAssignmentIfNeeded(shift: Shift, doctorID: UUID) {
         if assignedShifts.contains(where: { $0.shift.id == shift.id && $0.status != .canceled }) { return }
         assignedShifts.append(AssignedShift(shift: shift, doctorID: doctorID))
@@ -181,6 +219,7 @@ public final class AssignedShiftsStore: ObservableObject {
         }
         save()
         syncFromService()
+        await SupabaseTradeRepository.shared.push(trade)
         return trade
     }
 
@@ -242,6 +281,7 @@ public final class AssignedShiftsStore: ObservableObject {
         }
         save()
         syncFromService()
+        await SupabaseTradeRepository.shared.push(trade)
         return trade
     }
 
@@ -325,6 +365,7 @@ public final class AssignedShiftsStore: ObservableObject {
         if incomingTrades.contains(where: { $0.id == trade.id }) {
             incomingTrades.removeAll { $0.id == trade.id }
         }
+        await SupabaseTradeRepository.shared.respond(tradeID: trade.id, accept: accept)
         return penalty
     }
 
@@ -431,6 +472,11 @@ public final class AssignedShiftsStore: ObservableObject {
     private func effectiveStart(for shift: Shift, policy: SchedulingPolicy) -> Date {
         if shift.rateUnit == .perHour { return shift.start }
         return Calendar.current.startOfDay(for: shift.date)
+    }
+
+    /// Re-reads trade state after a remote merge.
+    public func refreshTrades() {
+        syncFromService()
     }
 
     private func syncFromService() {
@@ -647,7 +693,7 @@ public final class AssignedShiftsStore: ObservableObject {
         assignedShifts.removeAll { Self.mockShiftIDs.contains($0.shift.id) }
         // Also drop synthetic partner / counter demo days.
         assignedShifts.removeAll { shift in
-            var bytes = shift.shift.id.uuid
+            let bytes = shift.shift.id.uuid
             return bytes.0 == 0xF0 && bytes.2 == 0xDE && bytes.3 == 0x40
         }
         tradeService.clearAllTrades()
@@ -758,6 +804,33 @@ public final class PenaltyLedgerStore: ObservableObject {
             shiftID: shiftID, type: type, amount: amount, createdAt: Date()
         ))
         save()
+
+        // A recovered penalty is money back for the hospital — report it as savings.
+        let shift = AssignedShiftsStore.shared.assignedShifts.first { $0.shift.id == shiftID }?.shift
+        SavingsReporter.shared.recordPenalty(
+            hospitalID: hospitalID,
+            shiftID: shiftID,
+            doctorID: doctorID,
+            type: type,
+            amount: amount,
+            specialty: shift?.specialty,
+            hospitalName: shift?.hospital
+        )
+    }
+
+    /// Repoints entries logged under a pre-Supabase doctor id. See `DoctorIdentity`.
+    public func remapDoctor(from previous: UUID, to next: UUID) {
+        var changed = false
+        entries = entries.map { entry in
+            guard entry.doctorID == previous else { return entry }
+            changed = true
+            return Entry(
+                id: entry.id, doctorID: next, hospitalID: entry.hospitalID,
+                shiftID: entry.shiftID, type: entry.type,
+                amount: entry.amount, createdAt: entry.createdAt
+            )
+        }
+        if changed { save() }
     }
 
     public func totalPenalties(for doctorID: UUID) -> Decimal {
@@ -812,7 +885,9 @@ public final class SchedulingPolicyStore: ObservableObject {
      a doctor's requests to another.
      */
     public func effectiveDailyTokenLimit(forDoctorID doctorID: UUID?) -> Int {
-        guard let doctorID else { return SchedulingPolicy().defaultDailyTokens }
+        guard let doctorID else {
+            return SchedulingPolicy().defaultDailyTokens + (PlusMembershipStore.shared.isActive ? PlusMembershipStore.tokenBonus : 0)
+        }
         var limit: Int?
         for policy in policiesByHospital.values {
             let candidate = policy.dailyTokenLimit(forDoctorID: doctorID)
@@ -821,7 +896,8 @@ public final class SchedulingPolicyStore: ObservableObject {
         // Also consider the in-memory active policy if it isn't keyed yet.
         let active = policy.dailyTokenLimit(forDoctorID: doctorID)
         limit = limit.map { max($0, active) } ?? active
-        return limit ?? SchedulingPolicy().defaultDailyTokens
+        let base = limit ?? SchedulingPolicy().defaultDailyTokens
+        return base + (PlusMembershipStore.shared.isActive ? PlusMembershipStore.tokenBonus : 0)
     }
 
     public func setDoctorTokenLimit(hospitalID: UUID, doctorID: UUID, limit: Int?) {

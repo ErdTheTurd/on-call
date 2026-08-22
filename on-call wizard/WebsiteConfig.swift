@@ -8,6 +8,18 @@ enum WebsiteConfig {
         return url
     }
 
+    static var supportURL: URL {
+        baseURL?.appendingPathComponent("support/")
+            ?? URL(string: "https://mdshift.net/support/")!
+    }
+
+    static var plusCheckoutFallbackURL: URL? {
+        let root = baseURL ?? URL(string: "https://mdshift.net")!
+        var comps = URLComponents(url: root, resolvingAgainstBaseURL: false)
+        comps?.queryItems = [URLQueryItem(name: "open", value: "plus")]
+        return comps?.url ?? URL(string: "https://mdshift.net/?open=plus")
+    }
+
     static var dashboardURL: URL? {
         baseURL?.appendingPathComponent("dashboard.html")
     }

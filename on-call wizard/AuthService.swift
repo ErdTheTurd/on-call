@@ -10,6 +10,11 @@ enum AuthState: Equatable {
     case needsOnboarding(UserRole)
     case locked(UserRole)        // has profile but needs Face ID
     case authenticated(UserRole)
+
+    var isAuthenticated: Bool {
+        if case .authenticated = self { return true }
+        return false
+    }
 }
 
 // MARK: - Auth Service

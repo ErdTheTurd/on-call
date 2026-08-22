@@ -11,3 +11,11 @@ Config/Secrets.xcconfig
 
 # Local Resend/Supabase tokens for setup scripts
 .env.resend
+
+# Finder duplicate copies ("File 2.swift") — Xcode auto-compiles the whole
+# synced folder, so these cause Invalid redeclaration build failures.
+**/* [0-9].swift
+**/* [0-9].js
+**/* [0-9].tsx
+**/* [0-9].ts
+**/* [0-9].css
