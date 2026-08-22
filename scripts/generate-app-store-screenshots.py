@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Generate App Store Connect–valid iPhone 6.5" screenshots (1284 × 2778).
+"""Generate App Store Connect–valid screenshots.
+
+iPhone 6.5": 1284 × 2778 (optional 1242 × 2688)
+iPad 13":    2064 × 2752 (optional 2048 × 2732)
 
 Usage:
-  python3 scripts/generate-app-store-screenshots.py
-  python3 scripts/generate-app-store-screenshots.py --also-1242
+  python3 scripts/generate-app-store-screenshots.py --ipad
+  python3 scripts/generate-app-store-screenshots.py --also-1242 --ipad
 """
 
 from __future__ import annotations
@@ -15,6 +18,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1284, 2778
 W_ALT, H_ALT = 1242, 2688
+IPAD_W, IPAD_H = 2064, 2752
+IPAD_ALT_W, IPAD_ALT_H = 2048, 2732
+SCALE = 1.0
 
 BG = (7, 11, 23)
 SURFACE = (22, 28, 44)
@@ -33,6 +39,7 @@ OUT = ROOT / "AppStoreScreenshots"
 
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    size = max(18, int(round(size * SCALE)))
     candidates = [
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
@@ -301,22 +308,43 @@ def shot_analytics(sizes):
     save(img, "06-analytics", sizes)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--also-1242", action="store_true", help="Also write 1242×2688 variants")
-    args = parser.parse_args()
-    sizes = [(W, H)]
-    if args.also_1242:
-        sizes.append((W_ALT, H_ALT))
-
+def render_all(sizes: list[tuple[int, int]]) -> None:
     shot_doctor_home(sizes)
     shot_open_shifts(sizes)
     shot_hospital(sizes)
     shot_alter(sizes)
     shot_approvals(sizes)
     shot_analytics(sizes)
-    print(f"\nUpload these to App Store Connect → iPhone 6.5\" display.")
-    print(f"Required: {W}×{H} (or {W_ALT}×{H_ALT}). Folder: {OUT}")
+
+
+def main():
+    global W, H, SCALE
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--also-1242", action="store_true", help="Also write iPhone 1242×2688")
+    parser.add_argument("--iphone", action="store_true", help="Write iPhone sizes (default if --ipad omitted)")
+    parser.add_argument("--ipad", action="store_true", help="Write iPad 13\" 2064×2752 (and 2048×2732)")
+    args = parser.parse_args()
+    do_iphone = args.iphone or not args.ipad
+    if args.ipad and not args.iphone:
+        do_iphone = False
+    if not args.ipad and not args.iphone:
+        do_iphone = True
+
+    if do_iphone:
+        W, H, SCALE = 1284, 2778, 1.0
+        sizes = [(W, H)]
+        if args.also_1242:
+            sizes.append((W_ALT, H_ALT))
+        render_all(sizes)
+        print(f"iPhone 6.5\": upload *-{W}x{H}.png")
+
+    if args.ipad:
+        W, H, SCALE = IPAD_W, IPAD_H, 1.35
+        render_all([(IPAD_W, IPAD_H), (IPAD_ALT_W, IPAD_ALT_H)])
+        print(f"iPad 13\": upload *-{IPAD_W}x{IPAD_H}.png (required if the app runs on iPad)")
+        print(f"iPad 12.9\" optional: *-{IPAD_ALT_W}x{IPAD_ALT_H}.png")
+
+    print(f"Folder: {OUT}")
 
 
 if __name__ == "__main__":

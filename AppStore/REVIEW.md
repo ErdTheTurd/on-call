@@ -137,12 +137,23 @@ Upload from `AppStoreScreenshots/`:
 5. `05-approvals-1284x2778.png`
 6. `06-analytics-1284x2778.png`
 
-Use the **iPhone 6.5"** slot (1284×2778). Do not upload Simulator captures from iPhone 17 Pro Max.
+Use the **iPhone 6.5"** slot (1284×2778) and the **iPad 13"** slot (2064×2752).
+
+iPad files:
+
+1. `01-doctor-home-2064x2752.png`
+2. `02-open-shifts-2064x2752.png`
+3. `03-hospital-dashboard-2064x2752.png`
+4. `04-alter-rates-2064x2752.png`
+5. `05-approvals-2064x2752.png`
+6. `06-analytics-2064x2752.png`
+
+Optional 12.9" copies: `*-2048x2732.png`.
 
 Regenerate:
 
 ```bash
-python3 scripts/generate-app-store-screenshots.py --also-1242
+python3 scripts/generate-app-store-screenshots.py --also-1242 --ipad --iphone
 ```
 
 ## App Store Connect app record
