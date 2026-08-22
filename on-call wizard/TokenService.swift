@@ -13,6 +13,7 @@ public final class TokenStore: ObservableObject {
     @Published public var tokensRemaining: Int = 3
     @Published public var dailyLimit: Int = 3
     @Published public var requestedDays: [TokenRequest] = []
+    @Published public var lastPushError: String?
 
     public struct TokenRequest: Identifiable, Codable, Equatable {
         public let id: UUID
@@ -98,6 +99,30 @@ public final class TokenStore: ObservableObject {
         applyDailyLimit(limit)
     }
 
+    /// Repoints requests filed under a pre-Supabase doctor id. See `DoctorIdentity`.
+    public func remapDoctor(from previous: UUID, to next: UUID) {
+        var changed = false
+        requestedDays = requestedDays.map { req in
+            guard req.doctorID == previous else { return req }
+            changed = true
+            return TokenRequest(
+                id: req.id,
+                doctorID: next,
+                doctorName: req.doctorName,
+                credential: req.credential,
+                hospitalID: req.hospitalID,
+                date: req.date,
+                status: req.status,
+                hospitalName: req.hospitalName,
+                specialty: req.specialty,
+                requestedAt: req.requestedAt,
+                approvedAt: req.approvedAt,
+                shiftRate: req.shiftRate
+            )
+        }
+        if changed { save() }
+    }
+
     public func applyDailyLimit(_ limit: Int) {
         let clamped = SchedulingPolicy.clampDailyTokens(limit)
         guard clamped != dailyLimit else { return }
@@ -152,7 +177,14 @@ public final class TokenStore: ObservableObject {
         requestedDays.append(req)
         if status != .autoApproved { tokensRemaining -= 1 }
         save()
-        Task { try? await Repositories.tokens.submit(req) }
+        Task {
+            do {
+                try await Repositories.tokens.submit(req)
+                lastPushError = nil
+            } catch {
+                lastPushError = error.localizedDescription
+            }
+        }
         return true
     }
 
@@ -161,7 +193,14 @@ public final class TokenStore: ObservableObject {
         requestedDays[idx].status = .approved
         requestedDays[idx].approvedAt = Date()
         save()
-        Task { try? await Repositories.tokens.updateStatus(id: id, status: .approved) }
+        Task {
+            do {
+                try await Repositories.tokens.updateStatus(id: id, status: .approved)
+                lastPushError = nil
+            } catch {
+                lastPushError = error.localizedDescription
+            }
+        }
     }
 
     public func deny(id: UUID) {
@@ -171,7 +210,14 @@ public final class TokenStore: ObservableObject {
         }
         requestedDays[idx].status = .denied
         save()
-        Task { try? await Repositories.tokens.updateStatus(id: id, status: .denied) }
+        Task {
+            do {
+                try await Repositories.tokens.updateStatus(id: id, status: .denied)
+                lastPushError = nil
+            } catch {
+                lastPushError = error.localizedDescription
+            }
+        }
     }
 
     public func autoApprovePending(forDoctorID doctorID: UUID) {
@@ -185,8 +231,14 @@ public final class TokenStore: ObservableObject {
         if changed { save() }
     }
 
-    public func pendingRequests(forHospitalID hospitalID: UUID) -> [TokenRequest] {
+    /// All coverage requests for a hospital (any status).
+    public func requests(forHospitalID hospitalID: UUID) -> [TokenRequest] {
         requestedDays.filter { $0.hospitalID == hospitalID }
+    }
+
+    /// Only requests still waiting on hospital approval.
+    public func pendingRequests(forHospitalID hospitalID: UUID) -> [TokenRequest] {
+        requests(forHospitalID: hospitalID).filter { $0.status == .pending }
     }
 
     public func requests(forHospitalID hospitalID: UUID, on date: Date) -> [TokenRequest] {

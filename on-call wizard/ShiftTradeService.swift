@@ -127,6 +127,21 @@ public final class ShiftTradeService {
         }
     }
 
+    /// Repoints trades and shifts held under a pre-Supabase doctor id. See `DoctorIdentity`.
+    public func remapDoctor(from previous: UUID, to next: UUID) {
+        for (id, var trade) in trades {
+            var changed = false
+            if trade.fromDoctorID == previous { trade.fromDoctorID = next; changed = true }
+            if trade.toDoctorID == previous { trade.toDoctorID = next; changed = true }
+            if changed { trades[id] = trade }
+        }
+        for (id, var shift) in shifts where shift.doctorID == previous {
+            shift.doctorID = next
+            shifts[id] = shift
+        }
+        persist()
+    }
+
     public func upsertPolicy(_ policy: SchedulingPolicy, for hospitalID: UUID) {
         policies[hospitalID] = policy
         persist()
@@ -138,6 +153,17 @@ public final class ShiftTradeService {
     }
 
     public func getShift(_ id: UUID) -> DoctorShift? { shifts[id] }
+
+    /// Folds server trades in, so a request made on a partner's device shows up here.
+    public func mergeRemote(_ remote: [ShiftTradeRequest]) {
+        guard !remote.isEmpty else { return }
+        var changed = false
+        for trade in remote where trades[trade.id] != trade {
+            trades[trade.id] = trade
+            changed = true
+        }
+        if changed { persist() }
+    }
 
     public func pendingTrades(for doctorID: UUID, direction: TradeDirection) -> [ShiftTradeRequest] {
         trades.values.filter { trade in

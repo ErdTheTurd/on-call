@@ -37,7 +37,7 @@ struct AuthView: View {
                             Image(systemName: "waveform.path.ecg")
                                 .font(.system(size: 28, weight: .semibold))
                                 .foregroundStyle(Color(hex: "4F8EF7"))
-                            Text("MD Shift")
+                            Text(Brand.appName)
                                 .font(.system(size: 22, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                         }
@@ -80,7 +80,7 @@ struct AuthView: View {
             Text("Authenticator code")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white)
-            Text("Open Google Authenticator (or any TOTP app) and enter the 6-digit code for MD Shift.")
+            Text("Open Google Authenticator (or any TOTP app) and enter the 6-digit code for \(Brand.appName).")
                 .font(.system(size: 14))
                 .foregroundStyle(Color.white.opacity(0.55))
             codeField(placeholder: "6-digit code", text: $mfaCode) {
@@ -95,7 +95,7 @@ struct AuthView: View {
             Button {
                 mfaChallenge = false
                 mfaCode = ""
-                try? SupabaseAuthService.shared.signOut()
+                SupabaseAuthService.shared.signOut()
             } label: {
                 Text("Back to sign in").font(.system(size: 14, weight: .medium)).foregroundStyle(Color.white.opacity(0.55)).frame(maxWidth: .infinity)
             }
@@ -111,7 +111,7 @@ struct AuthView: View {
             Text("Set up authenticator")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white)
-            Text("Add MD Shift in Google Authenticator using this secret, then enter the 6-digit code.")
+            Text("Add \(Brand.appName) in Google Authenticator using this secret, then enter the 6-digit code.")
                 .font(.system(size: 14))
                 .foregroundStyle(Color.white.opacity(0.55))
             if !enroll.secret.isEmpty {

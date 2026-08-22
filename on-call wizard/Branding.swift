@@ -88,6 +88,11 @@ extension View {
 // MARK: - Brand Tokens
 
 enum Brand {
+    /// Public product name. Same app as the Xcode project “on-call wizard” /
+    /// former “On Call” label — one product, one brand.
+    static let appName = "MD Shift"
+    static let plusName = "MD Shift+"
+
     // ── Backgrounds ──────────────────────────────────────────────────────────
     static let bg = Color(UIColor { tc in
         tc.userInterfaceStyle == .dark
@@ -372,13 +377,11 @@ struct MonthNavButton: View {
 // MARK: - Contact Support
 
 struct ContactSupportFooter: View {
-    private let email = "erdunn706@gmail.com"
+    private let supportURL = WebsiteConfig.supportURL
 
     var body: some View {
         Button {
-            if let url = URL(string: "mailto:\(email)") {
-                UIApplication.shared.open(url)
-            }
+            UIApplication.shared.open(supportURL)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "envelope")
@@ -387,7 +390,7 @@ struct ContactSupportFooter: View {
                     .font(.system(size: 11, weight: .medium))
                 Text("·")
                     .foregroundStyle(Brand.textTertiary)
-                Text(email)
+                Text("mdshift.net/support")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Brand.accent)
             }
@@ -397,19 +400,17 @@ struct ContactSupportFooter: View {
             .padding(.horizontal, 12)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Contact support at \(email)")
+        .accessibilityLabel("Contact support at mdshift.net/support")
     }
 }
 
 /// List row for hamburger dashboards (hospital / doctor).
 struct ContactSupportRow: View {
-    private let email = "erdunn706@gmail.com"
+    private let supportURL = WebsiteConfig.supportURL
 
     var body: some View {
         Button {
-            if let url = URL(string: "mailto:\(email)") {
-                UIApplication.shared.open(url)
-            }
+            UIApplication.shared.open(supportURL)
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "envelope.fill")
@@ -418,7 +419,7 @@ struct ContactSupportRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Contact support")
                         .foregroundStyle(Brand.textPrimary)
-                    Text(email)
+                    Text("mdshift.net/support")
                         .font(.caption)
                         .foregroundStyle(Brand.accent)
                 }
@@ -428,7 +429,7 @@ struct ContactSupportRow: View {
                     .foregroundStyle(Brand.textTertiary)
             }
         }
-        .accessibilityLabel("Contact support at \(email)")
+        .accessibilityLabel("Contact support at mdshift.net/support")
     }
 }
 
