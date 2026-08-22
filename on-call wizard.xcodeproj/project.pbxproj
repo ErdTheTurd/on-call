@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		16BC69B42FEB677500C31198 /* on-call wizard.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "on-call wizard.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		16BC69B42FEB677500C31198 /* MD Shift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MD Shift.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		16BC69C22FEB678000C31198 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -42,7 +42,7 @@
 		16BC69B52FEB677500C31198 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				16BC69B42FEB677500C31198 /* on-call wizard.app */,
+				16BC69B42FEB677500C31198 /* MD Shift.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -77,7 +77,7 @@
 			packageProductDependencies = (
 			);
 			productName = "on-call wizard";
-			productReference = 16BC69B42FEB677500C31198 /* on-call wizard.app */;
+			productReference = 16BC69B42FEB677500C31198 /* MD Shift.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -265,10 +265,12 @@
 				CODE_SIGN_ENTITLEMENTS = Config/OnCallWizard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8LVD2L956K;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "MD Shift";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock MD Shift quickly and securely with Face ID.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -283,7 +285,6 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.eporthospine.mdshift;
 				PRODUCT_NAME = "MD Shift";
-				DEVELOPMENT_TEAM = 8LVD2L956K;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -303,10 +304,12 @@
 				CODE_SIGN_ENTITLEMENTS = Config/OnCallWizard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8LVD2L956K;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "MD Shift";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock MD Shift quickly and securely with Face ID.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -321,7 +324,6 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.eporthospine.mdshift;
 				PRODUCT_NAME = "MD Shift";
-				DEVELOPMENT_TEAM = 8LVD2L956K;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;

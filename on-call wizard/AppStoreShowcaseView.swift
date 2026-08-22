@@ -50,7 +50,7 @@ struct AppStoreShowcaseView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Text("Screenshot kit")
+                    Text("Preview")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Brand.textTertiary)
                 }
@@ -58,19 +58,6 @@ struct AppStoreShowcaseView: View {
                     Button("Sign out", action: onSignOut)
                         .font(.subheadline.weight(.semibold))
                 }
-            }
-            .safeAreaInset(edge: .bottom) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("App Store size: 1284 × 2778")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Brand.textPrimary)
-                    Text("Upload the PNGs from the AppStoreScreenshots folder (not a phone screenshot). Wrong sizes come from newer Pro Max simulators.")
-                        .font(.caption2)
-                        .foregroundStyle(Brand.textSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(Brand.surfaceHigh)
             }
         }
     }
