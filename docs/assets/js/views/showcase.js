@@ -198,7 +198,10 @@ export function renderShowcase(state = {}) {
           <p class="subtitle">${escapeHtml(meta.blurb)}</p>
         </div>
         ${renderShot(shot)}
-        <p class="showcase-hint">Swipe chips above · capture each screen for App Store Connect</p>
+        <p class="showcase-hint">
+          App Store Connect needs <strong>1284 × 2778</strong> (or 1242 × 2688).
+          Use the ready PNGs in <code>AppStoreScreenshots/</code> — do not upload a raw device screenshot from a newer Pro Max.
+        </p>
       </main>
     </div>`;
 }
