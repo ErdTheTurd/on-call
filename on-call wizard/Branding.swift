@@ -88,9 +88,8 @@ extension View {
 // MARK: - Brand Tokens
 
 enum Brand {
-    /// Public product name. Same app as the Xcode project “on-call wizard” /
-    /// former “On Call” label — one product, one brand.
-    static let appName = "MD Shift"
+    /// Public product name under the icon / App Store listing.
+    static let appName = "MD Shift Demo"
     static let plusName = "MD Shift+"
 
     // ── Backgrounds ──────────────────────────────────────────────────────────

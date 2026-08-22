@@ -290,7 +290,7 @@ final class SupabaseAuthService: NSObject {
         }
     }
 
-    func enrollTotp(friendlyName: String = "MD Shift") async throws -> TotpEnrollment {
+    func enrollTotp(friendlyName: String = Brand.appName) async throws -> TotpEnrollment {
         guard let access = accessToken else { throw SupabaseError.notConfigured }
         let body: [String: Any] = [
             "factor_type": "totp",
