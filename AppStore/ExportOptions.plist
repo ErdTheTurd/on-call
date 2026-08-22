@@ -13,7 +13,7 @@
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>com.eporthospine.mdshift</key>
-		<string>MD Shift Demo App Store</string>
+		<string>Md Shift Demo</string>
 	</dict>
 	<key>destination</key>
 	<string>upload</string>

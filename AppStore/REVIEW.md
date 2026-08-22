@@ -147,11 +147,11 @@ python3 scripts/generate-app-store-screenshots.py --also-1242
 
 ## Build & upload (no physical iPhone required)
 
-You do **not** need a phone to submit. Release builds use **Manual** signing with the **MD Shift Demo App Store** profile (App Store profiles are not device-bound). Automatic Debug signing still needs a device UDID if you want to run on hardware.
+You do **not** need a phone to submit. Release builds use **Manual** signing with the **Md Shift Demo** profile (App Store profiles are not device-bound). Automatic Debug signing still needs a device UDID if you want to run on hardware.
 
 ### One-time profile setup
 
-Follow **[CREATE_PROFILE.md](CREATE_PROFILE.md)** — create/install an App Store provisioning profile named exactly `MD Shift Demo App Store`.
+Follow **[CREATE_PROFILE.md](CREATE_PROFILE.md)** — create/install an App Store provisioning profile named exactly `Md Shift Demo`.
 
 Also ensure an **Apple Distribution** cert exists: Xcode → Settings → Accounts → team **8LVD2L956K** → Manage Certificates → **+** → Apple Distribution.
 
