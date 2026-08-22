@@ -9,6 +9,7 @@ import { enrollTotp, verifyTotp, challengeAndVerifyFirstTotp } from "./domain/mf
 import { hydrateLocalProfiles } from "./domain/sync.js";
 import { renderAuthView, bindAuth } from "./views/auth.js";
 import { renderAdminApp, bindAdmin } from "./views/admin.js";
+import { renderShowcase, bindShowcase } from "./views/showcase.js";
 import { isAdminUser, fetchApplications, setApplicationStatus } from "./domain/approvals.js";
 import { fetchSavingsEvents, groupSavingsByHospital } from "./domain/savings.js";
 import { startDemo, isDemoSession, clearDemoFlag } from "./domain/demo.js";
@@ -38,7 +39,8 @@ const state = {
   pendingAuth: null,
   onb: { step: 0, role: "Doctor", specialties: [], verified: false, codeVerified: false },
   ui: { tab: "home", sheet: false, daySheet: null, calendarMonth: new Date().toISOString() },
-  admin: emptyAdminState()
+  admin: emptyAdminState(),
+  showcase: { shot: "doctor-home" }
 };
 
 function emptyAdminState() {
@@ -54,6 +56,7 @@ function merge(path, patch) {
   if (path === "ui") Object.assign(state.ui, patch);
   else if (path === "onb") Object.assign(state.onb, patch);
   else if (path === "admin") Object.assign(state.admin, patch);
+  else if (path === "showcase") Object.assign(state.showcase, patch);
   else Object.assign(state, patch);
 }
 
@@ -105,6 +108,18 @@ function enterDemo(role) {
   };
   state.route = hospital ? "hospital" : "doctor";
   update({ error: null, loading: false });
+}
+
+/** App Store screenshot kit — admin perfect screens. */
+function enterShowcase() {
+  beginSession({
+    userID: "00000000-0000-4000-9000-000000000099",
+    email: "info@erdanimates.shop",
+    role: "Hospital"
+  });
+  state.route = "showcase";
+  state.showcase = { shot: "doctor-home" };
+  update({ error: null, loading: false, email: "info@erdanimates.shop" });
 }
 
 /** Routes admins straight to the approvals queue. Returns false for everyone else. */
@@ -392,6 +407,20 @@ function render() {
     return;
   }
 
+  if (state.route === "showcase") {
+    root.innerHTML = renderShowcase(state.showcase);
+    bindShowcase(root, {
+      onShot: (shot) => update({ showcase: { shot } }),
+      onSignOut: () => {
+        signOut();
+        clearDemoFlag();
+        state.route = "auth";
+        update({ email: "", error: null });
+      }
+    });
+    return;
+  }
+
   if (state.route === "doctor") {
     if (!DOCTOR_TABS.includes(state.ui.tab)) state.ui.tab = "home";
     root.innerHTML = demoRibbon() + syncBanner() + renderDoctorApp(state.ui);
@@ -623,6 +652,11 @@ async function handleAuthSubmit({ email, password, confirm }) {
     }
 
     if (isConfigured()) {
+      // Screenshot kit admin — before Supabase so App Store captures always work.
+      if (normalizedEmail === "info@erdanimates.shop" && String(password).trim() === "1234567890") {
+        enterShowcase();
+        return;
+      }
       try {
         const res = await signInRemote(normalizedEmail, password);
         if (res.needsMfa) {
@@ -640,10 +674,15 @@ async function handleAuthSubmit({ email, password, confirm }) {
         return;
       } catch (err) {
         const message = err?.message || "Could not sign in.";
+        if (normalizedEmail === "info@erdanimates.shop") {
+          if (String(password).trim() === "1234567890") {
+            enterShowcase();
+            return;
+          }
+        }
         const demoRoleByEmail = {
           "erdunn706@gmail.com": "Hospital",
-          "jdunn@eporthospine.com": "Doctor",
-          "info@erdanimates.shop": "Hospital"
+          "jdunn@eporthospine.com": "Doctor"
         };
         // Investor emails: if Supabase rejects them mid-demo, open the seeded walkthrough.
         if (demoRoleByEmail[normalizedEmail]) {
@@ -685,10 +724,13 @@ async function handleAuthSubmit({ email, password, confirm }) {
     }
 
     // Offline: Explore-style shortcut for known demo emails.
+    if (normalizedEmail === "info@erdanimates.shop" && String(password).trim() === "1234567890") {
+      enterShowcase();
+      return;
+    }
     const offlineDemo = {
       "erdunn706@gmail.com": "Hospital",
-      "jdunn@eporthospine.com": "Doctor",
-      "info@erdanimates.shop": "Hospital"
+      "jdunn@eporthospine.com": "Doctor"
     };
     if (offlineDemo[normalizedEmail]) {
       enterDemo(offlineDemo[normalizedEmail]);

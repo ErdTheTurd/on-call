@@ -3,12 +3,13 @@ import Foundation
 /// Investor walkthrough helpers — Explore buttons + quiet email shortcuts.
 @MainActor
 enum DemoAccounts {
-    /// Offline / unconfigured fallback only. Real accounts use Supabase passwords.
+    /// Offline / screenshot-kit password for known demo emails.
     static let password = "1234567890"
 
     private static let doctorUserID = UUID(uuidString: "00000000-0000-4000-9000-000000000001")!
     private static let hospitalUserID = UUID(uuidString: "00000000-0000-4000-9000-000000000002")!
     private static let hospitalID = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
+    private static let adminUserID = UUID(uuidString: "00000000-0000-4000-9000-000000000099")!
 
     private static let aliases: [String: (email: String, role: UserRole)] = [
         "erdunn": ("erdunn706@gmail.com", .hospital),
@@ -16,28 +17,46 @@ enum DemoAccounts {
         "erdunn706@gmail.com": ("erdunn706@gmail.com", .hospital),
         "jdunn": ("jdunn@eporthospine.com", .doctor),
         "jdunn@eporthospine": ("jdunn@eporthospine.com", .doctor),
-        "jdunn@eporthospine.com": ("jdunn@eporthospine.com", .doctor),
-        "info": ("info@erdanimates.shop", .hospital),
-        "info@erdanimates.shop": ("info@erdanimates.shop", .hospital),
-        "admin": ("info@erdanimates.shop", .hospital)
+        "jdunn@eporthospine.com": ("jdunn@eporthospine.com", .doctor)
+    ]
+
+    private static let adminEmails: Set<String> = [
+        "info@erdanimates.shop",
+        "info",
+        "admin"
     ]
 
     static func normalize(_ raw: String) -> String {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if adminEmails.contains(value) { return "info@erdanimates.shop" }
         if let mapped = aliases[value]?.email { return mapped }
         if value.hasSuffix("@eporthospine") { return value + ".com" }
         return value
     }
 
+    static func isAdminEmail(_ raw: String) -> Bool {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return adminEmails.contains(value) || normalize(value) == "info@erdanimates.shop"
+    }
+
     static func role(forEmail raw: String) -> UserRole? {
         let email = normalize(raw)
+        if isAdminEmail(email) { return nil }
         return aliases[email]?.role
             ?? aliases.first(where: { $0.value.email == email })?.value.role
     }
 
-    /// Quiet offline shortcut (password `1234567890`) when Supabase is down or not configured.
+    /// Admin screenshot kit: info@erdanimates.shop + 1234567890
+    static func matchAdmin(email raw: String, password rawPassword: String) -> Bool {
+        guard InvestorDemo.isEnabled else { return false }
+        let password = rawPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isAdminEmail(raw) && password == Self.password
+    }
+
+    /// Quiet offline shortcut for doctor/hospital demos.
     static func matchOffline(email raw: String, password rawPassword: String) -> (email: String, role: UserRole)? {
         guard InvestorDemo.isEnabled else { return nil }
+        if matchAdmin(email: raw, password: rawPassword) { return nil }
         let email = normalize(raw)
         let password = rawPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard password == Self.password else { return nil }
@@ -45,9 +64,13 @@ enum DemoAccounts {
         return (email, role)
     }
 
-    /// Known demo emails — used to fall back to a seeded walkthrough if Supabase rejects them mid-demo.
-    static func isKnownDemoEmail(_ raw: String) -> Bool {
-        role(forEmail: raw) != nil
+    static func enterAdminShowcase(auth: AuthService) {
+        SessionStore.shared.beginSession(
+            userID: adminUserID,
+            email: "info@erdanimates.shop",
+            role: .hospital
+        )
+        auth.enterAdminShowcase()
     }
 
     static func enter(email: String, role: UserRole, auth: AuthService) {

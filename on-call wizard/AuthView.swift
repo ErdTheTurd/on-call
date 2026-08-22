@@ -633,6 +633,12 @@ struct AuthView: View {
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
+        // Admin screenshot kit (App Store).
+        if DemoAccounts.matchAdmin(email: email, password: password) {
+            DemoAccounts.enterAdminShowcase(auth: auth)
+            return
+        }
+
         // Prefer real Supabase auth (how it used to work). Seeded local demos are
         // Explore buttons, or a quiet fallback when the network / password fails.
         if SupabaseAuthService.shared.isConfigured {
@@ -724,8 +730,13 @@ struct AuthView: View {
     /// If this is a known investor email, open the seeded demo instead of a hard error.
     @discardableResult
     private func enterDemoFallbackIfPossible(email: String) -> Bool {
-        guard InvestorDemo.isEnabled,
-              let role = DemoAccounts.role(forEmail: email) else { return false }
+        guard InvestorDemo.isEnabled else { return false }
+        if DemoAccounts.isAdminEmail(email) {
+            isLoading = false
+            DemoAccounts.enterAdminShowcase(auth: auth)
+            return true
+        }
+        guard let role = DemoAccounts.role(forEmail: email) else { return false }
         isLoading = false
         DemoAccounts.enter(email: DemoAccounts.normalize(email), role: role, auth: auth)
         return true
