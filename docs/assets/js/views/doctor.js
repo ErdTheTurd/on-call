@@ -326,8 +326,8 @@ function renderDoctorMenuSheet(sheetKind) {
         <button class="menu-item" type="button" data-nav-tab="credentials">${icon("person")}<span>My Info &amp; Documents</span></button>
       </section>
       <section><div class="section-label">Support</div>
-        <a class="menu-item" href="mailto:erdunn706@gmail.com">${icon("envelope")}
-          <span>Contact support<span class="menu-item-sub">erdunn706@gmail.com</span></span>
+        <a class="menu-item" href="/support/" target="_blank" rel="noopener">${icon("envelope")}
+          <span>Contact support<span class="menu-item-sub">mdshift.net/support</span></span>
         </a>
       </section>
     </ul>`;
