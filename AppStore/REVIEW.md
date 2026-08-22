@@ -145,7 +145,22 @@ Regenerate:
 python3 scripts/generate-app-store-screenshots.py --also-1242
 ```
 
-## Build & upload (no physical iPhone required)
+## App Store Connect app record
+
+You already have a **web** listing for `com.eporthospine.mdshift.web`. The iOS app must be a **separate** record with bundle ID exactly:
+
+```
+com.eporthospine.mdshift
+```
+
+Xcode may have created it as **MD Shift Demo** (Apple ID `6804116879`). Confirm at:
+
+https://appstoreconnect.apple.com/apps
+
+If you see **MD Shift Demo**, open it → App Information → rename display name to **MD Shift**.
+
+Then in Xcode Organizer: select the archive → **Distribute App** → App Store Connect → Upload again.
+
 
 You do **not** need a phone to submit. You need an **Apple Distribution** certificate and an **App Store** provisioning profile (those are not device-bound). Xcode failed earlier because it tried to make a *Development* profile, which does require a device.
 

@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MD Shift — App Store Connect fill sheet</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --card: #151b2e;
+      --line: rgba(255,255,255,.08);
+      --text: #f4f7ff;
+      --muted: #9aa6c1;
+      --accent: #4f8ef7;
+      --ok: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 16px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+      background: radial-gradient(1200px 500px at 10% -10%, rgba(79,142,247,.22), transparent 50%), var(--bg);
+      color: var(--text);
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+    h1 { font-size: 28px; letter-spacing: -.03em; margin: 0 0 8px; }
+    .lede { color: var(--muted); margin: 0 0 28px; }
+    .warn {
+      padding: 14px 16px;
+      border: 1px solid rgba(79,142,247,.35);
+      background: rgba(79,142,247,.1);
+      border-radius: 12px;
+      margin-bottom: 28px;
+    }
+    .warn strong { color: var(--accent); }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px 18px 14px;
+      margin-bottom: 14px;
+    }
+    h2 { font-size: 15px; margin: 0 0 4px; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+    .where { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+    pre, .val {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #0b1020;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+    button {
+      flex: 0 0 auto;
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 650;
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button.copied { background: var(--ok); color: #06281c; }
+    ul.clicks { margin: 0; padding-left: 18px; color: var(--muted); }
+    ul.clicks li { margin: 6px 0; }
+    a { color: var(--accent); }
+    .shots { display: grid; gap: 8px; }
+    .shots a { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Fill App Store Connect</h1>
+    <p class="lede">Open <strong>MD Shift Demo</strong> only (bundle <code>com.eporthospine.mdshift</code>). Ignore the other “MD Shift” listing — that’s the web app. Click Copy next to each field and paste.</p>
+
+    <div class="warn">
+      <strong>Open this app:</strong>
+      <a href="https://appstoreconnect.apple.com/apps/6804116879" target="_blank" rel="noreferrer">appstoreconnect.apple.com/apps/6804116879</a>
+      <br />Screenshots folder:
+      <code>/Users/edwardhome/Desktop/on-call wizard/AppStoreScreenshots/</code>
+    </div>
+
+    <section>
+      <div class="row"><h2>0 · Rename the app</h2><button data-copy="MD Shift">Copy</button></div>
+      <p class="where">App Information → Name (left sidebar, not the version page)</p>
+      <div class="val">MD Shift</div>
+    </section>
+
+    <section>
+      <div class="row"><h2>1 · Privacy Policy URL</h2><button data-copy="https://mdshift.net/privacypolicy/">Copy</button></div>
+      <p class="where">App Information → Privacy Policy URL</p>
+      <div class="val">https://mdshift.net/privacypolicy/</div>
+    </section>
+
+    <section>
+      <div class="row"><h2>2 · Category</h2></div>
+      <p class="where">App Information → Category</p>
+      <ul class="clicks">
+        <li>Primary: <strong>Medical</strong></li>
+        <li>Secondary: <strong>Business</strong></li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="row"><h2>3 · Age rating</h2></div>
+      <p class="where">App Information → Age Ratings → Edit</p>
+      <ul class="clicks">
+        <li>All violence / sexual / profanity / drugs / gambling: <strong>None</strong></li>
+        <li>Medical or treatment information: <strong>None</strong> (this is scheduling, not clinical content)</li>
+        <li>Unrestricted web access: <strong>No</strong></li>
+        <li>User-generated content: <strong>Yes</strong> (shift notes / profiles) — then “moderated / reported” as you prefer; we have support email</li>
+        <li>Expected result: <strong>4+</strong></li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="row"><h2>4 · Copyright</h2><button data-copy="2026 Edward Dunn">Copy</button></div>
+      <p class="where">App Information → Copyright, or Version → Copyright</p>
+      <div class="val">2026 Edward Dunn</div>
+    </section>
+
+    <section>
+      <div class="row"><h2>5 · Subtitle</h2><button data-copy="Hospital on-call, filled.">Copy</button></div>
+      <p class="where">iOS App 1.0 → Version Information (30 characters max)</p>
+      <div class="val">Hospital on-call, filled.</div>
+    </section>
+
+    <section>
+      <div class="row"><h2>6 · Promotional text</h2><button data-copy="Fill open call faster. Doctors claim shifts at locked rates; hospitals set Smart Algo or proprietary rates and approve coverage with a clear audit trail.">Copy</button></div>
+      <p class="where">Version Information → Promotional Text</p>
+      <pre>Fill open call faster. Doctors claim shifts at locked rates; hospitals set Smart Algo or proprietary rates and approve coverage with a clear audit trail.</pre>
+    </section>
+
+    <section>
+      <div class="row"><h2>7 · Description</h2><button data-copy="MD Shift helps hospitals fill on-call coverage and helps doctors find shifts without the usual email chaos.
+
+Hospitals
+• See fill rate, open nights, and pending approvals in one place
+• Set locked proprietary rates or Smart Algo escalation with a clear floor
+• Approve doctors and hospitals before they cover
+• Track savings you can audit
+
+Doctors
+• Claim open shifts with rates you can trust
+• Manage assigned call, trades, and availability
+• Keep credentials and NPI verification in one profile
+
+Explore mode includes sample data so you can walk the product before creating a live roster. MD Shift is a scheduling tool — not emergency dispatch. Use your hospital’s normal channels for clinical emergencies.
+
+Support: https://mdshift.net/support/
+Privacy: https://mdshift.net/privacypolicy/">Copy</button></div>
+      <p class="where">Version Information → Description</p>
+      <pre>MD Shift helps hospitals fill on-call coverage and helps doctors find shifts without the usual email chaos.
+
+Hospitals
+• See fill rate, open nights, and pending approvals in one place
+• Set locked proprietary rates or Smart Algo escalation with a clear floor
+• Approve doctors and hospitals before they cover
+• Track savings you can audit
+
+Doctors
+• Claim open shifts with rates you can trust
+• Manage assigned call, trades, and availability
+• Keep credentials and NPI verification in one profile
+
+Explore mode includes sample data so you can walk the product before creating a live roster. MD Shift is a scheduling tool — not emergency dispatch. Use your hospital’s normal channels for clinical emergencies.
+
+Support: https://mdshift.net/support/
+Privacy: https://mdshift.net/privacypolicy/</pre>
+    </section>
+
+    <section>
+      <div class="row"><h2>8 · Keywords</h2><button data-copy="on-call,hospital,physician,shift,coverage,scheduling,locum,NPI,medical staffing,doctor">Copy</button></div>
+      <p class="where">Version Information → Keywords (no spaces after commas)</p>
+      <div class="val">on-call,hospital,physician,shift,coverage,scheduling,locum,NPI,medical staffing,doctor</div>
+    </section>
+
+    <section>
+      <div class="row"><h2>9 · Support URL</h2><button data-copy="https://mdshift.net/support/">Copy</button></div>
+      <p class="where">Version Information → Support URL</p>
+      <div class="val">https://mdshift.net/support/</div>
+    </section>
+
+    <section>
+      <div class="row"><h2>10 · Marketing URL</h2><button data-copy="https://mdshift.net/">Copy</button></div>
+      <p class="where">Version Information → Marketing URL</p>
+      <div class="val">https://mdshift.net/</div>
+    </section>
+
+    <section>
+      <div class="row"><h2>11 · What’s New</h2><button data-copy="First release of MD Shift — hospital on-call coverage, doctor shift claims, trades, and verification.">Copy</button></div>
+      <p class="where">Version Information → What’s New (1.0)</p>
+      <pre>First release of MD Shift — hospital on-call coverage, doctor shift claims, trades, and verification.</pre>
+    </section>
+
+    <section>
+      <div class="row"><h2>12 · Screenshots</h2></div>
+      <p class="where">iPhone 6.5" display — drag these 6 files in this order. Do not use Simulator captures.</p>
+      <div class="shots">
+        <span>1. AppStoreScreenshots/01-doctor-home-1284x2778.png</span>
+        <span>2. AppStoreScreenshots/02-open-shifts-1284x2778.png</span>
+        <span>3. AppStoreScreenshots/03-hospital-dashboard-1284x2778.png</span>
+        <span>4. AppStoreScreenshots/04-alter-rates-1284x2778.png</span>
+        <span>5. AppStoreScreenshots/05-approvals-1284x2778.png</span>
+        <span>6. AppStoreScreenshots/06-analytics-1284x2778.png</span>
+      </div>
+    </section>
+
+    <section>
+      <div class="row"><h2>13 · Build</h2></div>
+      <p class="where">Build → Select a build before you submit</p>
+      <ul class="clicks">
+        <li>Wait until processing finishes (can take 5–20 min)</li>
+        <li>Choose <strong>1.0 (1)</strong></li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="row"><h2>14 · Sign-in required?</h2></div>
+      <p class="where">App Review Information</p>
+      <ul class="clicks">
+        <li>Sign-in required: <strong>Yes</strong></li>
+        <li>User name — copy below</li>
+        <li>Password — copy below</li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="row"><h2>15 · Demo username</h2><button data-copy="jdunn@eporthospine.com">Copy</button></div>
+      <div class="val">jdunn@eporthospine.com</div>
+    </section>
+
+    <section>
+      <div class="row"><h2>16 · Demo password</h2><button data-copy="1234567890">Copy</button></div>
+      <div class="val">1234567890</div>
+    </section>
+
+    <section>
+      <div class="row"><h2>17 · Review notes</h2><button data-copy="MD Shift schedules hospital on-call coverage for doctors and hospitals.
+
+HOW TO REVIEW (recommended)
+1. On the sign-in screen, tap “Explore as doctor” or “Explore as hospital”.
+2. No password required. Sample data loads so you can browse Dashboard / Alter Rates / Doctors (hospital) or Home / Open Shifts / Trades (doctor).
+3. Explore mode is labeled as sample data and is not live hospital volume.
+
+ALTERNATE LOGINS (seeded demos)
+• Doctor: jdunn@eporthospine.com / 1234567890
+• Hospital: erdunn706@gmail.com / 1234567890
+If network auth fails, these still open the seeded walkthrough.
+
+Face ID may appear after a real account is created; cancel it on Simulator.
+
+Support: https://mdshift.net/support/
+Contact: erdunn706@gmail.com">Copy</button></div>
+      <p class="where">App Review Information → Notes</p>
+      <pre>MD Shift schedules hospital on-call coverage for doctors and hospitals.
+
+HOW TO REVIEW (recommended)
+1. On the sign-in screen, tap “Explore as doctor” or “Explore as hospital”.
+2. No password required. Sample data loads so you can browse Dashboard / Alter Rates / Doctors (hospital) or Home / Open Shifts / Trades (doctor).
+3. Explore mode is labeled as sample data and is not live hospital volume.
+
+ALTERNATE LOGINS (seeded demos)
+• Doctor: jdunn@eporthospine.com / 1234567890
+• Hospital: erdunn706@gmail.com / 1234567890
+If network auth fails, these still open the seeded walkthrough.
+
+Face ID may appear after a real account is created; cancel it on Simulator.
+
+Support: https://mdshift.net/support/
+Contact: erdunn706@gmail.com</pre>
+    </section>
+
+    <section>
+      <div class="row"><h2>18 · Contact</h2></div>
+      <p class="where">App Review Information → Contact</p>
+      <ul class="clicks">
+        <li>First name: Edward</li>
+        <li>Last name: Dunn</li>
+        <li>Phone: your number</li>
+        <li>Email: <strong>erdunn706@gmail.com</strong></li>
+      </ul>
+      <p class="where" style="margin-top:10px">Copy email:</p>
+      <div class="row"><div class="val" style="flex:1">erdunn706@gmail.com</div><button data-copy="erdunn706@gmail.com">Copy</button></div>
+    </section>
+
+    <section>
+      <div class="row"><h2>19 · Encryption</h2></div>
+      <p class="where">App Review Information / Export Compliance (if asked)</p>
+      <ul class="clicks">
+        <li>Uses encryption? <strong>Yes</strong> (HTTPS only)</li>
+        <li>Exempt / standard encryption only? <strong>Yes</strong></li>
+        <li>The app already ships <code>ITSAppUsesNonExemptEncryption = NO</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="row"><h2>20 · Content rights</h2></div>
+      <ul class="clicks">
+        <li>Does not contain third-party content you don’t have rights to: <strong>Yes, I have the rights</strong> / no third-party media</li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="row"><h2>21 · Advertising Identifier</h2></div>
+      <ul class="clicks"><li>Uses IDFA? <strong>No</strong></li></ul>
+    </section>
+
+    <section>
+      <div class="row"><h2>22 · App Privacy (nutrition labels)</h2></div>
+      <p class="where">App Privacy → Get Started / Edit</p>
+      <ul class="clicks">
+        <li>Do you collect data? <strong>Yes</strong></li>
+        <li>Tracking? <strong>No</strong></li>
+        <li>Declare these, all <strong>linked to identity</strong>, used for <strong>App Functionality</strong> only:</li>
+        <li>Contact Info → <strong>Email Address</strong></li>
+        <li>Contact Info → <strong>Name</strong></li>
+        <li>Identifiers → <strong>User ID</strong></li>
+        <li>User Content → <strong>Other User Content</strong> (NPI, license, specialties, shifts)</li>
+        <li>Not used for advertising, not sold, not tracking</li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="row"><h2>23 · Submit</h2></div>
+      <ul class="clicks">
+        <li>Add for Review → Submit for Review</li>
+        <li>Leave the other “MD Shift” (.web) listing alone</li>
+      </ul>
+    </section>
+  </main>
+  <script>
+    document.querySelectorAll("button[data-copy]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        const prev = btn.textContent;
+        btn.textContent = "Copied";
+        btn.classList.add("copied");
+        setTimeout(() => { btn.textContent = prev; btn.classList.remove("copied"); }, 1200);
+      });
+    });
+  </script>
+</body>
+</html>
