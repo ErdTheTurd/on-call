@@ -623,17 +623,15 @@ async function handleAuthSubmit({ email, password, confirm }) {
     }
 
     if (isConfigured()) {
-      // Investor demo shortcuts — same passwords as iOS, even with Supabase on.
+      // Investor demo shortcuts — full seeded walkthrough (same as Explore buttons).
       const demoAccounts = {
         "erdunn706@gmail.com": "Hospital",
         "jdunn@eporthospine.com": "Doctor",
         "info@erdanimates.shop": "Hospital"
       };
-      if (password === "1234567890" && demoAccounts[normalizedEmail]) {
-        const role = demoAccounts[normalizedEmail];
-        beginSession({ userID: crypto.randomUUID?.() || String(Date.now()), email: normalizedEmail, role });
-        state.route = role === "Hospital" ? "hospital" : "doctor";
-        update({ loading: false, error: null });
+      if (String(password).trim() === "1234567890" && demoAccounts[normalizedEmail]) {
+        enterDemo(demoAccounts[normalizedEmail]);
+        update({ loading: false, error: null, email: normalizedEmail });
         return;
       }
       try {
@@ -679,16 +677,30 @@ async function handleAuthSubmit({ email, password, confirm }) {
           return;
         }
         const friendly = /invalid login credentials/i.test(message)
-          ? "Wrong email or password. Try erdunn706@gmail.com, or create an account."
+          ? (demoAccounts[normalizedEmail]
+              ? "Wrong password. Investor demo password is 1234567890 (or tap Explore below)."
+              : "Wrong email or password. Try erdunn / jdunn with password 1234567890, or create an account.")
           : message;
         update({ error: friendly, loading: false });
         return;
       }
     }
 
+    // Offline / unconfigured: still allow investor demo shortcuts.
+    const offlineDemo = {
+      "erdunn706@gmail.com": "Hospital",
+      "jdunn@eporthospine.com": "Doctor",
+      "info@erdanimates.shop": "Hospital"
+    };
+    if (String(password).trim() === "1234567890" && offlineDemo[normalizedEmail]) {
+      enterDemo(offlineDemo[normalizedEmail]);
+      update({ loading: false, error: null, email: normalizedEmail });
+      return;
+    }
+
     let acct = signInLocal(normalizedEmail, password);
     if (!acct) {
-      update({ error: "Wrong email or password. Create an account if you are new.", loading: false });
+      update({ error: "Wrong email or password. Demo: erdunn / jdunn · password 1234567890.", loading: false });
       return;
     }
     beginSession({ userID: acct.id, email: acct.email, role: acct.role });

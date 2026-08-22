@@ -427,20 +427,20 @@ struct AuthView: View {
                         Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
                     }
                     Button {
-                        finishAuth(userID: UUID(), email: "jdunn@eporthospine.com", role: .doctor)
+                        DemoAccounts.enter(email: "jdunn@eporthospine.com", role: .doctor, auth: auth)
                     } label: {
                         oauthLabel(systemImage: "stethoscope", title: "Explore as a doctor")
                     }
                     .buttonStyle(.plain)
                     Button {
-                        finishAuth(userID: UUID(), email: "erdunn706@gmail.com", role: .hospital)
+                        DemoAccounts.enter(email: "erdunn706@gmail.com", role: .hospital, auth: auth)
                     } label: {
                         oauthLabel(systemImage: "cross.case.fill", title: "Explore as a hospital")
                     }
                     .buttonStyle(.plain)
-                    Text("Opens mock sample data — not a live hospital account.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.white.opacity(0.35))
+                    Text("Demo logins: erdunn / jdunn · password \(DemoAccounts.password)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.45))
                         .multilineTextAlignment(.center)
                 }
                 .padding(.horizontal, 24)
@@ -496,23 +496,10 @@ struct AuthView: View {
         )
     }
 
-    // Investor / ship demos: local shortcuts always available (DEBUG + Release).
-    private let demoAccounts: [String: (email: String, role: UserRole)] = [
-        "erdunn": ("erdunn706@gmail.com", .hospital),
-        "erdunn706@gmail.com": ("erdunn706@gmail.com", .hospital),
-        "jdunn": ("jdunn@eporthospine.com", .doctor),
-        "jdunn@eporthospine": ("jdunn@eporthospine.com", .doctor),
-        "jdunn@eporthospine.com": ("jdunn@eporthospine.com", .doctor)
-    ]
-    private let demoPassword = "1234567890"
+    // Investor demo aliases live in `DemoAccounts`.
 
     private func normalizeEmail(_ raw: String) -> String {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if let mapped = demoAccounts[value]?.email { return mapped }
-        if value == "erdunn" { return "erdunn706@gmail.com" }
-        if value == "jdunn" || value == "jdunn@eporthospine" { return "jdunn@eporthospine.com" }
-        if value.hasSuffix("@eporthospine") { return value + ".com" }
-        return value
+        DemoAccounts.normalize(raw)
     }
 
     private func finishAuth(userID: UUID, email: String, role: UserRole) {
@@ -646,16 +633,14 @@ struct AuthView: View {
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
-        // Local demo shortcuts for investor walks — work even when Supabase is configured.
-        if InvestorDemo.isEnabled,
-           let demo = demoAccounts[trimmedEmail],
-           password == demoPassword {
+        // Local demo shortcuts for investor walks — seed full mock session.
+        if let demo = DemoAccounts.match(email: email, password: password) {
             isLoading = true
             Task {
-                try? await Task.sleep(nanoseconds: 300_000_000)
+                try? await Task.sleep(nanoseconds: 200_000_000)
                 await MainActor.run {
                     isLoading = false
-                    finishAuth(userID: UUID(), email: demo.email, role: demo.role)
+                    DemoAccounts.enter(email: demo.email, role: demo.role, auth: auth)
                 }
             }
             return
