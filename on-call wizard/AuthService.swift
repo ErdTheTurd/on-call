@@ -10,10 +10,13 @@ enum AuthState: Equatable {
     case needsOnboarding(UserRole)
     case locked(UserRole)        // has profile but needs Face ID
     case authenticated(UserRole)
+    case adminShowcase           // App Store / investor screenshot kit
 
     var isAuthenticated: Bool {
-        if case .authenticated = self { return true }
-        return false
+        switch self {
+        case .authenticated, .adminShowcase: return true
+        default: return false
+        }
     }
 }
 
@@ -82,6 +85,13 @@ final class AuthService: ObservableObject {
     func completeOnboarding(role: UserRole) {
         UserDefaults.standard.set(role.rawValue, forKey: roleKey)
         state = .authenticated(role)
+    }
+
+    /// App Store screenshot kit — not a hospital/doctor session.
+    func enterAdminShowcase() {
+        UserDefaults.standard.removeObject(forKey: roleKey)
+        state = .adminShowcase
+        errorMessage = nil
     }
 
     // MARK: - Sign Out

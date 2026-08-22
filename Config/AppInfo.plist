@@ -4,22 +4,27 @@
 <dict>
 	<key>UIUserInterfaceStyle</key>
 	<string>Automatic</string>
-	<key>SUPABASE_URL</key>
-	<string>$(SUPABASE_URL)</string>
-	<key>SUPABASE_ANON_KEY</key>
-	<string>$(SUPABASE_ANON_KEY)</string>
-	<key>WEBSITE_BASE_URL</key>
-	<string>$(WEBSITE_BASE_URL)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>callsystems.on-call-wizard</string>
+			<string>com.eporthospine.mdshift</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>oncallwizard</string>
+				<string>mdshift</string>
 			</array>
 		</dict>
 	</array>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>$(SUPABASE_ANON_KEY)</string>
+	<key>SUPABASE_URL</key>
+	<string>$(SUPABASE_URL)</string>
+	<key>WEBSITE_BASE_URL</key>
+	<string>$(WEBSITE_BASE_URL)</string>
+	<key>STRIPE_PLUS_PAYMENT_LINK</key>
+	<string>$(STRIPE_PLUS_PAYMENT_LINK)</string>
 </dict>
 </plist>

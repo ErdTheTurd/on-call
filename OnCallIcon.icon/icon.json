@@ -22,39 +22,26 @@
           "fill" : {
             "solid" : "display-p3:1.00000,1.00000,1.00000,1.00000"
           },
-          "image-name" : "SVG Image.svg",
-          "name" : "Glass sheen",
-          "opacity" : 0.4,
-          "position" : {
-            "scale" : 1.05,
-            "translation-in-points" : [
-              -36,
-              -64
-            ]
-          }
-        },
-        {
-          "fill" : {
-            "solid" : "display-p3:1.00000,1.00000,1.00000,1.00000"
-          },
+          "glass" : true,
           "image-name" : "SVG Image 2.svg",
           "name" : "Pulse",
           "position" : {
-            "scale" : 1,
+            "scale" : 0.92,
             "translation-in-points" : [
               0,
-              10
+              8
             ]
           }
         }
       ],
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.35
+        "opacity" : 0.28
       },
+      "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.45
+        "value" : 0.42
       }
     }
   ],

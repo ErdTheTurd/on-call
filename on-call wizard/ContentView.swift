@@ -32,6 +32,9 @@ struct ContentView: View {
             case .authenticated(let role):
                 mainView(for: role)
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+            case .adminShowcase:
+                AppStoreShowcaseView(onSignOut: { auth.signOut() })
+                    .transition(.opacity)
             }
 
             if let bannerRoute {
@@ -44,7 +47,7 @@ struct ContentView: View {
                 }
             }
 
-            if auth.state.isAuthenticated,
+            if case .authenticated = auth.state,
                syncCoordinator.lastError != nil || tokens.lastPushError != nil {
                 VStack {
                     Spacer()

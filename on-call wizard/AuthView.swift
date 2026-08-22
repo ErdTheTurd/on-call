@@ -415,7 +415,39 @@ struct AuthView: View {
             .disabled(isLoading || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty || (mode == .signUp && confirmPassword.isEmpty))
             .padding(.horizontal, 24)
             .padding(.top, 20)
-            .padding(.bottom, 32)
+
+            if InvestorDemo.isEnabled && mode == .signIn {
+                VStack(spacing: 10) {
+                    HStack(spacing: 12) {
+                        Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                        Text("OR LOOK AROUND FIRST")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.25))
+                            .tracking(1)
+                        Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                    }
+                    Button {
+                        DemoAccounts.enter(email: "jdunn@eporthospine.com", role: .doctor, auth: auth)
+                    } label: {
+                        oauthLabel(systemImage: "stethoscope", title: "Explore as a doctor")
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        DemoAccounts.enter(email: "erdunn706@gmail.com", role: .hospital, auth: auth)
+                    } label: {
+                        oauthLabel(systemImage: "cross.case.fill", title: "Explore as a hospital")
+                    }
+                    .buttonStyle(.plain)
+                    Text("Sample data, no account needed.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+            }
+
+            Color.clear.frame(height: 20)
         }
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
@@ -464,26 +496,10 @@ struct AuthView: View {
         )
     }
 
-    #if DEBUG
-    private let demoAccounts: [String: (email: String, role: UserRole)] = [
-        "erdunn": ("erdunn706@gmail.com", .hospital),
-        "erdunn706@gmail.com": ("erdunn706@gmail.com", .hospital),
-        "jdunn": ("jdunn@eporthospine.com", .doctor),
-        "jdunn@eporthospine": ("jdunn@eporthospine.com", .doctor),
-        "jdunn@eporthospine.com": ("jdunn@eporthospine.com", .doctor)
-    ]
-    private let demoPassword = "1234567890"
-    #endif
+    // Investor demo aliases live in `DemoAccounts`.
 
     private func normalizeEmail(_ raw: String) -> String {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        #if DEBUG
-        if let mapped = demoAccounts[value]?.email { return mapped }
-        #endif
-        if value == "erdunn" { return "erdunn706@gmail.com" }
-        if value == "jdunn" || value == "jdunn@eporthospine" { return "jdunn@eporthospine.com" }
-        if value.hasSuffix("@eporthospine") { return value + ".com" }
-        return value
+        DemoAccounts.normalize(raw)
     }
 
     private func finishAuth(userID: UUID, email: String, role: UserRole) {
@@ -617,21 +633,14 @@ struct AuthView: View {
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
-        #if DEBUG
-        if let demo = demoAccounts[trimmedEmail], password == demoPassword,
-           !SupabaseAuthService.shared.isConfigured {
-            isLoading = true
-            Task {
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                await MainActor.run {
-                    isLoading = false
-                    finishAuth(userID: UUID(), email: demo.email, role: demo.role)
-                }
-            }
+        // Admin screenshot kit (App Store).
+        if DemoAccounts.matchAdmin(email: email, password: password) {
+            DemoAccounts.enterAdminShowcase(auth: auth)
             return
         }
-        #endif
 
+        // Prefer real Supabase auth (how it used to work). Seeded local demos are
+        // Explore buttons, or a quiet fallback when the network / password fails.
         if SupabaseAuthService.shared.isConfigured {
             isLoading = true
             Task {
@@ -676,7 +685,7 @@ struct AuthView: View {
                                     thenFinish: result.userID,
                                     email: result.email,
                                     role: result.role,
-                                    suggest: result.suggestMfaEnroll
+                                    suggest: false
                                 )
                             }
                         }
@@ -685,23 +694,52 @@ struct AuthView: View {
                     where [.cannotConnectToHost, .notConnectedToInternet,
                            .networkConnectionLost, .timedOut,
                            .cannotFindHost, .dnsLookupFailed].contains(urlErr.code) {
-                    await MainActor.run { isLoading = false }
-                    handleLocalAuth(trimmedEmail: trimmedEmail)
+                    await MainActor.run {
+                        if enterDemoFallbackIfPossible(email: trimmedEmail) { return }
+                        isLoading = false
+                        handleLocalAuth(trimmedEmail: trimmedEmail)
+                    }
                 } catch AuthServiceError.emailNotConfirmed {
                     await MainActor.run {
+                        // Mid-demo: don't strand investors on OTP — open the seeded walkthrough.
+                        if enterDemoFallbackIfPossible(email: trimmedEmail) { return }
                         isLoading = false
                         pendingVerificationEmail = trimmedEmail
                         otpCode = ""
                         errorMessage = nil
                     }
                 } catch {
-                    await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }
+                    await MainActor.run {
+                        if enterDemoFallbackIfPossible(email: trimmedEmail) { return }
+                        isLoading = false
+                        errorMessage = error.localizedDescription
+                    }
                 }
             }
             return
         }
 
+        if let demo = DemoAccounts.matchOffline(email: email, password: password) {
+            DemoAccounts.enter(email: demo.email, role: demo.role, auth: auth)
+            return
+        }
+
         handleLocalAuth(trimmedEmail: trimmedEmail)
+    }
+
+    /// If this is a known investor email, open the seeded demo instead of a hard error.
+    @discardableResult
+    private func enterDemoFallbackIfPossible(email: String) -> Bool {
+        guard InvestorDemo.isEnabled else { return false }
+        if DemoAccounts.isAdminEmail(email) {
+            isLoading = false
+            DemoAccounts.enterAdminShowcase(auth: auth)
+            return true
+        }
+        guard let role = DemoAccounts.role(forEmail: email) else { return false }
+        isLoading = false
+        DemoAccounts.enter(email: DemoAccounts.normalize(email), role: role, auth: auth)
+        return true
     }
 
     private func resendVerification() {

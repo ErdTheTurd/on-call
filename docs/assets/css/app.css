@@ -2127,24 +2127,10 @@ a.ad-banner:hover {
 /* Dot grid over the opening screen only, fading out before the stat band.
    Canvas draws a quiet grid and a bright trail radius around the pointer
    (see bindDotField) — clearer than CSS mask composites. */
-.site-dotfield {
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 760px;
-  pointer-events: none;
-  z-index: 0;
-  -webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
-}
-
+/* Dot field removed from landing — keep CSS inert so old HTML can't flash it. */
+.site-dotfield,
 .site-dotfield-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .site-dotfield { opacity: 0.55; }
+  display: none !important;
 }
 
 .site .hero,
@@ -3167,5 +3153,269 @@ a.ad-banner:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .error-page .btn-solid:hover { transform: none; }
+}
+
+/* —— App Store screenshot kit (admin showcase) —— */
+.showcase-shell {
+  padding-bottom: var(--safe-bottom);
+  background:
+    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(79, 142, 247, 0.18), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(52, 211, 153, 0.08), transparent 50%),
+    var(--bg);
+}
+
+.showcase-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px var(--page-pad) 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.showcase-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.showcase-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 12px var(--page-pad);
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.showcase-chips::-webkit-scrollbar { display: none; }
+
+.showcase-chip {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-high);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.showcase-chip:hover {
+  color: var(--text);
+  border-color: rgba(79, 142, 247, 0.45);
+}
+
+.showcase-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.showcase-main {
+  padding: 8px var(--page-pad) 32px;
+}
+
+.showcase-head h1 {
+  margin: 0 0 4px;
+  font-size: clamp(1.35rem, 3vw, 1.75rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.showcase-hint {
+  margin: 28px 0 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.shot-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.shot-card {
+  padding: 18px;
+  border-radius: var(--card-radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.shot-card h3 {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.shot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shot-title {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.shot-kicker {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.shot-kicker.ok { color: var(--success); }
+
+.shot-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.shot-metrics > div,
+.shot-grid > .shot-metrics > div {
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--surface-high);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shot-metrics strong {
+  font-family: var(--font-rounded);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.shot-metrics span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.shot-metrics .ok,
+.shot-rate.ok,
+.ok { color: var(--success); }
+
+.shot-metrics .warn,
+.warn { color: var(--warning); }
+
+.shot-shift {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.shot-shift:first-of-type { border-top: 0; padding-top: 0; }
+
+.shot-day {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.shot-shift-body { flex: 1; min-width: 0; }
+
+.shot-pill {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--surface-high);
+  color: var(--text-secondary);
+}
+
+.shot-pill.ok {
+  background: rgba(52, 211, 153, 0.14);
+  color: var(--success);
+}
+
+.shot-pill.warn {
+  background: rgba(251, 191, 36, 0.14);
+  color: var(--warning);
+}
+
+.shot-rate {
+  font-family: var(--font-rounded);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.shot-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 650;
+  background: var(--accent);
+  color: #fff;
+}
+
+.shot-cta.ok { background: rgba(52, 211, 153, 0.18); color: var(--success); }
+.shot-cta.quiet { background: var(--surface-high); color: var(--text-secondary); }
+.shot-cta.danger { background: rgba(248, 113, 113, 0.14); color: var(--danger); }
+
+.shot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.shot-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-high);
+  margin: 12px 0 8px;
+  overflow: hidden;
+}
+
+.shot-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #6ea8ff);
+}
+
+.shot-money {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+
+.shot-money:first-of-type { border-top: 0; padding-top: 0; }
+
+@media (min-width: 720px) {
+  .shot-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .shot-grid > .shot-metrics {
+    grid-column: 1 / -1;
+  }
 }
 
