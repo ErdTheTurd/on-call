@@ -652,14 +652,31 @@ async function handleAuthSubmit({ email, password, confirm }) {
     }
 
     if (isConfigured()) {
+      const demoRoleByEmail = {
+        "erdunn706@gmail.com": "Hospital",
+        "jdunn@eporthospine.com": "Doctor"
+      };
+      const demoPassword = "1234567890";
+
       // Screenshot kit admin — before Supabase so App Store captures always work.
-      if (normalizedEmail === "info@erdanimates.shop" && String(password).trim() === "1234567890") {
+      if (normalizedEmail === "info@erdanimates.shop" && String(password).trim() === demoPassword) {
         enterShowcase();
+        return;
+      }
+      // Investor demo emails — seeded walkthrough before Supabase MFA/OTP/empty profiles.
+      if (demoRoleByEmail[normalizedEmail] && String(password).trim() === demoPassword) {
+        enterDemo(demoRoleByEmail[normalizedEmail]);
+        update({ loading: false, error: null, email: normalizedEmail });
         return;
       }
       try {
         const res = await signInRemote(normalizedEmail, password);
         if (res.needsMfa) {
+          if (demoRoleByEmail[normalizedEmail]) {
+            enterDemo(demoRoleByEmail[normalizedEmail]);
+            update({ loading: false, error: null, email: normalizedEmail, mfaChallenge: false });
+            return;
+          }
           update({
             loading: false,
             mfaChallenge: true,
