@@ -633,13 +633,20 @@ struct AuthView: View {
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
-        // Admin screenshot kit (App Store).
-        if DemoAccounts.matchAdmin(email: email, password: password) {
-            DemoAccounts.enterAdminShowcase(auth: auth)
-            return
+        // Demo / App Store accounts always open the seeded walkthrough first — never
+        // Supabase MFA, OTP, or empty profiles for known investor credentials.
+        if mode == .signIn {
+            if DemoAccounts.matchAdmin(email: email, password: password) {
+                DemoAccounts.enterAdminShowcase(auth: auth)
+                return
+            }
+            if let demo = DemoAccounts.matchOffline(email: email, password: password) {
+                DemoAccounts.enter(email: demo.email, role: demo.role, auth: auth)
+                return
+            }
         }
 
-        // Prefer real Supabase auth (how it used to work). Seeded local demos are
+        // Prefer real Supabase auth for everyone else. Seeded local demos are also
         // Explore buttons, or a quiet fallback when the network / password fails.
         if SupabaseAuthService.shared.isConfigured {
             isLoading = true
@@ -675,6 +682,7 @@ struct AuthView: View {
                         let result = try await SupabaseAuthService.shared.signIn(email: trimmedEmail, password: password)
                         await MainActor.run {
                             if result.needsMfa {
+                                if enterDemoFallbackIfPossible(email: trimmedEmail) { return }
                                 isLoading = false
                                 mfaChallenge = true
                                 mfaCode = ""
