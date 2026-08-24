@@ -230,19 +230,29 @@ extension View {
 // MARK: - Primary Button
 
 struct PrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 16, weight: .semibold, design: .rounded))
+            .font(.body.weight(.semibold))
             .frame(maxWidth: .infinity)
-            .frame(height: 54)
+            .padding(.vertical, 14)
+            .frame(minHeight: 50)
             .background {
                 RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous)
                     .fill(Brand.accentGradient)
-                    .opacity(configuration.isPressed ? 0.8 : 1)
+                    .opacity(backgroundOpacity(pressed: configuration.isPressed))
             }
             .foregroundStyle(.white)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(isEnabled ? 1 : 0.55)
+            .scaleEffect(configuration.isPressed && isEnabled ? 0.97 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .accessibilityAddTraits(.isButton)
+    }
+
+    private func backgroundOpacity(pressed: Bool) -> Double {
+        if !isEnabled { return 0.45 }
+        return pressed ? 0.8 : 1
     }
 }
 
@@ -279,13 +289,13 @@ struct SectionHeader: View {
         HStack(spacing: 9) {
             if let img = systemImage {
                 Image(systemName: img)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Brand.accent)
                     .frame(width: 24, height: 24)
                     .background(Brand.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.headline)
                 .foregroundStyle(Brand.textPrimary)
         }
     }
@@ -299,7 +309,7 @@ struct ValueChip: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .font(.subheadline.weight(.semibold))
             .foregroundStyle(accent)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
@@ -384,13 +394,13 @@ struct ContactSupportFooter: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "envelope")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                 Text("Contact support")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.caption.weight(.medium))
                 Text("·")
                     .foregroundStyle(Brand.textTertiary)
                 Text("mdshift.net/support")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Brand.accent)
             }
             .foregroundStyle(Brand.textSecondary)
