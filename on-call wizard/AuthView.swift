@@ -6,6 +6,7 @@ import CryptoKit
 
 struct AuthView: View {
     @ObservedObject var auth: AuthService
+    @Environment(\.colorScheme) private var colorScheme
     @State private var mode: AuthMode = .signIn
     @State private var email = ""
     @State private var password = ""
@@ -21,33 +22,41 @@ struct AuthView: View {
     @State private var mfaChallenge = false
     @State private var mfaEnroll: SupabaseAuthService.TotpEnrollment? = nil
     @State private var mfaCode = ""
-    @Namespace private var ns
 
-    enum AuthMode { case signIn, signUp }
+    enum AuthMode: String, CaseIterable, Identifiable {
+        case signIn = "Sign in"
+        case signUp = "Create account"
+        var id: String { rawValue }
+    }
+
+    private var privacyURL: URL {
+        WebsiteConfig.baseURL?.appendingPathComponent("privacypolicy/")
+            ?? URL(string: "https://mdshift.net/privacypolicy/")!
+    }
 
     var body: some View {
         ZStack {
-            Color(hex: "0A0F1E").ignoresSafeArea()
-            MeshBackground()
+            BackgroundGradient()
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 8) {
                         HStack(spacing: 10) {
                             Image(systemName: "waveform.path.ecg")
-                                .font(.system(size: 28, weight: .semibold))
-                                .foregroundStyle(Color(hex: "4F8EF7"))
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(Brand.accent)
+                                .accessibilityHidden(true)
                             Text(Brand.appName)
-                                .font(.system(size: 22, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
+                                .font(.title2.weight(.bold))
+                                .foregroundStyle(Brand.textPrimary)
                         }
                         Text("Smarter shift scheduling")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(0.4))
-                            .tracking(0.5)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Brand.textSecondary)
                     }
-                    .padding(.top, 64)
-                    .padding(.bottom, 48)
+                    .padding(.top, 48)
+                    .padding(.bottom, 32)
+                    .accessibilityElement(children: .combine)
 
                     if mfaChallenge {
                         mfaChallengeCard
@@ -59,11 +68,8 @@ struct AuthView: View {
                         mainAuthCard
                     }
 
-                    Text("By continuing you agree to our Terms of Service and Privacy Policy.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.white.opacity(0.2))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
+                    legalFooter
+                        .padding(.horizontal, 32)
                         .padding(.top, 24)
                         .padding(.bottom, 48)
                 }
@@ -75,67 +81,91 @@ struct AuthView: View {
         }
     }
 
+    private var legalFooter: some View {
+        VStack(spacing: 4) {
+            Text("By continuing you agree to our")
+                .font(.caption)
+                .foregroundStyle(Brand.textTertiary)
+            HStack(spacing: 4) {
+                Link("Privacy Policy", destination: privacyURL)
+                    .font(.caption.weight(.semibold))
+                Text("and Terms of Service.")
+                    .font(.caption)
+                    .foregroundStyle(Brand.textTertiary)
+            }
+            .tint(Brand.accent)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+    }
+
     private var mfaChallengeCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Authenticator code")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(.white)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(Brand.textPrimary)
             Text("Open Google Authenticator (or any TOTP app) and enter the 6-digit code for \(Brand.appName).")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.white.opacity(0.55))
+                .font(.subheadline)
+                .foregroundStyle(Brand.textSecondary)
             codeField(placeholder: "6-digit code", text: $mfaCode) {
                 if mfaCode.filter(\.isNumber).count == 6 { submitMfaChallenge() }
             }
             if let err = errorMessage {
-                Text(err).font(.system(size: 13, weight: .medium)).foregroundStyle(Color(hex: "F87171"))
+                Text(err).font(.subheadline.weight(.medium)).foregroundStyle(Brand.danger)
             }
-            Button { submitMfaChallenge() } label: { authPrimaryLabel("Verify") }
-                .buttonStyle(.plain)
-                .disabled(isLoading || mfaCode.filter(\.isNumber).count != 6)
+            Button { submitMfaChallenge() } label: {
+                authPrimaryLabel("Verify")
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(isLoading || mfaCode.filter(\.isNumber).count != 6)
             Button {
                 mfaChallenge = false
                 mfaCode = ""
                 SupabaseAuthService.shared.signOut()
             } label: {
-                Text("Back to sign in").font(.system(size: 14, weight: .medium)).foregroundStyle(Color.white.opacity(0.55)).frame(maxWidth: .infinity)
+                Text("Back to sign in")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Brand.textSecondary)
+                    .frame(maxWidth: .infinity)
             }
         }
-        .padding(24)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        .cardStyle()
         .padding(.horizontal, 20)
     }
 
     private func mfaEnrollCard(_ enroll: SupabaseAuthService.TotpEnrollment) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Set up authenticator")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(.white)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(Brand.textPrimary)
             Text("Add \(Brand.appName) in Google Authenticator using this secret, then enter the 6-digit code.")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.white.opacity(0.55))
+                .font(.subheadline)
+                .foregroundStyle(Brand.textSecondary)
             if !enroll.secret.isEmpty {
                 Text(enroll.secret)
-                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color(hex: "4F8EF7"))
+                    .font(.body.weight(.semibold).monospaced())
+                    .foregroundStyle(Brand.accent)
                     .textSelection(.enabled)
             }
             codeField(placeholder: "6-digit code", text: $mfaCode) {
                 if mfaCode.filter(\.isNumber).count == 6 { confirmMfaEnroll() }
             }
             if let err = errorMessage {
-                Text(err).font(.system(size: 13, weight: .medium)).foregroundStyle(Color(hex: "F87171"))
+                Text(err).font(.subheadline.weight(.medium)).foregroundStyle(Brand.danger)
             }
-            Button { confirmMfaEnroll() } label: { authPrimaryLabel("Confirm and continue") }
-                .buttonStyle(.plain)
-                .disabled(isLoading || mfaCode.filter(\.isNumber).count != 6)
+            Button { confirmMfaEnroll() } label: {
+                authPrimaryLabel("Confirm and continue")
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(isLoading || mfaCode.filter(\.isNumber).count != 6)
             Button { skipMfaEnroll() } label: {
-                Text("Skip for now").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "4F8EF7")).frame(maxWidth: .infinity)
+                Text("Skip for now")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Brand.accent)
+                    .frame(maxWidth: .infinity)
             }
         }
-        .padding(24)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        .cardStyle()
         .padding(.horizontal, 20)
     }
 
@@ -144,10 +174,14 @@ struct AuthView: View {
             .keyboardType(.numberPad)
             .textContentType(.oneTimeCode)
             .multilineTextAlignment(.center)
-            .font(.system(size: 28, weight: .semibold, design: .rounded))
+            .font(.title.weight(.semibold))
+            .foregroundStyle(Brand.textPrimary)
             .padding(.vertical, 14)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+            .background(Brand.surfaceHigh, in: RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous)
+                    .strokeBorder(Brand.border, lineWidth: 1)
+            )
             .onChange(of: text.wrappedValue) { _, newValue in
                 let filtered = newValue.filter(\.isNumber)
                 if filtered.count > 6 { text.wrappedValue = String(filtered.prefix(6)) }
@@ -235,23 +269,24 @@ struct AuthView: View {
     private var otpCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Enter verification code")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(.white)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(Brand.textPrimary)
             Text("We sent a 6-digit code to \(pendingVerificationEmail ?? ""). Enter it here — no link to click.")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.white.opacity(0.55))
+                .font(.subheadline)
+                .foregroundStyle(Brand.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             TextField("", text: $otpCode)
                 .keyboardType(.numberPad)
                 .textContentType(.oneTimeCode)
                 .multilineTextAlignment(.center)
-                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .font(.title.weight(.semibold))
+                .foregroundStyle(Brand.textPrimary)
                 .padding(.vertical, 14)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Brand.surfaceHigh, in: RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous)
+                        .strokeBorder(Brand.border, lineWidth: 1)
                 )
                 .onChange(of: otpCode) { _, newValue in
                     let filtered = newValue.filter(\.isNumber)
@@ -262,28 +297,29 @@ struct AuthView: View {
                     }
                     if otpCode.count == 6 { submitOTP() }
                 }
+                .accessibilityLabel("Verification code")
 
             if let err = errorMessage {
                 Text(err)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color(hex: "F87171"))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Brand.danger)
             }
             if let notice = noticeMessage {
                 Text(notice)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color(hex: "34D399"))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Brand.success)
             }
 
             Button { submitOTP() } label: {
                 authPrimaryLabel("Verify and continue")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PrimaryButtonStyle())
             .disabled(isLoading || otpCode.count != 6)
 
             Button { resendVerification() } label: {
                 Text("Resend code")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color(hex: "4F8EF7"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Brand.accent)
                     .frame(maxWidth: .infinity)
             }
             .disabled(isLoading)
@@ -296,53 +332,43 @@ struct AuthView: View {
                 mode = .signIn
             } label: {
                 Text("Back to sign in")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.55))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Brand.textSecondary)
                     .frame(maxWidth: .infinity)
             }
         }
-        .padding(24)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .cardStyle()
         .padding(.horizontal, 20)
     }
 
     private var mainAuthCard: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                TabPill(label: "Sign in", isActive: mode == .signIn, ns: ns) {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { mode = .signIn; errorMessage = nil }
-                }
-                TabPill(label: "Create account", isActive: mode == .signUp, ns: ns) {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { mode = .signUp; errorMessage = nil }
+            Picker("Account mode", selection: $mode) {
+                ForEach(AuthMode.allCases) { item in
+                    Text(item.rawValue).tag(item)
                 }
             }
-            .padding(4)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .pickerStyle(.segmented)
             .padding(.horizontal, 24)
-            .padding(.bottom, 28)
+            .padding(.bottom, 24)
+            .onChange(of: mode) { _, _ in errorMessage = nil }
 
             if mode == .signUp {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("I AM A")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Color.white.opacity(0.35))
-                        .tracking(1.5)
-                    HStack(spacing: 10) {
-                        RolePill(label: "Doctor", icon: "stethoscope", isSelected: selectedRole == .doctor) {
-                            withAnimation(.spring(response: 0.3)) { selectedRole = .doctor }
-                        }
-                        RolePill(label: "Hospital", icon: "cross.case.fill", isSelected: selectedRole == .hospital) {
-                            withAnimation(.spring(response: 0.3)) { selectedRole = .hospital }
-                        }
+                    Text("I am a")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Brand.textTertiary)
+                        .textCase(.uppercase)
+                    Picker("Role", selection: $selectedRole) {
+                        Text("Doctor").tag(UserRole.doctor)
+                        Text("Hospital").tag(UserRole.hospital)
                     }
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("Account role")
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 20)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(.opacity)
             }
 
             VStack(spacing: 10) {
@@ -351,6 +377,7 @@ struct AuthView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isLoading || !SupabaseAuthService.shared.isConfigured)
+                .accessibilityLabel("Continue with Google")
 
                 SignInWithAppleButton(.signIn) { request in
                     let nonce = randomNonce()
@@ -360,58 +387,68 @@ struct AuthView: View {
                 } onCompletion: { result in
                     handleAppleResult(result)
                 }
-                .signInWithAppleButtonStyle(.white)
-                .frame(height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                .frame(height: 50)
+                .clipShape(RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous))
                 .disabled(isLoading || !SupabaseAuthService.shared.isConfigured)
+                .accessibilityLabel("Continue with Apple")
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
 
             HStack(spacing: 12) {
-                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
-                Text("OR USE EMAIL").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.white.opacity(0.25)).tracking(1)
-                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                Rectangle().fill(Brand.border).frame(height: 1)
+                Text("OR USE EMAIL")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Brand.textTertiary)
+                Rectangle().fill(Brand.border).frame(height: 1)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
 
             VStack(spacing: 12) {
-                AuthField(icon: "envelope", placeholder: "Email address", text: $email, keyboard: .emailAddress)
-                AuthField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
+                AuthField(
+                    icon: "envelope",
+                    placeholder: "Email address",
+                    text: $email,
+                    keyboard: .emailAddress,
+                    textContentType: .emailAddress
+                )
+                AuthField(
+                    icon: "lock",
+                    placeholder: "Password",
+                    text: $password,
+                    isSecure: true,
+                    textContentType: mode == .signUp ? .newPassword : .password
+                )
                 if mode == .signUp {
-                    AuthField(icon: "lock.fill", placeholder: "Confirm password", text: $confirmPassword, isSecure: true)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    AuthField(
+                        icon: "lock.fill",
+                        placeholder: "Confirm password",
+                        text: $confirmPassword,
+                        isSecure: true,
+                        textContentType: .newPassword
+                    )
+                    .transition(.opacity)
                 }
             }
             .padding(.horizontal, 24)
-            .animation(.spring(response: 0.35), value: mode)
+            .animation(.easeInOut(duration: 0.2), value: mode)
 
             if let err = errorMessage {
                 Text(err)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color(hex: "F87171"))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Brand.danger)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                     .padding(.top, 12)
                     .transition(.opacity)
             }
 
-            if mode == .signIn {
-                HStack {
-                    Spacer()
-                    Button("Forgot password?") {}
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color(hex: "4F8EF7").opacity(0.8))
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-            }
-
             Button { handleSubmit() } label: {
                 authPrimaryLabel(mode == .signIn ? "Sign in" : "Create account")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PrimaryButtonStyle())
             .disabled(isLoading || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty || (mode == .signUp && confirmPassword.isEmpty))
             .padding(.horizontal, 24)
             .padding(.top, 20)
@@ -419,12 +456,11 @@ struct AuthView: View {
             if InvestorDemo.isEnabled && mode == .signIn {
                 VStack(spacing: 10) {
                     HStack(spacing: 12) {
-                        Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                        Rectangle().fill(Brand.border).frame(height: 1)
                         Text("OR LOOK AROUND FIRST")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.white.opacity(0.25))
-                            .tracking(1)
-                        Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Brand.textTertiary)
+                        Rectangle().fill(Brand.border).frame(height: 1)
                     }
                     Button {
                         DemoAccounts.enter(email: "jdunn@eporthospine.com", role: .doctor, auth: auth)
@@ -432,15 +468,17 @@ struct AuthView: View {
                         oauthLabel(systemImage: "stethoscope", title: "Explore as a doctor")
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Explore as a doctor with sample data")
                     Button {
                         DemoAccounts.enter(email: "erdunn706@gmail.com", role: .hospital, auth: auth)
                     } label: {
                         oauthLabel(systemImage: "cross.case.fill", title: "Explore as a hospital")
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Explore as a hospital with sample data")
                     Text("Sample data, no account needed.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.white.opacity(0.35))
+                        .font(.caption)
+                        .foregroundStyle(Brand.textTertiary)
                         .multilineTextAlignment(.center)
                 }
                 .padding(.horizontal, 24)
@@ -449,11 +487,7 @@ struct AuthView: View {
 
             Color.clear.frame(height: 20)
         }
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .cardStyle()
         .padding(.horizontal, 20)
     }
 
@@ -463,36 +497,28 @@ struct AuthView: View {
                 ProgressView().tint(.white)
             } else {
                 Text(title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 52)
-        .background(
-            LinearGradient(
-                colors: [Color(hex: "4F8EF7"), Color(hex: "2563EB")],
-                startPoint: .leading, endPoint: .trailing
-            ),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
     }
 
     private func oauthLabel(systemImage: String, title: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.75))
+                .font(.body.weight(.medium))
+                .foregroundStyle(Brand.textSecondary)
+                .accessibilityHidden(true)
             Text(title)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.75))
+                .font(.body.weight(.medium))
+                .foregroundStyle(Brand.textPrimary)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 52)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.vertical, 14)
+        .frame(minHeight: 50)
+        .background(Brand.surfaceHigh, in: RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous)
+                .strokeBorder(Brand.border, lineWidth: 1)
         )
     }
 
@@ -863,73 +889,24 @@ private struct DevRolePickerView: View {
     }
 }
 
-// MARK: - Tab Pill
-
-private struct TabPill: View {
-    let label: String; let isActive: Bool; let ns: Namespace.ID; let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 14, weight: isActive ? .semibold : .medium))
-                .foregroundStyle(isActive ? Color.white : Color.white.opacity(0.4))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 9)
-                .background {
-                    if isActive {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(Color.white.opacity(0.1))
-                            .matchedGeometryEffect(id: "tab", in: ns)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Role Pill
-
-private struct RolePill: View {
-    let label: String; let icon: String; let isSelected: Bool; let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(isSelected ? Color(hex: "4F8EF7") : Color.white.opacity(0.4))
-                Text(label)
-                    .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? .white : Color.white.opacity(0.5))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 11)
-            .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(isSelected ? Color(hex: "4F8EF7").opacity(0.15) : Color.white.opacity(0.05))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(isSelected ? Color(hex: "4F8EF7").opacity(0.5) : Color.white.opacity(0.08), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Auth Field
 
 private struct AuthField: View {
-    let icon: String; let placeholder: String
+    let icon: String
+    let placeholder: String
     @Binding var text: String
     var keyboard: UIKeyboardType = .default
     var isSecure: Bool = false
+    var textContentType: UITextContentType? = nil
     @State private var isRevealed = false
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.3))
+                .font(.body.weight(.medium))
+                .foregroundStyle(Brand.textTertiary)
                 .frame(width: 20)
+                .accessibilityHidden(true)
             Group {
                 if isSecure && !isRevealed {
                     SecureField(placeholder, text: $text)
@@ -940,38 +917,29 @@ private struct AuthField: View {
                         .autocorrectionDisabled()
                 }
             }
-            .font(.system(size: 15))
-            .foregroundStyle(.white)
-            .tint(Color(hex: "4F8EF7"))
+            .font(.body)
+            .foregroundStyle(Brand.textPrimary)
+            .tint(Brand.accent)
+            .textContentType(textContentType)
             if isSecure {
                 Button { isRevealed.toggle() } label: {
                     Image(systemName: isRevealed ? "eye.slash" : "eye")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color.white.opacity(0.3))
+                        .font(.body)
+                        .foregroundStyle(Brand.textTertiary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(isRevealed ? "Hide password" : "Show password")
             }
         }
         .padding(.horizontal, 16)
-        .frame(height: 52)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.vertical, 12)
+        .frame(minHeight: 50)
+        .background(Brand.surfaceHigh, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                .strokeBorder(Brand.border, lineWidth: 1)
         )
-    }
-}
-
-// MARK: - Animated Mesh Background
-
-private struct MeshBackground: View {
-    var body: some View {
-        LinearGradient(
-            colors: [Color(hex: "0A0F1E"), Color(hex: "1E3A8A").opacity(0.45), Color(hex: "0A0F1E")],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .ignoresSafeArea()
+        .accessibilityElement(children: .contain)
     }
 }
 

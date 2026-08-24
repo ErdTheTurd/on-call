@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - User Role
 
-public enum UserRole: String, CaseIterable, Identifiable, Codable {
+public enum UserRole: String, CaseIterable, Identifiable, Codable, Hashable {
     case doctor = "Doctor"
     case hospital = "Hospital"
     public var id: String { rawValue }

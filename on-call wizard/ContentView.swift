@@ -404,7 +404,7 @@ struct DoctorDashboardView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Dashboard")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
@@ -807,11 +807,12 @@ struct DoctorHomeView: View {
                             TokenBadge(store: tokens)
                             Spacer()
                             Button { showDashboard = true } label: {
-                                Text("Dashboard ›")
+                                Text("Settings")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(Brand.accent)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Open settings")
                         }
                         .padding(.horizontal, 2)
 
@@ -876,7 +877,7 @@ struct DoctorHomeView: View {
                                     Text(date.formatted(.dateTime.weekday(.wide).month().day()))
                                         .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 10)
                                     if shiftsForSelectedDate.isEmpty {
-                                        HStack { Image(systemName: "moon.zzz").foregroundStyle(.secondary); Text("No open \(doctorSpecialty) shifts").foregroundStyle(Color.white.opacity(0.4)) }
+                                        HStack { Image(systemName: "moon.zzz").foregroundStyle(.secondary); Text("No open \(doctorSpecialty) shifts").foregroundStyle(Brand.textSecondary) }
                                             .font(.subheadline).padding(.vertical, 6)
                                     } else {
                                         ForEach(shiftsForSelectedDate) { shift in
@@ -905,6 +906,7 @@ struct DoctorHomeView: View {
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(Color.primary)
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
         }
@@ -1070,7 +1072,7 @@ struct DayShiftApplySheet: View {
                         if shifts.isEmpty {
                             VStack(spacing: 10) {
                                 Image(systemName: "moon.zzz").font(.system(size: 36)).foregroundStyle(.secondary)
-                                Text("No open shifts on this day").foregroundStyle(Color.white.opacity(0.4))
+                                Text("No open shifts on this day").foregroundStyle(Brand.textSecondary)
                                 Text("You can still request call — the hospital may post shifts later.")
                                     .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
                             }
@@ -1714,7 +1716,7 @@ struct HospitalDashboardSheet: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Dashboard")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
@@ -1911,6 +1913,7 @@ struct HospitalDashboardView: View {
                     Button { showDashboard = true } label: {
                         Image(systemName: "line.3.horizontal").font(.title3.weight(.semibold))
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
             .sheet(item: $detailDate) { wrapper in
