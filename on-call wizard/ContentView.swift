@@ -1944,6 +1944,8 @@ private struct StatBadge: View {
             Text(value)
                 .font(.system(.title2, design: .rounded).weight(.bold))
                 .foregroundStyle(Brand.accent)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
             Text(label)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Brand.textPrimary)
@@ -1956,9 +1958,17 @@ private struct StatBadge: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
+        .padding(.vertical, 16)
         .padding(.horizontal, 8)
-        .background(Brand.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Brand.accentSoft)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Brand.accent.opacity(0.16), lineWidth: 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

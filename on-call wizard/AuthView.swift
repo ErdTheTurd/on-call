@@ -40,22 +40,22 @@ struct AuthView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 10) {
                         HStack(spacing: 10) {
                             Image(systemName: "waveform.path.ecg")
-                                .font(.title2.weight(.semibold))
+                                .font(.title.weight(.semibold))
                                 .foregroundStyle(Brand.accent)
                                 .accessibilityHidden(true)
                             Text(Brand.appName)
-                                .font(.title2.weight(.bold))
+                                .font(.title.weight(.bold))
                                 .foregroundStyle(Brand.textPrimary)
                         }
                         Text("Smarter shift scheduling")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(Brand.textSecondary)
                     }
-                    .padding(.top, 48)
-                    .padding(.bottom, 32)
+                    .padding(.top, 56)
+                    .padding(.bottom, 28)
                     .accessibilityElement(children: .combine)
 
                     if mfaChallenge {
@@ -454,7 +454,7 @@ struct AuthView: View {
             .padding(.top, 20)
 
             if InvestorDemo.isEnabled && mode == .signIn {
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     HStack(spacing: 12) {
                         Rectangle().fill(Brand.border).frame(height: 1)
                         Text("OR LOOK AROUND FIRST")
@@ -462,6 +462,7 @@ struct AuthView: View {
                             .foregroundStyle(Brand.textTertiary)
                         Rectangle().fill(Brand.border).frame(height: 1)
                     }
+                    .padding(.top, 4)
                     Button {
                         DemoAccounts.enter(email: "jdunn@eporthospine.com", role: .doctor, auth: auth)
                     } label: {
@@ -480,9 +481,10 @@ struct AuthView: View {
                         .font(.caption)
                         .foregroundStyle(Brand.textTertiary)
                         .multilineTextAlignment(.center)
+                        .padding(.top, 2)
                 }
                 .padding(.horizontal, 24)
-                .padding(.top, 12)
+                .padding(.top, 16)
             }
 
             Color.clear.frame(height: 20)
