@@ -15,11 +15,12 @@ struct AdBannerView: View {
             if plus.showsAds {
                 AdWebBanner(placement: placement)
                     .frame(height: 76)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Brand.border, lineWidth: 1)
+                        RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous)
+                            .strokeBorder(Brand.border.opacity(0.7), lineWidth: 1)
                     }
+                    .opacity(0.92)
                     .accessibilityLabel("Advertisement")
             }
         }

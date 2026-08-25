@@ -177,7 +177,7 @@ enum Brand {
     static let cardRadius:     CGFloat = 18
     static let buttonRadius:   CGFloat = 14
     static let cardPadding:    CGFloat = 20
-    static let sectionSpacing: CGFloat = 12
+    static let sectionSpacing: CGFloat = 14
     static let brandFont = Font.system(.body, design: .default)
 }
 
@@ -206,19 +206,23 @@ struct CardStyle: ViewModifier {
             .background {
                 RoundedRectangle(cornerRadius: Brand.cardRadius, style: .continuous)
                     .fill(scheme == .dark
-                          ? Color.white.opacity(0.07)
-                          : Color.white.opacity(0.92))
+                          ? Color.white.opacity(0.08)
+                          : Color.white.opacity(0.94))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: Brand.cardRadius, style: .continuous)
                     .strokeBorder(
-                        scheme == .dark ? Color.white.opacity(0.12) : Color(hex: "BFDBFE").opacity(0.7),
+                        scheme == .dark
+                            ? Color.white.opacity(0.14)
+                            : Brand.border.opacity(0.85),
                         lineWidth: 1
                     )
             }
             .shadow(
-                color: scheme == .dark ? .clear : Color.black.opacity(0.04),
-                radius: 6, x: 0, y: 2
+                color: scheme == .dark ? Color.black.opacity(0.35) : Color(hex: "1E3A8A").opacity(0.08),
+                radius: scheme == .dark ? 10 : 12,
+                x: 0,
+                y: scheme == .dark ? 4 : 6
             )
     }
 }
@@ -256,26 +260,63 @@ struct PrimaryButtonStyle: ButtonStyle {
     }
 }
 
-// MARK: - Background (lightweight — no live blur orbs)
+// MARK: - Background (soft radial washes)
 
 struct BackgroundGradient: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        Group {
+        ZStack {
             if scheme == .dark {
                 LinearGradient(
                     colors: [Color(hex: "070B17"), Color(hex: "0F172A"), Color(hex: "111827")],
                     startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+                RadialGradient(
+                    colors: [Color(hex: "4F8EF7").opacity(0.22), .clear],
+                    center: .topLeading,
+                    startRadius: 20,
+                    endRadius: 420
+                )
+                RadialGradient(
+                    colors: [Color(hex: "7C3AED").opacity(0.16), .clear],
+                    center: .topTrailing,
+                    startRadius: 10,
+                    endRadius: 380
+                )
+                RadialGradient(
+                    colors: [Color(hex: "1E40AF").opacity(0.20), .clear],
+                    center: .bottomLeading,
+                    startRadius: 40,
+                    endRadius: 460
                 )
             } else {
                 LinearGradient(
                     colors: [Color(hex: "F8FBFF"), Color(hex: "EFF6FF"), Color(hex: "F5F3FF")],
                     startPoint: .topLeading, endPoint: .bottomTrailing
                 )
+                RadialGradient(
+                    colors: [Color(hex: "93C5FD").opacity(0.45), .clear],
+                    center: .topLeading,
+                    startRadius: 20,
+                    endRadius: 400
+                )
+                RadialGradient(
+                    colors: [Color(hex: "C4B5FD").opacity(0.28), .clear],
+                    center: .topTrailing,
+                    startRadius: 10,
+                    endRadius: 360
+                )
+                RadialGradient(
+                    colors: [Color(hex: "BFDBFE").opacity(0.35), .clear],
+                    center: .bottom,
+                    startRadius: 40,
+                    endRadius: 480
+                )
             }
         }
         .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 }
 
@@ -493,12 +534,16 @@ struct EmptyStateCard: View {
     var onAction: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             Image(systemName: systemImage)
-                .font(.system(size: 28, weight: .semibold))
+                .font(.title2.weight(.semibold))
                 .foregroundStyle(Brand.accent)
-                .frame(width: 52, height: 52)
-                .background(Brand.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .frame(width: 56, height: 56)
+                .background(Brand.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Brand.accent.opacity(0.18), lineWidth: 1)
+                )
             Text(title)
                 .font(.headline)
                 .foregroundStyle(Brand.textPrimary)
@@ -507,20 +552,19 @@ struct EmptyStateCard: View {
                 .font(.subheadline)
                 .foregroundStyle(Brand.textSecondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             if let actionTitle, let onAction {
                 Button(action: onAction) {
                     Text(actionTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .padding(.top, 4)
             }
         }
-        .padding(20)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .cardStyle()
+        .accessibilityElement(children: .combine)
     }
 }
 
