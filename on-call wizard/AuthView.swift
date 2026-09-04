@@ -353,23 +353,20 @@ struct AuthView: View {
             .padding(.bottom, 24)
             .onChange(of: mode) { _, _ in errorMessage = nil }
 
-            if mode == .signUp {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("I am a")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Brand.textTertiary)
-                        .textCase(.uppercase)
-                    Picker("Role", selection: $selectedRole) {
-                        Text("Doctor").tag(UserRole.doctor)
-                        Text("Hospital").tag(UserRole.hospital)
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityLabel("Account role")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("I am a")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Brand.textTertiary)
+                    .textCase(.uppercase)
+                Picker("Role", selection: $selectedRole) {
+                    Text("Doctor").tag(UserRole.doctor)
+                    Text("Hospital").tag(UserRole.hospital)
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 20)
-                .transition(.opacity)
+                .pickerStyle(.segmented)
+                .accessibilityLabel("Account role")
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
 
             VStack(spacing: 10) {
                 Button { startGoogleSignIn() } label: {
@@ -388,9 +385,12 @@ struct AuthView: View {
                     handleAppleResult(result)
                 }
                 .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                .frame(maxWidth: .infinity)
                 .frame(height: 50)
                 .clipShape(RoundedRectangle(cornerRadius: Brand.buttonRadius, style: .continuous))
                 .disabled(isLoading || !SupabaseAuthService.shared.isConfigured)
+                .opacity(isLoading || !SupabaseAuthService.shared.isConfigured ? 0.5 : 1)
+                .allowsHitTesting(!isLoading && SupabaseAuthService.shared.isConfigured)
                 .accessibilityLabel("Continue with Apple")
             }
             .padding(.horizontal, 24)
@@ -576,13 +576,20 @@ struct AuthView: View {
         switch result {
         case .failure(let error):
             let ns = error as NSError
-            if ns.code == ASAuthorizationError.canceled.rawValue { return }
+            if ns.domain == ASAuthorizationError.errorDomain,
+               ns.code == ASAuthorizationError.canceled.rawValue { return }
+            if ns.domain == ASAuthorizationError.errorDomain,
+               ns.code == ASAuthorizationError.unknown.rawValue {
+                // Common on first-run / iPad when the sheet dismisses oddly — don't block review with a cryptic code.
+                errorMessage = "Apple Sign In did not complete. Try again, or use Explore as a doctor / hospital."
+                return
+            }
             errorMessage = error.localizedDescription
         case .success(let authorization):
             guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
                   let tokenData = credential.identityToken,
                   let idToken = String(data: tokenData, encoding: .utf8) else {
-                errorMessage = "Apple Sign In failed."
+                errorMessage = "Apple Sign In failed. Try Explore as a doctor / hospital, or email sign-in."
                 return
             }
             isLoading = true
@@ -595,7 +602,9 @@ struct AuthView: View {
                         nonce: nonce,
                         role: selectedRole
                     )
-                    let resolved = result.email.isEmpty ? (credential.email ?? "apple-user") : result.email
+                    let resolved = result.email.isEmpty
+                        ? (credential.email ?? "apple-user-\(result.userID.uuidString.prefix(8))@privaterelay.appleid.com")
+                        : result.email
                     await MainActor.run {
                         if result.needsMfa {
                             isLoading = false

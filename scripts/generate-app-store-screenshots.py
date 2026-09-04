@@ -50,16 +50,11 @@ def round_rect(draw: ImageDraw.ImageDraw, xy, radius: int, fill, outline=None, w
     draw.rounded_rectangle(xy, radius=radius, fill=fill, outline=outline, width=width)
 
 
-def status_bar(draw: ImageDraw.ImageDraw, y: int = 54):
-    draw.text((72, y), "9:41", font=font(42, True), fill=TEXT)
-    draw.text((W - 220, y), "•••• 100%", font=font(36, True), fill=TEXT)
-
-
 def brand_header(draw: ImageDraw.ImageDraw, title: str, subtitle: str):
-    status_bar(draw)
-    draw.text((72, 140), "MD Shift", font=font(36, True), fill=ACCENT)
-    draw.text((72, 200), title, font=font(64, True), fill=TEXT)
-    draw.text((72, 280), subtitle, font=font(34), fill=TEXT2)
+    # No fake status bar — Apple rejects non-iOS / mock status chrome (Guideline 2.3.10).
+    draw.text((72, 100), "MD Shift Demo", font=font(36, True), fill=ACCENT)
+    draw.text((72, 160), title, font=font(64, True), fill=TEXT)
+    draw.text((72, 240), subtitle, font=font(34), fill=TEXT2)
 
 
 def card(draw: ImageDraw.ImageDraw, x0, y0, x1, y1):

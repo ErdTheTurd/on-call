@@ -168,12 +168,11 @@ export function renderAuthView(state, handlers) {
           <button type="button" class="${mode === "signin" ? "active" : ""}" data-auth-mode="signin">Sign in</button>
           <button type="button" class="${mode === "signup" ? "active" : ""}" data-auth-mode="signup">Create account</button>
         </div>
-        ${mode === "signup" ? `
-          <div class="eyebrow" style="padding:0 24px 8px">I AM A</div>
-          <div class="role-pills">
-            <button type="button" class="role-pill ${state.role === "Doctor" ? "active" : ""}" data-role="Doctor">${icon("stethoscope")} Doctor</button>
-            <button type="button" class="role-pill ${state.role === "Hospital" ? "active" : ""}" data-role="Hospital">${icon("hospital")} Hospital</button>
-          </div>` : ""}
+        <div class="eyebrow" style="padding:0 24px 8px">I AM A</div>
+        <div class="role-pills">
+          <button type="button" class="role-pill ${state.role === "Doctor" ? "active" : ""}" data-role="Doctor">${icon("stethoscope")} Doctor</button>
+          <button type="button" class="role-pill ${state.role === "Hospital" ? "active" : ""}" data-role="Hospital">${icon("hospital")} Hospital</button>
+        </div>
         <div class="oauth-row">
           <button type="button" class="btn-oauth" data-oauth="google" ${state.loading || !isConfigured() ? "disabled" : ""}>
             ${googleMark()} Continue with Google

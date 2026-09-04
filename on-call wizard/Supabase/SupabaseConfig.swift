@@ -78,10 +78,32 @@ struct SupabaseHTTPClient {
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse else { throw SupabaseError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            let msg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-            throw SupabaseError.server(msg)
+            throw SupabaseError.server(Self.humanizeError(data: data, status: http.statusCode))
         }
         return data
+    }
+
+    /// Prefer a short user-facing message over raw GoTrue / PostgREST JSON blobs.
+    private static func humanizeError(data: Data, status: Int) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return String(data: data, encoding: .utf8) ?? "HTTP \(status)"
+        }
+        let raw = (json["error_description"] as? String)
+            ?? (json["msg"] as? String)
+            ?? (json["message"] as? String)
+            ?? (json["error"] as? String)
+            ?? "HTTP \(status)"
+        let lower = raw.lowercased()
+        if lower.contains("audience") || lower.contains("unacceptable") {
+            return "Apple Sign In is not configured for this app. Please try Explore mode or email sign-in."
+        }
+        if lower.contains("nonce") {
+            return "Apple Sign In could not be verified. Please try again."
+        }
+        if lower.contains("id token") || lower.contains("id_token") || lower.contains("provider is not enabled") {
+            return "Sign in with Apple is temporarily unavailable. Use Explore as a doctor/hospital, or email sign-in."
+        }
+        return raw
     }
 
     func invokeFunction(name: String, body: [String: Any], accessToken: String? = nil) async throws -> Data {
