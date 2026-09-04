@@ -12,7 +12,7 @@ Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/
 | Primary category | Medical |
 | Secondary | Business (optional) |
 | Version | 1.0 |
-| Build | 2 |
+| Build | 3 |
 | Copyright | 2026 Edward Dunn / MD Shift |
 
 ## URLs
@@ -72,28 +72,42 @@ First release of MD Shift Demo — hospital on-call coverage, doctor shift claim
 ## App Review Information — Notes (paste as-is)
 
 ```
-MD Shift Demo schedules hospital on-call coverage for doctors and hospitals.
+Hi App Review team,
 
-HOW TO REVIEW (recommended)
-1. On the sign-in screen, tap “Explore as doctor” or “Explore as hospital”.
-2. No password required. Sample data loads so you can browse Dashboard / Alter Rates / Doctors (hospital) or Home / Open Shifts / Trades (doctor).
-3. Explore mode is labeled as sample data and is not live hospital volume.
+Thanks for the follow-up on MD Shift Demo 1.0 (3).
 
-ALTERNATE LOGINS (seeded demos)
-• Doctor: jdunn@eporthospine.com / 1234567890
-• Hospital: erdunn706@gmail.com / 1234567890
-If Supabase auth is reachable these prefer the live account; otherwise they open the same seeded walkthrough.
+SCREENSHOTS (2.3.10)
+We replaced the App Store screenshots. The previous set had a mock status bar (text signal / battery). The new set has no status bar chrome and shows the in-app UI only. Please use the updated iPhone 6.5" assets (and View All Sizes in Media Manager if needed).
 
-ADMIN PREVIEW (marketing-style screens, optional)
-• info@erdanimates.shop / 1234567890
-Opens a curated preview of core screens. Prefer Explore mode for functional review.
+SIGN IN WITH APPLE (2.1a)
+Sign in with Apple is supported on iPhone and iPad. Choose Doctor or Hospital on the sign-in screen, then Continue with Apple.
 
-Face ID may appear after a real account is created; it can be skipped / cancelled on Simulator.
+If you only need to exercise scheduling features without creating an Apple account:
+1. Tap Explore as a doctor or Explore as a hospital (no password).
+2. Or use demo login jdunn@eporthospine.com / 1234567890 (doctor) or erdunn706@gmail.com / 1234567890 (hospital).
+
+Account deletion is not in-app; users email https://mdshift.net/support/
 
 Support: https://mdshift.net/support/
 Privacy: https://mdshift.net/privacypolicy/
 Contact: erdunn706@gmail.com
 ```
+
+## Fix checklist after Sept 2026 rejection
+
+### Screenshots (2.3.10)
+1. Upload all `AppStoreScreenshots/*-1284x2778.png` to App Store Connect → Previews and Screenshots.
+2. Also open **View All Sizes in Media Manager** and replace any leftover sizes that still show a mock status bar.
+
+### Sign in with Apple (2.1a) — Supabase dashboard (required)
+Native Apple tokens use the **Bundle ID** as audience. In Supabase:
+
+1. Authentication → Providers → **Apple** → Enabled
+2. **Client IDs** must include BOTH (Services ID first):
+   `com.eporthospine.mdshift.web,com.eporthospine.mdshift`
+3. Secret JWT must be valid if web Apple is enabled (regenerate if older than ~6 months)
+4. Apple Developer → Identifiers → App ID `com.eporthospine.mdshift` → Sign In with Apple ON
+5. Rebuild / upload build **3**, then test Continue with Apple on an iPad simulator or device before resubmitting
 
 ## Demo account (App Review form)
 
