@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-"""Generate App Store Connect–valid iPhone 6.5" screenshots (1284 × 2778).
+"""Generate App Store Connect–valid screenshots (no mock status bar).
+
+iPhone 6.5": 1284 × 2778 (optional 1242 × 2688)
+iPad 13":    2064 × 2752 (and 2048 × 2732)
 
 Usage:
   python3 scripts/generate-app-store-screenshots.py
-  python3 scripts/generate-app-store-screenshots.py --also-1242
+  python3 scripts/generate-app-store-screenshots.py --also-1242 --ipad --iphone
 """
 
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1284, 2778
 W_ALT, H_ALT = 1242, 2688
+IPAD_W, IPAD_H = 2064, 2752
+IPAD_ALT_W, IPAD_ALT_H = 2048, 2732
+SCALE = 1.0
 
 BG = (7, 11, 23)
 SURFACE = (22, 28, 44)
@@ -30,13 +37,18 @@ TEXT3 = (110, 120, 145)
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "AppStoreScreenshots"
+DOCS = ROOT / "docs" / "app-store-screenshots"
 
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    size = max(18, int(round(size * SCALE)))
     candidates = [
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
         "/Library/Fonts/Arial.ttf",
+        "/usr/share/fonts/truetype/macos/Inter-Bold.ttf" if bold else "/usr/share/fonts/truetype/macos/Inter-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
     for path in candidates:
         try:
@@ -296,22 +308,62 @@ def shot_analytics(sizes):
     save(img, "06-analytics", sizes)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--also-1242", action="store_true", help="Also write 1242×2688 variants")
-    args = parser.parse_args()
-    sizes = [(W, H)]
-    if args.also_1242:
-        sizes.append((W_ALT, H_ALT))
-
+def render_all(sizes: list[tuple[int, int]]) -> None:
     shot_doctor_home(sizes)
     shot_open_shifts(sizes)
     shot_hospital(sizes)
     shot_alter(sizes)
     shot_approvals(sizes)
     shot_analytics(sizes)
-    print(f"\nUpload these to App Store Connect → iPhone 6.5\" display.")
-    print(f"Required: {W}×{H} (or {W_ALT}×{H_ALT}). Folder: {OUT}")
+
+
+def sync_docs_iphone() -> None:
+    """Keep the marketing site copy in lockstep with the clean 1284×2778 set."""
+    DOCS.mkdir(parents=True, exist_ok=True)
+    for src in sorted(OUT.glob("*-1284x2778.png")):
+        dest = DOCS / src.name
+        shutil.copy2(src, dest)
+        print(f"synced {dest}")
+
+
+def main():
+    global W, H, SCALE
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--also-1242", action="store_true", help="Also write iPhone 1242×2688")
+    parser.add_argument("--iphone", action="store_true", help="Write iPhone sizes")
+    parser.add_argument("--ipad", action="store_true", help="Write iPad 13\" 2064×2752 (and 2048×2732)")
+    parser.add_argument("--skip-docs", action="store_true", help="Do not copy 1284×2778 into docs/app-store-screenshots")
+    args = parser.parse_args()
+
+    # Default: generate iPhone + iPad so ASC Media Manager can replace every slot.
+    do_iphone = args.iphone or not args.ipad
+    do_ipad = args.ipad or not args.iphone
+    if not args.iphone and not args.ipad:
+        do_iphone = True
+        do_ipad = True
+        args.also_1242 = True
+
+    if do_iphone:
+        W, H, SCALE = 1284, 2778, 1.0
+        sizes = [(W, H)]
+        if args.also_1242:
+            sizes.append((W_ALT, H_ALT))
+        render_all(sizes)
+        print(f"iPhone 6.5\": upload *-{W}x{H}.png")
+        if args.also_1242:
+            print(f"iPhone 5.5\" / 6.5\" alt: *-{W_ALT}x{H_ALT}.png")
+
+    if do_ipad:
+        W, H, SCALE = IPAD_W, IPAD_H, 1.35
+        render_all([(IPAD_W, IPAD_H), (IPAD_ALT_W, IPAD_ALT_H)])
+        print(f"iPad 13\": upload *-{IPAD_W}x{IPAD_H}.png (required if the app runs on iPad)")
+        print(f"iPad 12.9\" optional: *-{IPAD_ALT_W}x{IPAD_ALT_H}.png")
+
+    if do_iphone and not args.skip_docs:
+        sync_docs_iphone()
+
+    print(f"Folder: {OUT}")
+    print("No status-bar chrome (no 9:41 / signal / battery). Replace iPhone AND iPad slots in ASC Media Manager.")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # MD Shift Demo — App Store review kit
 
-Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/` (`*-1284x2778.png`).
+Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/`: iPhone `*-1284x2778.png` and iPad `*-2064x2752.png` (plus `*-2048x2732.png`). None include status-bar chrome.
 
 ## Identity
 
@@ -77,7 +77,7 @@ Hi App Review team,
 Thanks for the follow-up on MD Shift Demo 1.0 (3).
 
 SCREENSHOTS (2.3.10)
-We replaced the App Store screenshots. The previous set had a mock status bar (text signal / battery). The new set has no status bar chrome and shows the in-app UI only. Please use the updated iPhone 6.5" assets (and View All Sizes in Media Manager if needed).
+We replaced the App Store screenshots for iPhone and iPad. The previous set had a mock status bar (text signal / battery). The new set has no status bar chrome and shows the in-app UI only. Please replace both iPhone 6.5" (1284×2778) and iPad 13" (2064×2752) slots — open Media Manager → View All Sizes so leftover 12.9" / 2048×2732 assets are replaced too.
 
 SIGN IN WITH APPLE (2.1a)
 Sign in with Apple is supported on iPhone and iPad. Choose Doctor or Hospital on the sign-in screen, then Continue with Apple.
@@ -96,8 +96,10 @@ Contact: erdunn706@gmail.com
 ## Fix checklist after Sept 2026 rejection
 
 ### Screenshots (2.3.10)
-1. Upload all `AppStoreScreenshots/*-1284x2778.png` to App Store Connect → Previews and Screenshots.
-2. Also open **View All Sizes in Media Manager** and replace any leftover sizes that still show a mock status bar.
+1. In App Store Connect → your version → **Previews and Screenshots**, open **View All Sizes in Media Manager**.
+2. Replace **iPhone** slots with `AppStoreScreenshots/*-1284x2778.png` (6.5"). Also replace 1242×2688 if that size is still listed.
+3. Replace **iPad** slots with `AppStoreScreenshots/*-2064x2752.png` (13"). If Media Manager still shows a 12.9" / 2048×2732 row, upload `*-2048x2732.png` there too.
+4. Confirm every remaining size has **no** mock status bar (no “9:41”, signal bars, or battery). ASC often keeps old iPad assets after only the iPhone set is updated.
 
 ### Sign in with Apple (2.1a) — Supabase dashboard (required)
 Native Apple tokens use the **Bundle ID** as audience. In Supabase:
@@ -108,6 +110,8 @@ Native Apple tokens use the **Bundle ID** as audience. In Supabase:
 3. Secret JWT must be valid if web Apple is enabled (regenerate if older than ~6 months)
 4. Apple Developer → Identifiers → App ID `com.eporthospine.mdshift` → Sign In with Apple ON
 5. Rebuild / upload build **3**, then test Continue with Apple on an iPad simulator or device before resubmitting
+
+Native SIWA is already wired (`com.apple.developer.applesignin` = Default; `SignInWithAppleButton` sends a hashed nonce to `signInWithAppleIDToken`). The usual iPad review failure is missing **Bundle ID** in the Supabase Apple Client IDs list above — not a presentation-anchor bug. Do not ship iOS-only Client IDs.
 
 ## Demo account (App Review form)
 
@@ -142,7 +146,7 @@ Do **not** claim tracking unless you add ATT / ad SDKs.
 
 ## Screenshots
 
-Upload from `AppStoreScreenshots/`:
+Upload from `AppStoreScreenshots/` — **iPhone 6.5"** (1284×2778):
 
 1. `01-doctor-home-1284x2778.png`
 2. `02-open-shifts-1284x2778.png`
@@ -151,12 +155,25 @@ Upload from `AppStoreScreenshots/`:
 5. `05-approvals-1284x2778.png`
 6. `06-analytics-1284x2778.png`
 
-Use the **iPhone 6.5"** slot (1284×2778). Do not upload Simulator captures from iPhone 17 Pro Max.
+Then **iPad 13"** (2064×2752) — required because the app runs on iPad. Open **Media Manager → View All Sizes** and replace these slots (do not leave the old mock-status-bar iPad assets):
 
-Regenerate:
+1. `01-doctor-home-2064x2752.png`
+2. `02-open-shifts-2064x2752.png`
+3. `03-hospital-dashboard-2064x2752.png`
+4. `04-alter-rates-2064x2752.png`
+5. `05-approvals-2064x2752.png`
+6. `06-analytics-2064x2752.png`
+
+If Media Manager still lists **iPad 12.9"** (2048×2732), upload the matching `*-2048x2732.png` files from the same folder.
+
+Do not upload Simulator captures from iPhone 17 Pro Max.
+
+The marketing-site copies in `docs/app-store-screenshots/` are the same clean 1284×2778 set (no status bar).
+
+Regenerate (writes iPhone 1284 + 1242, iPad 2064 + 2048, and syncs docs):
 
 ```bash
-python3 scripts/generate-app-store-screenshots.py --also-1242
+python3 scripts/generate-app-store-screenshots.py
 ```
 
 ## Build & upload (no physical iPhone required)
