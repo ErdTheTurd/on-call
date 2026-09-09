@@ -586,8 +586,14 @@ struct AuthView: View {
             }
             errorMessage = error.localizedDescription
         case .success(let authorization):
-            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-                  let tokenData = credential.identityToken,
+            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+                errorMessage = "Apple Sign In failed. Try Explore as a doctor / hospital, or email sign-in."
+                return
+            }
+            // Apple only includes fullName on the first authorization — persist before the
+            // network call so a later retry or session still has it for onboarding.
+            AppleSignInNameStore.persist(appleUserID: credential.user, fullName: credential.fullName)
+            guard let tokenData = credential.identityToken,
                   let idToken = String(data: tokenData, encoding: .utf8) else {
                 errorMessage = "Apple Sign In failed. Try Explore as a doctor / hospital, or email sign-in."
                 return
@@ -602,6 +608,7 @@ struct AuthView: View {
                         nonce: nonce,
                         role: selectedRole
                     )
+                    AppleSignInNameStore.bindSession(userID: result.userID)
                     let resolved = result.email.isEmpty
                         ? (credential.email ?? "apple-user-\(result.userID.uuidString.prefix(8))@privaterelay.appleid.com")
                         : result.email

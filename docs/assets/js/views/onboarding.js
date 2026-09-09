@@ -30,7 +30,7 @@ export function renderOnboarding(role, state) {
         ${state.error ? `<p class="error-text" style="margin-top:12px">${escapeHtml(state.error)}</p>` : ""}
       </div>
       <div class="onboarding-actions">
-        ${state.step > 0 ? `<button type="button" class="btn-bordered" data-onb-back>Back</button>` : "<span></span>"}
+        ${state.step > (state.skipNameStep ? 1 : 0) ? `<button type="button" class="btn-bordered" data-onb-back>Back</button>` : "<span></span>"}
         <button type="button" class="btn-primary" data-onb-next ${state.loading ? "disabled" : ""}>
           ${state.loading ? `<span class="spinner"></span>` : (state.step >= steps.length - 1 ? "Get Started" : "Continue")}
         </button>
@@ -43,8 +43,10 @@ function doctorStepBody(state) {
     case 0:
       return `
         <div class="form-stack">
+          ${state.skipNameStep ? "" : `
           <div class="form-field"><label>First name</label><input data-field="firstName" value="${escapeHtml(state.firstName || "")}" /></div>
           <div class="form-field"><label>Last name</label><input data-field="lastName" value="${escapeHtml(state.lastName || "")}" /></div>
+          `}
           <div class="form-field"><label>Credential</label>
             <select data-field="credential">${CREDENTIALS.map((c) => `<option ${state.credential === c ? "selected" : ""}>${c}</option>`).join("")}</select>
           </div>

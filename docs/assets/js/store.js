@@ -354,6 +354,7 @@ export async function signInRemote(email, password) {
 }
 
 async function finalizeRemoteSession(user, emailFallback) {
+  persistAppleSignInNameFromUser(user);
   const email = user.email || emailFallback;
   const supabase = getSupabase();
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
@@ -495,6 +496,78 @@ export function oauthRedirectTo() {
   return new URL("callback.html", window.location.href).href;
 }
 
+const APPLE_NAME_KEY_PREFIX = "mdshift_apple_siwa_name.";
+
+function isAppleAuthUser(user) {
+  const identities = user?.identities || [];
+  if (identities.some((i) => i.provider === "apple")) return true;
+  const provider = String(user?.app_metadata?.provider || "").toLowerCase();
+  const providers = user?.app_metadata?.providers;
+  if (provider === "apple") return true;
+  if (Array.isArray(providers) && providers.includes("apple")) return true;
+  return false;
+}
+
+function splitPersonName(full) {
+  const text = String(full || "").trim();
+  if (!text) return { givenName: "", familyName: "" };
+  const space = text.indexOf(" ");
+  if (space === -1) return { givenName: text, familyName: "" };
+  return { givenName: text.slice(0, space).trim(), familyName: text.slice(space + 1).trim() };
+}
+
+function loadAppleSignInName(userID) {
+  try {
+    const raw = localStorage.getItem(APPLE_NAME_KEY_PREFIX + userID);
+    if (!raw) return { givenName: "", familyName: "" };
+    const parsed = JSON.parse(raw);
+    return {
+      givenName: String(parsed.givenName || "").trim(),
+      familyName: String(parsed.familyName || "").trim()
+    };
+  } catch {
+    return { givenName: "", familyName: "" };
+  }
+}
+
+/** Apple only sends a name on the first authorization. Persist it; never overwrite with empty. */
+export function persistAppleSignInNameFromUser(user) {
+  if (!user?.id || !isAppleAuthUser(user)) return;
+  const meta = user.user_metadata || {};
+  const identity = (user.identities || []).find((i) => i.provider === "apple");
+  const data = identity?.identity_data || {};
+  let given = String(meta.given_name || meta.givenName || data.given_name || data.givenName || "").trim();
+  let family = String(meta.family_name || meta.familyName || data.family_name || data.familyName || "").trim();
+  if (!given && !family) {
+    const split = splitPersonName(meta.full_name || meta.name || data.full_name || data.name);
+    given = split.givenName;
+    family = split.familyName;
+  }
+  const existing = loadAppleSignInName(user.id);
+  const givenName = given || existing.givenName;
+  const familyName = family || existing.familyName;
+  if (!givenName && !familyName) return;
+  try {
+    localStorage.setItem(APPLE_NAME_KEY_PREFIX + user.id, JSON.stringify({ givenName, familyName }));
+  } catch { /* ignore */ }
+}
+
+export function appleSignInNameForUser(userID) {
+  if (!userID) return { givenName: "", familyName: "" };
+  return loadAppleSignInName(userID);
+}
+
+/** Prefill / skip doctor name-entry when Apple already shared a full name. */
+export function seedDoctorOnboardingFromApple(onb, userID) {
+  if ((onb.role || "Doctor") !== "Doctor") return onb;
+  const name = appleSignInNameForUser(userID);
+  const givenName = name.givenName || onb.firstName || "";
+  const familyName = name.familyName || onb.lastName || "";
+  const skipNameStep = !!(givenName.trim() && familyName.trim());
+  const step = skipNameStep && !(onb.step > 0) ? 1 : (onb.step || 0);
+  return { ...onb, firstName: givenName, lastName: familyName, skipNameStep, step };
+}
+
 /** Starts Google or Apple OAuth in the browser. Role is applied after redirect. */
 export async function signInWithOAuth(provider, role) {
   if (!isConfigured()) throw new Error("Supabase is not configured.");
@@ -522,6 +595,7 @@ export async function completeOAuthSession() {
   if (!session?.user) return null;
 
   const user = session.user;
+  persistAppleSignInNameFromUser(user);
   if (await needsMfaChallenge()) {
     return {
       userID: user.id,

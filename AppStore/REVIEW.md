@@ -12,7 +12,7 @@ Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/
 | Primary category | Medical |
 | Secondary | Business (optional) |
 | Version | 1.0 |
-| Build | 3 |
+| Build | 5 |
 | Copyright | 2026 Edward Dunn / MD Shift |
 
 ## URLs
@@ -74,7 +74,10 @@ First release of MD Shift Demo — hospital on-call coverage, doctor shift claim
 ```
 Hi App Review team,
 
-Thanks for the follow-up on MD Shift Demo 1.0 (3).
+Thanks for the follow-up on MD Shift Demo 1.0 (5).
+
+SIGN IN WITH APPLE (Guideline 4)
+After Sign in with Apple, if Apple shares the name (givenName / familyName from Authentication Services), the app uses it and does not ask the user to re-enter it. Doctor onboarding starts at credentials/NPI in that case. We only show the name step when Apple did not provide a name (Share My Email / Hide My Name, or a later sign-in with nothing stored from the first authorization).
 
 SCREENSHOTS (2.3.10)
 We replaced the App Store screenshots for iPhone and iPad. The previous set had a mock status bar (text signal / battery). The new set has no status bar chrome and shows the in-app UI only. Please replace both iPhone 6.5" (1284×2778) and iPad 13" (2064×2752) slots — open Media Manager → View All Sizes so leftover 12.9" / 2048×2732 assets are replaced too.
@@ -109,9 +112,12 @@ Native Apple tokens use the **Bundle ID** as audience. In Supabase:
    `com.eporthospine.mdshift.web,com.eporthospine.mdshift`
 3. Secret JWT must be valid if web Apple is enabled (regenerate if older than ~6 months)
 4. Apple Developer → Identifiers → App ID `com.eporthospine.mdshift` → Sign In with Apple ON
-5. Rebuild / upload build **3**, then test Continue with Apple on an iPad simulator or device before resubmitting
+5. Rebuild / upload build **5**, then test Continue with Apple on an iPad simulator or device before resubmitting
 
-Native SIWA is already wired (`com.apple.developer.applesignin` = Default; `SignInWithAppleButton` sends a hashed nonce to `signInWithAppleIDToken`). The usual iPad review failure is missing **Bundle ID** in the Supabase Apple Client IDs list above — not a presentation-anchor bug. Do not ship iOS-only Client IDs.
+Native SIWA is already wired (`com.apple.developer.applesignin` = Default; `SignInWithAppleButton` sends a hashed nonce to `signInWithAppleIDToken`). After Sign in with Apple, if Apple shares the name, the app uses it and does not ask the user to re-enter it (Guideline 4). The usual iPad review failure is missing **Bundle ID** in the Supabase Apple Client IDs list above — not a presentation-anchor bug. Do not ship iOS-only Client IDs.
+
+### Sign in with Apple name (Guideline 4)
+Apple only sends `fullName` on the **first** authorization. Build 5 persists given/family name (UserDefaults, keyed by Apple user id) and prefills doctor onboarding. If both names are non-empty, the name-entry step is skipped. Hospital onboarding still asks for **hospital** name (that is the facility, not the signed-in person’s Apple name).
 
 ## Demo account (App Review form)
 

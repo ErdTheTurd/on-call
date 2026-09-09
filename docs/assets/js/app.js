@@ -3,7 +3,7 @@ import {
   authState, beginSession, registerAccount, signInLocal,
   signInRemote, signUpRemote, resendSignupEmail, verifySignupOtp,
   signInWithOAuth, completeOAuthSession, completeMfaSession, signOut, appStore, syncEverything, startPeriodicSync,
-  normalizeEmail, syncStatus
+  normalizeEmail, syncStatus, seedDoctorOnboardingFromApple
 } from "./store.js";
 import { enrollTotp, verifyTotp, challengeAndVerifyFirstTotp } from "./domain/mfa.js";
 import { hydrateLocalProfiles } from "./domain/sync.js";
@@ -288,8 +288,7 @@ async function boot() {
   if (auth.kind === "loggedOut") state.route = "landing";
   else if (auth.kind === "needsOnboarding") {
     state.route = "onboarding";
-    state.onb.role = auth.role;
-    state.onb.step = 0;
+    state.onb = seedDoctorOnboardingFromApple({ ...state.onb, role: auth.role, step: 0 }, appStore.session?.userID);
   } else {
     state.route = auth.role === "Hospital" ? "hospital" : "doctor";
   }
@@ -359,7 +358,10 @@ function render() {
   if (state.route === "onboarding") {
     root.innerHTML = `<div class="bg-gradient"><div class="blob-bottom"></div></div>${renderOnboarding(state.onb.role, state.onb)}`;
     bindOnboarding(root, {
-      onBack: () => update({ onb: { ...state.onb, step: Math.max(0, state.onb.step - 1) } }),
+      onBack: () => {
+        const min = state.onb.skipNameStep ? 1 : 0;
+        update({ onb: { ...state.onb, step: Math.max(min, state.onb.step - 1) } });
+      },
       onNext: handleOnboardingNext,
       onVerify: handleNpiVerify,
       onToggleSpecialty: (sp) => {
@@ -514,7 +516,9 @@ async function enterAuthedRoute(res, { suggestMfa = false } = {}) {
   const auth = authState();
   state.route = auth.kind === "needsOnboarding" ? "onboarding" : (res.role === "Hospital" ? "hospital" : "doctor");
   if (auth.kind === "needsOnboarding") {
-    state.onb = { step: 0, role: res.role, specialties: [], verified: false, codeVerified: false, email: res.email };
+    state.onb = seedDoctorOnboardingFromApple({
+      step: 0, role: res.role, specialties: [], verified: false, codeVerified: false, email: res.email
+    }, res.userID);
   }
   update({
     loading: false,
@@ -830,7 +834,7 @@ function handleOnboardingNext() {
   const steps = role === "Doctor" ? 4 : 3;
 
   if (role === "Doctor") {
-    if (state.onb.step === 0 && (!state.onb.firstName?.trim() || !state.onb.lastName?.trim())) {
+    if (state.onb.step === 0 && !state.onb.skipNameStep && (!state.onb.firstName?.trim() || !state.onb.lastName?.trim())) {
       update({ onb: { ...state.onb, error: "Enter your name." } }); return;
     }
     if (state.onb.step === 1 && !state.onb.verified) {

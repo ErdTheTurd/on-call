@@ -5,9 +5,12 @@ import SwiftUI
 struct DoctorOnboardingView: View {
     var onComplete: (DoctorProfile) -> Void
 
-    @State private var step = 0
-    @State private var firstName = ""
-    @State private var lastName = ""
+    /// When Sign in with Apple already provided both given and family name, skip the name step.
+    private let skipNameStep: Bool
+
+    @State private var step: Int
+    @State private var firstName: String
+    @State private var lastName: String
     @State private var credential: DoctorProfile.CredentialType = .md
     @State private var npi = ""
     @State private var deaNumber = ""
@@ -31,6 +34,21 @@ struct DoctorOnboardingView: View {
     @State private var npiAutoFilledName: String? = nil
 
     private let totalSteps = 4
+
+    init(
+        initialFirstName: String = "",
+        initialLastName: String = "",
+        onComplete: @escaping (DoctorProfile) -> Void
+    ) {
+        self.onComplete = onComplete
+        let given = initialFirstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let family = initialLastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let skip = !given.isEmpty && !family.isEmpty
+        self.skipNameStep = skip
+        _firstName = State(initialValue: given)
+        _lastName = State(initialValue: family)
+        _step = State(initialValue: skip ? 1 : 0)
+    }
 
     var body: some View {
         ZStack {
@@ -68,7 +86,12 @@ struct DoctorOnboardingView: View {
 
                         Group {
                             switch step {
-                            case 0: Step1View(firstName: $firstName, lastName: $lastName, credential: $credential)
+                            case 0: Step1View(
+                                        firstName: $firstName,
+                                        lastName: $lastName,
+                                        credential: $credential,
+                                        showNameFields: !skipNameStep
+                                    )
                             case 1: Step2View(
                                         npi: $npi, deaNumber: $deaNumber,
                                         licenseNumber: $licenseNumber, licenseState: $licenseState,
@@ -103,7 +126,7 @@ struct DoctorOnboardingView: View {
                         .padding(.horizontal)
 
                         HStack(spacing: 12) {
-                            if step > 0 {
+                            if step > (skipNameStep ? 1 : 0) {
                                 Button("Back") { withAnimation { step -= 1 } }
                                     .buttonStyle(.bordered).tint(.secondary)
                             }
@@ -121,6 +144,10 @@ struct DoctorOnboardingView: View {
             }
         }
         .interactiveDismissDisabled()
+        .onAppear {
+            // Do not present required name fields when Apple already provided a full name.
+            if skipNameStep && step == 0 { step = 1 }
+        }
     }
 
     // MARK: - Email Code
@@ -233,15 +260,18 @@ private struct Step1View: View {
     @Binding var firstName: String
     @Binding var lastName: String
     @Binding var credential: DoctorProfile.CredentialType
+    var showNameFields: Bool = true
 
     var body: some View {
         VStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 12) {
-                OnboardingField(label: "First Name", text: $firstName, placeholder: "Jane")
-                Divider()
-                OnboardingField(label: "Last Name",  text: $lastName,  placeholder: "Smith")
+            if showNameFields {
+                VStack(alignment: .leading, spacing: 12) {
+                    OnboardingField(label: "First Name", text: $firstName, placeholder: "Jane")
+                    Divider()
+                    OnboardingField(label: "Last Name",  text: $lastName,  placeholder: "Smith")
+                }
+                .cardStyle()
             }
-            .cardStyle()
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Credential Type").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
