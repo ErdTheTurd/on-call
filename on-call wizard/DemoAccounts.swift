@@ -1,6 +1,6 @@
 import Foundation
 
-/// Investor walkthrough helpers — Explore buttons + quiet email shortcuts.
+/// Sample-data walkthrough helpers. Prefer Explore buttons; email shortcuts are offline-only.
 @MainActor
 enum DemoAccounts {
     /// Offline / screenshot-kit password for known demo emails.
