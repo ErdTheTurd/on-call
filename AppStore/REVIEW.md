@@ -86,10 +86,11 @@ SIGN IN WITH APPLE (2.1a)
 Sign in with Apple is supported on iPhone and iPad. Choose Doctor or Hospital on the sign-in screen, then Continue with Apple.
 
 If you only need to exercise scheduling features without creating an Apple account:
-1. Tap Explore as a doctor or Explore as a hospital (no password).
-2. Or use demo login jdunn@eporthospine.com / 1234567890 (doctor) or erdunn706@gmail.com / 1234567890 (hospital).
+1. Tap Explore as a doctor or Explore as a hospital (no password). Sample data loads immediately.
+2. Or create / sign in with a real Apple, Google, or email account — normal auth (OTP / MFA when required).
 
-Account deletion is not in-app; users email https://mdshift.net/support/
+ADMIN PREVIEW (optional)
+• info@erdanimates.shop / 1234567890 — curated marketing screens. Prefer Explore for functional review.
 
 Support: https://mdshift.net/support/
 Privacy: https://mdshift.net/privacypolicy/
@@ -123,11 +124,11 @@ Apple only sends `fullName` on the **first** authorization. Build 5 persists giv
 
 | Field | Value |
 | --- | --- |
-| Sign-in required? | Yes (or use Explore — note above) |
-| User | `jdunn@eporthospine.com` |
-| Password | `1234567890` |
+| Sign-in required? | Prefer Explore (no password). Email / Apple / Google also work for real accounts. |
+| User | (optional) any registered email |
+| Password | (optional) that account’s password |
 
-Also mention Explore buttons in Notes so reviewers are not blocked if network auth fails.
+Mention **Explore as a doctor / Explore as a hospital** in Notes so reviewers are never blocked.
 
 ## Export compliance
 

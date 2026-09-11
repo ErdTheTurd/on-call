@@ -656,31 +656,16 @@ async function handleAuthSubmit({ email, password, confirm }) {
     }
 
     if (isConfigured()) {
-      const demoRoleByEmail = {
-        "erdunn706@gmail.com": "Hospital",
-        "jdunn@eporthospine.com": "Doctor"
-      };
       const demoPassword = "1234567890";
 
-      // Screenshot kit admin — before Supabase so App Store captures always work.
+      // Screenshot kit admin only — doctor/hospital sample data is Explore buttons, not email hijacks.
       if (normalizedEmail === "info@erdanimates.shop" && String(password).trim() === demoPassword) {
         enterShowcase();
-        return;
-      }
-      // Investor demo emails — seeded walkthrough before Supabase MFA/OTP/empty profiles.
-      if (demoRoleByEmail[normalizedEmail] && String(password).trim() === demoPassword) {
-        enterDemo(demoRoleByEmail[normalizedEmail]);
-        update({ loading: false, error: null, email: normalizedEmail });
         return;
       }
       try {
         const res = await signInRemote(normalizedEmail, password);
         if (res.needsMfa) {
-          if (demoRoleByEmail[normalizedEmail]) {
-            enterDemo(demoRoleByEmail[normalizedEmail]);
-            update({ loading: false, error: null, email: normalizedEmail, mfaChallenge: false });
-            return;
-          }
           update({
             loading: false,
             mfaChallenge: true,
@@ -695,22 +680,6 @@ async function handleAuthSubmit({ email, password, confirm }) {
         return;
       } catch (err) {
         const message = err?.message || "Could not sign in.";
-        if (normalizedEmail === "info@erdanimates.shop") {
-          if (String(password).trim() === "1234567890") {
-            enterShowcase();
-            return;
-          }
-        }
-        const demoRoleByEmail = {
-          "erdunn706@gmail.com": "Hospital",
-          "jdunn@eporthospine.com": "Doctor"
-        };
-        // Investor emails: if Supabase rejects them mid-demo, open the seeded walkthrough.
-        if (demoRoleByEmail[normalizedEmail]) {
-          enterDemo(demoRoleByEmail[normalizedEmail]);
-          update({ loading: false, error: null, email: normalizedEmail });
-          return;
-        }
         if (err?.code === "email_not_confirmed" || /email not confirmed/i.test(message)) {
           update({
             error: null,
@@ -744,7 +713,7 @@ async function handleAuthSubmit({ email, password, confirm }) {
       }
     }
 
-    // Offline: Explore-style shortcut for known demo emails.
+    // Offline only: known demo emails can still open sample data without Explore.
     if (normalizedEmail === "info@erdanimates.shop" && String(password).trim() === "1234567890") {
       enterShowcase();
       return;
@@ -753,7 +722,7 @@ async function handleAuthSubmit({ email, password, confirm }) {
       "erdunn706@gmail.com": "Hospital",
       "jdunn@eporthospine.com": "Doctor"
     };
-    if (offlineDemo[normalizedEmail]) {
+    if (offlineDemo[normalizedEmail] && String(password).trim() === "1234567890") {
       enterDemo(offlineDemo[normalizedEmail]);
       update({ loading: false, error: null, email: normalizedEmail });
       return;
