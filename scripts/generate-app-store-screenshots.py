@@ -64,7 +64,7 @@ def round_rect(draw: ImageDraw.ImageDraw, xy, radius: int, fill, outline=None, w
 
 def brand_header(draw: ImageDraw.ImageDraw, title: str, subtitle: str):
     # No fake status bar — Apple rejects non-iOS / mock status chrome (Guideline 2.3.10).
-    draw.text((72, 100), "MD Shift Demo", font=font(36, True), fill=ACCENT)
+    draw.text((72, 100), "MD Shift", font=font(36, True), fill=ACCENT)
     draw.text((72, 160), title, font=font(64, True), fill=TEXT)
     draw.text((72, 240), subtitle, font=font(34), fill=TEXT2)
 

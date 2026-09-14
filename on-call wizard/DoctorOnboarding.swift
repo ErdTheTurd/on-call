@@ -7,6 +7,8 @@ struct DoctorOnboardingView: View {
 
     /// When Sign in with Apple already provided both given and family name, skip the name step.
     private let skipNameStep: Bool
+    /// When Apple already provided an email, skip email entry and the confirm-email step.
+    private let skipEmailStep: Bool
 
     @State private var step: Int
     @State private var firstName: String
@@ -38,16 +40,22 @@ struct DoctorOnboardingView: View {
     init(
         initialFirstName: String = "",
         initialLastName: String = "",
+        initialEmail: String = "",
         onComplete: @escaping (DoctorProfile) -> Void
     ) {
         self.onComplete = onComplete
         let given = initialFirstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let family = initialLastName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let skip = !given.isEmpty && !family.isEmpty
-        self.skipNameStep = skip
+        let mail = initialEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let skipName = !given.isEmpty && !family.isEmpty
+        let skipEmail = !mail.isEmpty
+        self.skipNameStep = skipName
+        self.skipEmailStep = skipEmail
         _firstName = State(initialValue: given)
         _lastName = State(initialValue: family)
-        _step = State(initialValue: skip ? 1 : 0)
+        _email = State(initialValue: mail)
+        _codeVerified = State(initialValue: skipEmail)
+        _step = State(initialValue: skipName ? 1 : 0)
     }
 
     var body: some View {
@@ -102,6 +110,7 @@ struct DoctorOnboardingView: View {
                                         npiAutoFilledName: $npiAutoFilledName,
                                         firstName: firstName, lastName: lastName,
                                         credential: credential.rawValue,
+                                        showEmailField: !skipEmailStep,
                                         onVerify: runVerification
                                     )
                             case 2: EmailVerificationStep(
@@ -126,12 +135,12 @@ struct DoctorOnboardingView: View {
                         .padding(.horizontal)
 
                         HStack(spacing: 12) {
-                            if step > (skipNameStep ? 1 : 0) {
-                                Button("Back") { withAnimation { step -= 1 } }
+                            if step > firstVisibleStep {
+                                Button("Back") { withAnimation { step = previousStep(before: step) } }
                                     .buttonStyle(.bordered).tint(.secondary)
                             }
                             Button(step < totalSteps - 1 ? "Continue" : "Get Started") {
-                                if step < totalSteps - 1 { withAnimation { step += 1 } }
+                                if step < totalSteps - 1 { withAnimation { step = nextStep(after: step) } }
                                 else { finishOnboarding() }
                             }
                             .buttonStyle(PrimaryButtonStyle())
@@ -147,7 +156,22 @@ struct DoctorOnboardingView: View {
         .onAppear {
             // Do not present required name fields when Apple already provided a full name.
             if skipNameStep && step == 0 { step = 1 }
+            if skipEmailStep && step == 2 { step = 3 }
         }
+    }
+
+    private var firstVisibleStep: Int { skipNameStep ? 1 : 0 }
+
+    private func nextStep(after current: Int) -> Int {
+        var next = current + 1
+        if next == 2 && skipEmailStep { next = 3 }
+        return min(next, totalSteps - 1)
+    }
+
+    private func previousStep(before current: Int) -> Int {
+        var prev = current - 1
+        if prev == 2 && skipEmailStep { prev = 1 }
+        return max(prev, firstVisibleStep)
     }
 
     // MARK: - Email Code
@@ -190,7 +214,8 @@ struct DoctorOnboardingView: View {
                 firstName: firstName, lastName: lastName,
                 credential: credential.rawValue,
                 npi: npi, licenseNumber: licenseNumber,
-                licenseState: licenseState, email: email
+                licenseState: licenseState, email: email,
+                emailProvidedByApple: skipEmailStep
             )
             await MainActor.run {
                 isVerifying = false
@@ -221,9 +246,10 @@ struct DoctorOnboardingView: View {
         case 0: return !firstName.trimmingCharacters(in: .whitespaces).isEmpty &&
                        !lastName.trimmingCharacters(in: .whitespaces).isEmpty
         case 1:
-            guard npi.count == 10, !licenseNumber.isEmpty, licenseState.count == 2, !email.isEmpty else { return false }
+            guard npi.count == 10, !licenseNumber.isEmpty, licenseState.count == 2 else { return false }
+            if !skipEmailStep && email.trimmingCharacters(in: .whitespaces).isEmpty { return false }
             return verificationResult != nil && verificationResult?.npiRecord != nil
-        case 2: return codeVerified
+        case 2: return skipEmailStep || codeVerified
         case 3: return !selectedSpecialties.isEmpty
         default: return false
         }
@@ -302,6 +328,7 @@ private struct Step2View: View {
     let firstName: String
     let lastName: String
     let credential: String
+    var showEmailField: Bool = true
     let onVerify: () -> Void
 
     var body: some View {
@@ -334,10 +361,12 @@ private struct Step2View: View {
                             licenseState = String(new.filter { $0.isLetter }.prefix(2)).uppercased()
                         }
                 }
-                Divider()
-                OnboardingField(label: "Work Email", text: $email, placeholder: "jane@hospital.org", keyboard: .emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                if showEmailField {
+                    Divider()
+                    OnboardingField(label: "Work Email", text: $email, placeholder: "jane@hospital.org", keyboard: .emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
             }
             .cardStyle()
 
@@ -352,9 +381,11 @@ private struct Step2View: View {
                 .font(.headline).frame(maxWidth: .infinity).padding()
             }
             .buttonStyle(PrimaryButtonStyle())
-            .disabled(npi.count < 10 || licenseNumber.isEmpty || licenseState.count < 2 || email.isEmpty || isVerifying)
+            .disabled(npi.count < 10 || licenseNumber.isEmpty || licenseState.count < 2 || (showEmailField && email.isEmpty) || isVerifying)
 
-            if let result = verificationResult { VerificationBanner(result: result) }
+            if let result = verificationResult {
+                VerificationBanner(result: result, showEmailDomainCheck: showEmailField)
+            }
 
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "lock.shield.fill").foregroundStyle(Color.accentColor)
@@ -517,6 +548,7 @@ private struct Step3View: View {
 
 struct VerificationBanner: View {
     let result: DoctorVerificationResult
+    var showEmailDomainCheck: Bool = true
 
     var statusColor: Color {
         switch result.finalStatus {
@@ -553,7 +585,9 @@ struct VerificationBanner: View {
                 CheckRow(label: "NPI found in federal registry",  passed: result.npiRecord != nil)
                 CheckRow(label: "Name matches registry",           passed: result.nameMatches)
                 CheckRow(label: "Credential type matches",         passed: result.credentialMatches)
-                CheckRow(label: "Institutional email",             passed: result.emailDomainValid)
+                if showEmailDomainCheck {
+                    CheckRow(label: "Institutional email",             passed: result.emailDomainValid)
+                }
             }
         }
         .cardStyle()

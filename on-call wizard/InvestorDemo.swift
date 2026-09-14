@@ -153,19 +153,8 @@ enum InvestorDemo {
     }
 }
 
-/// Persistent reminder that seeded roster/calendar content is mock sample data.
+/// Sample-data reminder. Empty in shipping UI (Guideline 2.2) so the product
+/// does not present as a demo; Explore still loads sample data without a banner.
 struct MockSampleDataBanner: View {
-    var body: some View {
-        Group {
-            if InvestorDemo.isEnabled {
-                Text("Mock sample data — for demos. Not live hospital volume.")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Brand.textSecondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 12)
-                    .background(Brand.accentSoft)
-            }
-        }
-    }
+    var body: some View { EmptyView() }
 }

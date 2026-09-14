@@ -89,7 +89,7 @@ extension View {
 
 enum Brand {
     /// Public product name under the icon / App Store listing.
-    static let appName = "MD Shift Demo"
+    static let appName = "MD Shift"
     static let plusName = "MD Shift+"
 
     // ── Backgrounds ──────────────────────────────────────────────────────────

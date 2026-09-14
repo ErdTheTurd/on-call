@@ -16,7 +16,8 @@ import { startDemo, isDemoSession, clearDemoFlag } from "./domain/demo.js";
 import { renderLanding, bindLanding } from "./views/landing.js";
 import {
   renderOnboarding, bindOnboarding, readOnboardingFields,
-  finishDoctorOnboarding, finishHospitalOnboarding
+  finishDoctorOnboarding, finishHospitalOnboarding,
+  nextOnboardingStep, previousOnboardingStep
 } from "./views/onboarding.js";
 import { renderDoctorApp, bindDoctor } from "./views/doctor.js";
 import { renderHospitalApp, bindHospital } from "./views/hospital.js";
@@ -359,8 +360,7 @@ function render() {
     root.innerHTML = `<div class="bg-gradient"><div class="blob-bottom"></div></div>${renderOnboarding(state.onb.role, state.onb)}`;
     bindOnboarding(root, {
       onBack: () => {
-        const min = state.onb.skipNameStep ? 1 : 0;
-        update({ onb: { ...state.onb, step: Math.max(min, state.onb.step - 1) } });
+        update({ onb: { ...state.onb, step: previousOnboardingStep(state.onb), error: null } });
       },
       onNext: handleOnboardingNext,
       onVerify: handleNpiVerify,
@@ -448,7 +448,7 @@ function render() {
 function demoRibbon() {
   if (!isDemoSession()) return "";
   return `<div class="demo-ribbon">
-    <span>Demo — mock sample data (not live hospital volume)</span>
+    <span>Sample data — not live hospital volume</span>
     <button type="button" data-exit-demo>Exit</button>
   </div>`;
 }
@@ -656,13 +656,6 @@ async function handleAuthSubmit({ email, password, confirm }) {
     }
 
     if (isConfigured()) {
-      const demoPassword = "1234567890";
-
-      // Screenshot kit admin only — doctor/hospital sample data is Explore buttons, not email hijacks.
-      if (normalizedEmail === "info@erdanimates.shop" && String(password).trim() === demoPassword) {
-        enterShowcase();
-        return;
-      }
       try {
         const res = await signInRemote(normalizedEmail, password);
         if (res.needsMfa) {
@@ -713,11 +706,7 @@ async function handleAuthSubmit({ email, password, confirm }) {
       }
     }
 
-    // Offline only: known demo emails can still open sample data without Explore.
-    if (normalizedEmail === "info@erdanimates.shop" && String(password).trim() === "1234567890") {
-      enterShowcase();
-      return;
-    }
+    // Offline only: known sample emails can still open Explore data without the buttons.
     const offlineDemo = {
       "erdunn706@gmail.com": "Hospital",
       "jdunn@eporthospine.com": "Doctor"
@@ -752,18 +741,19 @@ async function handleNpiVerify() {
   update({ onb: { ...state.onb, loading: true, error: null } });
   try {
     if (role === "Doctor") {
-      const emailCheck = validateInstitutionalEmail(state.onb.email || appStore.session?.email);
-      // Allow demo personal emails with a soft flag — still verify NPI.
+      const providedEmail = state.onb.email || appStore.session?.email || "";
+      const emailCheck = state.onb.skipEmailStep
+        ? { ok: true }
+        : validateInstitutionalEmail(providedEmail);
       const record = await lookupNPI(npi, "NPI-1");
       const result = verifyDoctorCredentials({
         firstName: state.onb.firstName,
         lastName: state.onb.lastName,
         credential: state.onb.credential,
         npiRecord: record,
-        email: state.onb.email || appStore.session?.email
+        email: providedEmail
       });
-      // Soften email domain for demo accounts so onboarding isn't blocked.
-      if (!emailCheck.ok) {
+      if (!state.onb.skipEmailStep && !emailCheck.ok) {
         result.flags = [...(result.flags || []).filter((f) => !f.includes("institutional")), "Using non-institutional email — queued for review."];
         if (result.finalStatus === "flagged" && result.nameMatches !== false) result.finalStatus = "pending";
       }
@@ -809,8 +799,8 @@ function handleOnboardingNext() {
     if (state.onb.step === 1 && !state.onb.verified) {
       update({ onb: { ...state.onb, error: "Verify credentials first." } }); return;
     }
-    if (state.onb.step === 2 && state.onb.code !== "123456") {
-      update({ onb: { ...state.onb, error: "Incorrect or expired code. Try 123456 in demo mode." } }); return;
+    if (state.onb.step === 2 && !state.onb.skipEmailStep && state.onb.code !== "123456") {
+      update({ onb: { ...state.onb, error: "Incorrect or expired code." } }); return;
     }
     if (state.onb.step === 3 && !(state.onb.specialties?.length)) {
       update({ onb: { ...state.onb, error: "Choose your specialty." } }); return;
@@ -819,8 +809,8 @@ function handleOnboardingNext() {
     if (state.onb.step === 0 && (!state.onb.name?.trim() || !state.onb.npi)) {
       update({ onb: { ...state.onb, error: "Enter hospital name and NPI." } }); return;
     }
-    if (state.onb.step === 1 && state.onb.code !== "123456") {
-      update({ onb: { ...state.onb, error: "Use demo code 123456." } }); return;
+    if (state.onb.step === 1 && !state.onb.skipEmailStep && state.onb.code !== "123456") {
+      update({ onb: { ...state.onb, error: "Enter the 6-digit code from your email." } }); return;
     }
   }
 
@@ -839,7 +829,7 @@ function handleOnboardingNext() {
     return;
   }
 
-  update({ onb: { ...state.onb, step: state.onb.step + 1, error: null } });
+  update({ onb: { ...state.onb, step: nextOnboardingStep(state.onb), error: null } });
 }
 
 boot();

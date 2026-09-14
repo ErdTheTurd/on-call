@@ -1,4 +1,4 @@
-# MD Shift Demo — App Store review kit
+# MD Shift — App Store review kit
 
 Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/`: iPhone `*-1284x2778.png` and iPad `*-2064x2752.png` (plus `*-2048x2732.png`). None include status-bar chrome.
 
@@ -6,13 +6,13 @@ Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/
 
 | Field | Value |
 | --- | --- |
-| Name | MD Shift Demo |
+| Name | MD Shift |
 | Bundle ID | `com.eporthospine.mdshift` |
 | SKU | `mdshift-ios` (or your ASC SKU) |
 | Primary category | Medical |
 | Secondary | Business (optional) |
 | Version | 1.0 |
-| Build | 6 |
+| Build | 7 |
 | Copyright | 2026 Edward Dunn / MD Shift |
 
 ## URLs
@@ -38,7 +38,7 @@ Fill open call faster. Doctors claim shifts at locked rates; hospitals set Smart
 ## Description
 
 ```
-MD Shift Demo helps hospitals fill on-call coverage and helps doctors find shifts without the usual email chaos.
+MD Shift helps hospitals fill on-call coverage and helps doctors find shifts without the usual email chaos.
 
 Hospitals
 • See fill rate, open nights, and pending approvals in one place
@@ -51,7 +51,7 @@ Doctors
 • Manage assigned call, trades, and availability
 • Keep credentials and NPI verification in one profile
 
-Explore mode includes sample data so you can walk the product before creating a live roster. MD Shift Demo is a scheduling tool — not emergency dispatch. Use your hospital’s normal channels for clinical emergencies.
+Explore as a doctor or Explore as a hospital loads sample data so you can walk the product before creating a live roster. MD Shift is a scheduling tool — not emergency dispatch. Use your hospital’s normal channels for clinical emergencies.
 
 Support: https://mdshift.net/support/
 Privacy: https://mdshift.net/privacypolicy/
@@ -66,7 +66,7 @@ on-call,hospital,physician,shift,coverage,scheduling,locum,NPI,medical staffing,
 ## What’s New (1.0)
 
 ```
-First release of MD Shift Demo — hospital on-call coverage, doctor shift claims, trades, and verification.
+Hospital on-call coverage, doctor shift claims, trades, and verification. Sign in with Apple uses the name and email Apple already provided.
 ```
 
 ## App Review Information — Notes (paste as-is)
@@ -74,10 +74,15 @@ First release of MD Shift Demo — hospital on-call coverage, doctor shift claim
 ```
 Hi App Review team,
 
-Thanks for the follow-up on MD Shift Demo 1.0 (6).
+Thanks for the follow-up on MD Shift 1.0 (6). This build is 7.
 
 SIGN IN WITH APPLE (Guideline 4)
-After Sign in with Apple, if Apple shares the name (givenName / familyName from Authentication Services), the app uses it and does not ask the user to re-enter it. Doctor onboarding starts at credentials/NPI in that case. We only show the name step when Apple did not provide a name (Share My Email / Hide My Name, or a later sign-in with nothing stored from the first authorization).
+The app requests fullName and email from Authentication Services. When Apple provides givenName, familyName, and/or email, we persist them (keyed by Apple user id), bind them to the Supabase session user, and do not ask the user to type those values again.
+
+• Doctor onboarding: if both given and family name are present, name fields are skipped. If Apple email is present, the work-email field and the email-verification step are skipped. Remaining steps are credential/NPI and specialties.
+• Hospital onboarding: Apple’s personal name is not the facility name, so we still ask for hospital name and NPI. If Apple email is present, the admin-email field is skipped and that address is used.
+• Later Sign in with Apple attempts often omit fullName/email (Apple only sends them on the first authorization). Empty later values never overwrite a name or email we already stored.
+• If Apple hid name and email and nothing is stored, we collect what we still need.
 
 SCREENSHOTS (2.3.10)
 We replaced the App Store screenshots for iPhone and iPad. The previous set had a mock status bar (text signal / battery). The new set has no status bar chrome and shows the in-app UI only. Please replace both iPhone 6.5" (1284×2778) and iPad 13" (2064×2752) slots — open Media Manager → View All Sizes so leftover 12.9" / 2048×2732 assets are replaced too.
@@ -88,9 +93,6 @@ Sign in with Apple is supported on iPhone and iPad. Choose Doctor or Hospital on
 If you only need to exercise scheduling features without creating an Apple account:
 1. Tap Explore as a doctor or Explore as a hospital (no password). Sample data loads immediately.
 2. Or create / sign in with a real Apple, Google, or email account — normal auth (OTP / MFA when required).
-
-ADMIN PREVIEW (optional)
-• info@erdanimates.shop / 1234567890 — curated marketing screens. Prefer Explore for functional review.
 
 Support: https://mdshift.net/support/
 Privacy: https://mdshift.net/privacypolicy/
@@ -113,12 +115,15 @@ Native Apple tokens use the **Bundle ID** as audience. In Supabase:
    `com.eporthospine.mdshift.web,com.eporthospine.mdshift`
 3. Secret JWT must be valid if web Apple is enabled (regenerate if older than ~6 months)
 4. Apple Developer → Identifiers → App ID `com.eporthospine.mdshift` → Sign In with Apple ON
-5. Rebuild / upload build **6**, then test Continue with Apple on an iPad simulator or device before resubmitting
+5. Rebuild / upload build **7**, then test Continue with Apple on an iPad simulator or device before resubmitting
 
-Native SIWA is already wired (`com.apple.developer.applesignin` = Default; `SignInWithAppleButton` sends a hashed nonce to `signInWithAppleIDToken`). After Sign in with Apple, if Apple shares the name, the app uses it and does not ask the user to re-enter it (Guideline 4). The usual iPad review failure is missing **Bundle ID** in the Supabase Apple Client IDs list above — not a presentation-anchor bug. Do not ship iOS-only Client IDs.
+Native SIWA is already wired (`com.apple.developer.applesignin` = Default; `SignInWithAppleButton` sends a hashed nonce to `signInWithAppleIDToken`). After Sign in with Apple, if Apple shares the name and/or email, the app uses them and does not ask the user to re-enter them (Guideline 4). The usual iPad review failure is missing **Bundle ID** in the Supabase Apple Client IDs list above — not a presentation-anchor bug. Do not ship iOS-only Client IDs.
 
-### Sign in with Apple name (Guideline 4)
-Apple only sends `fullName` on the **first** authorization. Build 6 persists given/family name (UserDefaults, keyed by Apple user id) and prefills doctor onboarding. If both names are non-empty, the name-entry step is skipped. Hospital onboarding still asks for **hospital** name (that is the facility, not the signed-in person’s Apple name).
+### Sign in with Apple name and email (Guideline 4)
+Apple only sends `fullName` and `email` on the **first** authorization. Build 7 persists given name, family name, **and email** (UserDefaults, keyed by Apple user id), binds that Apple user to the session after Supabase sign-in, and prefills / skips onboarding fields. Empty later values never overwrite stored non-empty values. Hospital onboarding still asks for **hospital** name (that is the facility, not the signed-in person’s Apple name).
+
+### Demo / showcase framing (Guideline 2.2)
+The shipping product name is **MD Shift** (not “MD Shift Demo”). App Review can use **Explore as a doctor** / **Explore as a hospital** for sample data. There is no admin/marketing shortcut in the shipping sign-in UI.
 
 ## Demo account (App Review form)
 
@@ -185,7 +190,7 @@ python3 scripts/generate-app-store-screenshots.py
 
 ## Build & upload (no physical iPhone required)
 
-You do **not** need a phone to submit. Release builds use **Manual** signing with the **Md Shift Demo** profile (App Store profiles are not device-bound). Automatic Debug signing still needs a device UDID if you want to run on hardware.
+You do **not** need a phone to submit. Release builds use **Manual** signing with the **Md Shift Demo** profile (App Store profiles are not device-bound; the profile name is unchanged). Automatic Debug signing still needs a device UDID if you want to run on hardware.
 
 ### One-time profile setup
 

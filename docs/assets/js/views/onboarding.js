@@ -14,6 +14,27 @@ const HOSPITAL_STEPS = [
   { icon: "📋", title: "Scheduling Policy", subtitle: "Set default on-call granularity and rules." }
 ];
 
+export function minOnboardingStep(state) {
+  if ((state.role || "Doctor") === "Doctor") return state.skipNameStep ? 1 : 0;
+  return 0;
+}
+
+export function nextOnboardingStep(state) {
+  let step = (state.step || 0) + 1;
+  const role = state.role || "Doctor";
+  if (role === "Doctor" && step === 2 && state.skipEmailStep) step = 3;
+  if (role === "Hospital" && step === 1 && state.skipEmailStep) step = 2;
+  return step;
+}
+
+export function previousOnboardingStep(state) {
+  let step = (state.step || 0) - 1;
+  const role = state.role || "Doctor";
+  if (role === "Doctor" && step === 2 && state.skipEmailStep) step = 1;
+  if (role === "Hospital" && step === 1 && state.skipEmailStep) step = 0;
+  return Math.max(minOnboardingStep(state), step);
+}
+
 export function renderOnboarding(role, state) {
   const steps = role === "Doctor" ? DOCTOR_STEPS : HOSPITAL_STEPS;
   const step = steps[state.step] || steps[0];
@@ -30,7 +51,7 @@ export function renderOnboarding(role, state) {
         ${state.error ? `<p class="error-text" style="margin-top:12px">${escapeHtml(state.error)}</p>` : ""}
       </div>
       <div class="onboarding-actions">
-        ${state.step > (state.skipNameStep ? 1 : 0) ? `<button type="button" class="btn-bordered" data-onb-back>Back</button>` : "<span></span>"}
+        ${state.step > minOnboardingStep(state) ? `<button type="button" class="btn-bordered" data-onb-back>Back</button>` : "<span></span>"}
         <button type="button" class="btn-primary" data-onb-next ${state.loading ? "disabled" : ""}>
           ${state.loading ? `<span class="spinner"></span>` : (state.step >= steps.length - 1 ? "Get Started" : "Continue")}
         </button>
@@ -58,7 +79,7 @@ function doctorStepBody(state) {
           <div class="form-field"><label>DEA #</label><input data-field="deaNumber" value="${escapeHtml(state.deaNumber || "")}" placeholder="Optional" /></div>
           <div class="form-field"><label>License #</label><input data-field="licenseNumber" value="${escapeHtml(state.licenseNumber || "")}" /></div>
           <div class="form-field"><label>License state</label><input data-field="licenseState" maxlength="2" value="${escapeHtml(state.licenseState || "")}" /></div>
-          <div class="form-field"><label>Email</label><input data-field="email" type="email" value="${escapeHtml(state.email || appStore.session?.email || "")}" /></div>
+          ${state.skipEmailStep ? "" : `<div class="form-field"><label>Email</label><input data-field="email" type="email" value="${escapeHtml(state.email || appStore.session?.email || "")}" /></div>`}
           <button type="button" class="btn-secondary" data-verify-npi ${state.verified || state.loading ? "disabled" : ""}>
             ${state.loading ? `<span class="spinner"></span>` : (state.verified ? "✓ Credentials verified" : "Verify with NPI Registry")}
           </button>
@@ -74,7 +95,7 @@ function doctorStepBody(state) {
     case 2:
       return `
         <div class="form-stack" style="text-align:center">
-          <p class="subtitle">Demo mode: use code <strong>123456</strong></p>
+          <p class="subtitle">Enter the 6-digit code we sent to your email.</p>
           <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" placeholder="123456" /></div>
         </div>`;
     default:
@@ -95,7 +116,7 @@ function hospitalStepBody(state) {
         <div class="form-stack">
           <div class="form-field"><label>Hospital name</label><input data-field="name" value="${escapeHtml(state.name || "")}" /></div>
           <div class="form-field"><label>NPI</label><input data-field="npi" maxlength="10" inputmode="numeric" value="${escapeHtml(state.npi || "")}" /></div>
-          <div class="form-field"><label>Email</label><input data-field="email" type="email" value="${escapeHtml(state.email || appStore.session?.email || "")}" /></div>
+          ${state.skipEmailStep ? "" : `<div class="form-field"><label>Email</label><input data-field="email" type="email" value="${escapeHtml(state.email || appStore.session?.email || "")}" /></div>`}
           <button type="button" class="btn-secondary" data-verify-npi ${state.verified || state.loading ? "disabled" : ""}>
             ${state.loading ? `<span class="spinner"></span>` : (state.verified ? "✓ Facility NPI verified" : "Verify facility NPI")}
           </button>
@@ -103,7 +124,7 @@ function hospitalStepBody(state) {
     case 1:
       return `
         <div class="form-stack" style="text-align:center">
-          <p class="subtitle">Demo mode: use code <strong>123456</strong></p>
+          <p class="subtitle">Enter the 6-digit code we sent to your email.</p>
           <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" /></div>
         </div>`;
     default:

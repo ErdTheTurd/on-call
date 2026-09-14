@@ -27,11 +27,7 @@ enum DemoAccounts {
     ]
 
     static func normalize(_ raw: String) -> String {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if adminEmails.contains(value) { return "info@erdanimates.shop" }
-        if let mapped = aliases[value]?.email { return mapped }
-        if value.hasSuffix("@eporthospine") { return value + ".com" }
-        return value
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     static func isAdminEmail(_ raw: String) -> Bool {

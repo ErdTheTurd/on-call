@@ -159,7 +159,8 @@ public final class DoctorVerificationService {
         npi: String,
         licenseNumber: String,
         licenseState: String,
-        email: String
+        email: String,
+        emailProvidedByApple: Bool = false
     ) async -> DoctorVerificationResult {
         #if DEBUG
         if npi == "1234567890" && licenseNumber.lowercased() == "a1234567" &&
@@ -180,12 +181,18 @@ public final class DoctorVerificationService {
 
         var result = DoctorVerificationResult()
 
-        // 1. Email domain check (instant, no network)
-        do {
-            try EmailDomainChecker.validate(email)
+        // 1. Email domain check (instant, no network).
+        // Apple-provided emails (including iCloud / Hide My Email) already satisfy Guideline 4 —
+        // do not demand a different work address.
+        if emailProvidedByApple && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             result.emailDomainValid = true
-        } catch {
-            result.flags.append(error.localizedDescription)
+        } else {
+            do {
+                try EmailDomainChecker.validate(email)
+                result.emailDomainValid = true
+            } catch {
+                result.flags.append(error.localizedDescription)
+            }
         }
 
         // 2. NPI registry lookup
@@ -246,16 +253,21 @@ public final class HospitalVerificationService {
     public func verify(
         hospitalName: String,
         npi: String,
-        email: String
+        email: String,
+        emailProvidedByApple: Bool = false
     ) async -> HospitalVerificationResult {
         var result = HospitalVerificationResult()
 
-        // 1. Email domain check
-        do {
-            try EmailDomainChecker.validate(email)
+        // 1. Email domain check. Apple-provided emails must not force a different address.
+        if emailProvidedByApple && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             result.emailDomainValid = true
-        } catch {
-            result.flags.append(error.localizedDescription)
+        } else {
+            do {
+                try EmailDomainChecker.validate(email)
+                result.emailDomainValid = true
+            } catch {
+                result.flags.append(error.localizedDescription)
+            }
         }
 
         // 2. NPI registry — organization lookup

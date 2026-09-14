@@ -590,9 +590,13 @@ struct AuthView: View {
                 errorMessage = "Apple Sign In failed. Try Explore as a doctor / hospital, or email sign-in."
                 return
             }
-            // Apple only includes fullName on the first authorization — persist before the
-            // network call so a later retry or session still has it for onboarding.
-            AppleSignInNameStore.persist(appleUserID: credential.user, fullName: credential.fullName)
+            // Apple only includes fullName and email on the first authorization —
+            // persist before the network call so a later retry or session still has them.
+            AppleSignInNameStore.persist(
+                appleUserID: credential.user,
+                fullName: credential.fullName,
+                email: credential.email
+            )
             guard let tokenData = credential.identityToken,
                   let idToken = String(data: tokenData, encoding: .utf8) else {
                 errorMessage = "Apple Sign In failed. Try Explore as a doctor / hospital, or email sign-in."
@@ -608,10 +612,16 @@ struct AuthView: View {
                         nonce: nonce,
                         role: selectedRole
                     )
+                    let appleEmail = (credential.email ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    AppleSignInNameStore.persist(
+                        appleUserID: credential.user,
+                        fullName: nil,
+                        email: result.email
+                    )
                     AppleSignInNameStore.bindSession(userID: result.userID)
-                    let resolved = result.email.isEmpty
-                        ? (credential.email ?? "apple-user-\(result.userID.uuidString.prefix(8))@privaterelay.appleid.com")
-                        : result.email
+                    let resolved = !result.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? result.email
+                        : (!appleEmail.isEmpty ? appleEmail : "")
                     await MainActor.run {
                         if result.needsMfa {
                             isLoading = false
@@ -677,11 +687,13 @@ struct AuthView: View {
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
-        // Screenshot-kit admin only — doctor/hospital sample data is Explore buttons, not email hijacks.
+        // Screenshot-kit admin login is DEBUG-only — shipping review uses Explore or a real account.
+        #if DEBUG
         if mode == .signIn, DemoAccounts.matchAdmin(email: email, password: password) {
             DemoAccounts.enterAdminShowcase(auth: auth)
             return
         }
+        #endif
 
         // Real email / password / MFA when Supabase is configured. Explore stays a separate path.
         if SupabaseAuthService.shared.isConfigured {
