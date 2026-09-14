@@ -22,16 +22,18 @@ export function minOnboardingStep(state) {
 export function nextOnboardingStep(state) {
   let step = (state.step || 0) + 1;
   const role = state.role || "Doctor";
-  if (role === "Doctor" && step === 2 && state.skipEmailStep) step = 3;
-  if (role === "Hospital" && step === 1 && state.skipEmailStep) step = 2;
+  const skipConfirm = state.skipEmailConfirmStep || state.skipEmailStep;
+  if (role === "Doctor" && step === 2 && skipConfirm) step = 3;
+  if (role === "Hospital" && step === 1 && skipConfirm) step = 2;
   return step;
 }
 
 export function previousOnboardingStep(state) {
   let step = (state.step || 0) - 1;
   const role = state.role || "Doctor";
-  if (role === "Doctor" && step === 2 && state.skipEmailStep) step = 1;
-  if (role === "Hospital" && step === 1 && state.skipEmailStep) step = 0;
+  const skipConfirm = state.skipEmailConfirmStep || state.skipEmailStep;
+  if (role === "Doctor" && step === 2 && skipConfirm) step = 1;
+  if (role === "Hospital" && step === 1 && skipConfirm) step = 0;
   return Math.max(minOnboardingStep(state), step);
 }
 
