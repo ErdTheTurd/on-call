@@ -4,7 +4,7 @@ import { BRAND, brandLockup } from "../brand.js";
 /**
  * Public marketing page. No product state is read here.
  * Stat figures animate for presence; they are illustrative targets, not live counts.
- * Demo CTAs open mock sample data so the product is walkable before real accounts exist.
+ * Explore CTAs open sample data so the product is walkable before a real account exists.
  */
 export function renderLanding() {
   return `
@@ -42,7 +42,7 @@ function header() {
 function hero() {
   return `
     <section class="hero">
-      <span class="pill reveal">Live now · demos use mock sample data</span>
+      <span class="pill reveal">Live now</span>
       <h1 class="hero-title reveal">
         <span class="hero-shift-hit" data-hero-shift-hit>
           <span class="hero-shift-stack" data-hero-shift>
@@ -59,7 +59,7 @@ function hero() {
         <button type="button" class="btn-solid lg" data-demo-role="Doctor">For doctors ${arrow()}</button>
         <button type="button" class="btn-outline lg" data-demo-role="Hospital">For hospitals ${arrow()}</button>
       </div>
-      <p class="hero-note reveal">Opens mock sample data — no signup required. Create a real account when you're ready.</p>
+      <p class="hero-note reveal">Explore with sample data — no signup required. Create a real account when you're ready.</p>
     </section>`;
 }
 
@@ -116,7 +116,7 @@ function bothSides() {
             { day: "Sat", tone: "" }, { day: "Sun", tone: "" }
           ])}
           <p class="week-note">Friday is out for swap</p>
-          <button type="button" class="btn-solid" data-demo-role="Doctor">Explore doctor demo ${arrow()}</button>
+          <button type="button" class="btn-solid" data-demo-role="Doctor">Explore as a doctor ${arrow()}</button>
         </article>
 
         <article class="split-card reveal" id="for-hospitals">
@@ -132,7 +132,7 @@ function bothSides() {
             { day: "Sat", tone: "" }, { day: "Sun", tone: "" }
           ])}
           <p class="week-note gap"><span class="gap-dot"></span>1 coverage gap detected</p>
-          <button type="button" class="btn-solid" data-demo-role="Hospital">Explore hospital demo ${arrow()}</button>
+          <button type="button" class="btn-solid" data-demo-role="Hospital">Explore as a hospital ${arrow()}</button>
         </article>
       </div>
     </section>`;
@@ -182,11 +182,11 @@ function closing() {
       <div class="cta-band reveal">
         <div>
           <h2>Ready to fix your scheduling?</h2>
-          <p>We're expecting over 10,000 doctors and 500+ hospitals on ${BRAND.name}. Explore with mock sample data, or create a real account.</p>
+          <p>We're expecting over 10,000 doctors and 500+ hospitals on ${BRAND.name}. Explore with sample data, or create a real account.</p>
         </div>
         <div class="cta-actions">
-          <button type="button" class="btn-solid lg" data-demo-role="Hospital">Explore hospital demo</button>
-          <button type="button" class="btn-outline lg" data-demo-role="Doctor">Explore doctor demo</button>
+          <button type="button" class="btn-solid lg" data-demo-role="Hospital">Explore as a hospital</button>
+          <button type="button" class="btn-outline lg" data-demo-role="Doctor">Explore as a doctor</button>
         </div>
       </div>
     </section>`;
@@ -216,7 +216,7 @@ function footer() {
       <div class="footer-bottom">
         <div class="footer-legal">
           <span>© ${new Date().getFullYear()} ${BRAND.name}. All rights reserved. · <a href="/support/">Support</a> · <a href="/privacypolicy/">Privacy Policy</a></span>
-          <span class="footer-disclaimer">Growth targets are expectations, not live counts. Demo walks use mock sample data. Real accounts sync to your hospital when you sign up.</span>
+          <span class="footer-disclaimer">Growth targets are expectations, not live counts. Explore uses sample data on this device. Real accounts sync to your hospital when you sign up.</span>
         </div>
         <button type="button" class="btn-quiet" data-goto-auth>Log in</button>
       </div>

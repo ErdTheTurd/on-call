@@ -248,7 +248,7 @@ function setSyncStatus(state, message = "") {
 
 export async function syncEverything() {
   if (!backendLive()) {
-    setSyncStatus("offline", isDemoSession() ? "Demo mode — nothing is saved to the cloud." : "");
+    setSyncStatus("offline", isDemoSession() ? "Sample data — nothing is saved to the cloud." : "");
     return { ok: true, offline: true };
   }
   const result = await sync.syncEverything(syncHooks);
@@ -283,19 +283,6 @@ async function afterMutation(fn) {
 export function normalizeEmail(raw) {
   const value = String(raw || "").trim().toLowerCase();
   if (!value) return "";
-
-  const aliases = {
-    erdunn: "erdunn706@gmail.com",
-    "erdunn706": "erdunn706@gmail.com",
-    jdunn: "jdunn@eporthospine.com",
-    "jdunn@eporthospine": "jdunn@eporthospine.com",
-    admin: "info@erdanimates.shop",
-    info: "info@erdanimates.shop"
-  };
-  if (aliases[value]) return aliases[value];
-  if (!value.includes("@")) return `${value}@gmail.com`;
-  // Incomplete domains like jdunn@eporthospine → .com
-  if (value.endsWith("@eporthospine")) return `${value}.com`;
   return value;
 }
 
@@ -516,21 +503,30 @@ function splitPersonName(full) {
   return { givenName: text.slice(0, space).trim(), familyName: text.slice(space + 1).trim() };
 }
 
-function loadAppleSignInName(userID) {
+function emptyAppleIdentity() {
+  return { givenName: "", familyName: "", email: "" };
+}
+
+function loadAppleSignInIdentity(userID) {
   try {
     const raw = localStorage.getItem(APPLE_NAME_KEY_PREFIX + userID);
-    if (!raw) return { givenName: "", familyName: "" };
+    if (!raw) return emptyAppleIdentity();
     const parsed = JSON.parse(raw);
     return {
       givenName: String(parsed.givenName || "").trim(),
-      familyName: String(parsed.familyName || "").trim()
+      familyName: String(parsed.familyName || "").trim(),
+      email: String(parsed.email || "").trim()
     };
   } catch {
-    return { givenName: "", familyName: "" };
+    return emptyAppleIdentity();
   }
 }
 
-/** Apple only sends a name on the first authorization. Persist it; never overwrite with empty. */
+function loadAppleSignInName(userID) {
+  return loadAppleSignInIdentity(userID);
+}
+
+/** Apple only sends name/email on the first authorization. Persist; never overwrite with empty. */
 export function persistAppleSignInNameFromUser(user) {
   if (!user?.id || !isAppleAuthUser(user)) return;
   const meta = user.user_metadata || {};
@@ -543,29 +539,44 @@ export function persistAppleSignInNameFromUser(user) {
     given = split.givenName;
     family = split.familyName;
   }
-  const existing = loadAppleSignInName(user.id);
+  const incomingEmail = String(meta.email || data.email || user.email || "").trim();
+  const existing = loadAppleSignInIdentity(user.id);
   const givenName = given || existing.givenName;
   const familyName = family || existing.familyName;
-  if (!givenName && !familyName) return;
+  const email = incomingEmail || existing.email;
+  if (!givenName && !familyName && !email) return;
   try {
-    localStorage.setItem(APPLE_NAME_KEY_PREFIX + user.id, JSON.stringify({ givenName, familyName }));
+    localStorage.setItem(APPLE_NAME_KEY_PREFIX + user.id, JSON.stringify({ givenName, familyName, email }));
   } catch { /* ignore */ }
 }
 
 export function appleSignInNameForUser(userID) {
-  if (!userID) return { givenName: "", familyName: "" };
-  return loadAppleSignInName(userID);
+  if (!userID) return emptyAppleIdentity();
+  return loadAppleSignInIdentity(userID);
 }
 
-/** Prefill / skip doctor name-entry when Apple already shared a full name. */
+/** Prefill / skip doctor name and any email-entry steps when Apple already shared them. */
 export function seedDoctorOnboardingFromApple(onb, userID) {
-  if ((onb.role || "Doctor") !== "Doctor") return onb;
-  const name = appleSignInNameForUser(userID);
-  const givenName = name.givenName || onb.firstName || "";
-  const familyName = name.familyName || onb.lastName || "";
-  const skipNameStep = !!(givenName.trim() && familyName.trim());
-  const step = skipNameStep && !(onb.step > 0) ? 1 : (onb.step || 0);
-  return { ...onb, firstName: givenName, lastName: familyName, skipNameStep, step };
+  const identity = appleSignInNameForUser(userID);
+  const givenName = identity.givenName || onb.firstName || "";
+  const familyName = identity.familyName || onb.lastName || "";
+  const email = identity.email || onb.email || "";
+  const skipNameStep = (onb.role || "Doctor") === "Doctor" && !!(givenName.trim() && familyName.trim());
+  const skipEmailStep = !!email.trim();
+  let step = onb.step || 0;
+  if ((onb.role || "Doctor") === "Doctor" && skipNameStep && !(onb.step > 0)) step = 1;
+  if ((onb.role || "Doctor") === "Doctor" && skipEmailStep && step === 2) step = 3;
+  if ((onb.role || "") === "Hospital" && skipEmailStep && step === 1) step = 2;
+  return {
+    ...onb,
+    firstName: givenName || onb.firstName,
+    lastName: familyName || onb.lastName,
+    email,
+    skipNameStep,
+    skipEmailStep,
+    codeVerified: skipEmailStep ? true : onb.codeVerified,
+    step
+  };
 }
 
 /** Starts Google or Apple OAuth in the browser. Role is applied after redirect. */

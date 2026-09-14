@@ -73,15 +73,17 @@ struct ContentView: View {
 
     @ViewBuilder
     private func onboardingView(for role: UserRole) -> some View {
+        let appleIdentity = AppleSignInNameStore.identity(forSessionUserID: SessionStore.shared.currentUserID)
         switch role {
         case .doctor:
             DoctorOnboardingView(
-                initialFirstName: AppleSignInNameStore.name(forSessionUserID: SessionStore.shared.currentUserID).givenName,
-                initialLastName: AppleSignInNameStore.name(forSessionUserID: SessionStore.shared.currentUserID).familyName
+                initialFirstName: appleIdentity.givenName,
+                initialLastName: appleIdentity.familyName,
+                initialEmail: appleIdentity.email
             ) { _ in auth.completeOnboarding(role: .doctor) }
                 .withContactSupport()
         case .hospital:
-            HospitalOnboardingView { _ in auth.completeOnboarding(role: .hospital) }
+            HospitalOnboardingView(initialEmail: appleIdentity.email) { _ in auth.completeOnboarding(role: .hospital) }
                 .withContactSupport()
         }
     }

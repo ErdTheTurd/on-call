@@ -5,13 +5,23 @@ import SwiftUI
 struct HospitalOnboardingView: View {
     var onComplete: (HospitalProfile) -> Void
 
+    /// When Sign in with Apple already provided an email, do not ask the user to type it again.
+    private let skipEmailField: Bool
+
     @State private var hospitalName = ""
     @State private var npi = ""
-    @State private var email = ""
+    @State private var email: String
 
     @State private var isVerifying = false
     @State private var verificationResult: HospitalVerificationResult? = nil
     @State private var npiAutoFilledName: String? = nil
+
+    init(initialEmail: String = "", onComplete: @escaping (HospitalProfile) -> Void) {
+        self.onComplete = onComplete
+        let mail = initialEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.skipEmailField = !mail.isEmpty
+        _email = State(initialValue: mail)
+    }
 
     var body: some View {
         ZStack {
@@ -30,7 +40,9 @@ struct HospitalOnboardingView: View {
                                 .padding(.top, 32)
                             Text("Verify Your Facility")
                                 .font(.system(.title2, design: .rounded, weight: .bold))
-                            Text("We look up your facility NPI in the federal registry and verify your institutional email.")
+                            Text(skipEmailField
+                                 ? "We look up your facility NPI in the federal registry."
+                                 : "We look up your facility NPI in the federal registry and verify your institutional email.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
@@ -50,10 +62,12 @@ struct HospitalOnboardingView: View {
                                 }
                             }
 
-                            Divider()
-                            OnboardingField(label: "Admin Email", text: $email, placeholder: "admin@averagehospital.org", keyboard: .emailAddress)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
+                            if !skipEmailField {
+                                Divider()
+                                OnboardingField(label: "Admin Email", text: $email, placeholder: "admin@averagehospital.org", keyboard: .emailAddress)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
                         }
                         .cardStyle()
                         .padding(.horizontal)
@@ -73,12 +87,12 @@ struct HospitalOnboardingView: View {
                             .font(.headline).frame(maxWidth: .infinity).padding()
                         }
                         .buttonStyle(PrimaryButtonStyle())
-                        .disabled(npi.count < 10 || hospitalName.isEmpty || email.isEmpty || isVerifying)
+                        .disabled(npi.count < 10 || hospitalName.isEmpty || (skipEmailField ? false : email.isEmpty) || isVerifying)
                         .padding(.horizontal)
 
                         // Result banner
                         if let result = verificationResult {
-                            HospitalVerificationBanner(result: result)
+                            HospitalVerificationBanner(result: result, showEmailDomainCheck: !skipEmailField)
                                 .padding(.horizontal)
                         }
 
@@ -87,7 +101,9 @@ struct HospitalOnboardingView: View {
                             Image(systemName: "lock.shield.fill").foregroundStyle(Color.accentColor)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Why we verify").font(.caption.weight(.semibold))
-                                Text("We cross-reference your facility NPI in the CMS NPPES registry and confirm your admin email matches your facility's domain. Accounts that don't match are reviewed by our team before activation.")
+                                Text(skipEmailField
+                                     ? "We cross-reference your facility NPI in the CMS NPPES registry. Accounts that don't match are reviewed by our team before activation."
+                                     : "We cross-reference your facility NPI in the CMS NPPES registry and confirm your admin email matches your facility's domain. Accounts that don't match are reviewed by our team before activation.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -117,7 +133,8 @@ struct HospitalOnboardingView: View {
             let result = await HospitalVerificationService.shared.verify(
                 hospitalName: hospitalName,
                 npi: npi,
-                email: email
+                email: email,
+                emailProvidedByApple: skipEmailField
             )
             await MainActor.run {
                 isVerifying = false
@@ -163,6 +180,7 @@ struct HospitalOnboardingView: View {
 
 struct HospitalVerificationBanner: View {
     let result: HospitalVerificationResult
+    var showEmailDomainCheck: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -191,7 +209,9 @@ struct HospitalVerificationBanner: View {
             VStack(alignment: .leading, spacing: 6) {
                 CheckRow(label: "Facility NPI found in federal registry", passed: result.npiRecord != nil)
                 CheckRow(label: "Facility name matches registry",          passed: result.nameMatches)
-                CheckRow(label: "Institutional email domain",              passed: result.emailDomainValid)
+                if showEmailDomainCheck {
+                    CheckRow(label: "Institutional email domain",              passed: result.emailDomainValid)
+                }
             }
         }
         .cardStyle()
