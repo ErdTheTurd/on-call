@@ -89,11 +89,13 @@ export function validateInstitutionalEmail(email) {
   return { ok: true, domain: parts[1] };
 }
 
-export function verifyDoctorCredentials({ firstName, lastName, credential, npiRecord, email }) {
+export function verifyDoctorCredentials({ firstName, lastName, credential, npiRecord, email, emailProvidedByApple = false }) {
   const flags = [];
   let nameMatches = true;
   let credentialMatches = true;
-  const emailCheck = validateInstitutionalEmail(email);
+  const emailCheck = emailProvidedByApple && String(email || "").trim()
+    ? { ok: true }
+    : validateInstitutionalEmail(email);
   const emailDomainValid = emailCheck.ok;
 
   if (!emailDomainValid) flags.push(emailCheck.error);

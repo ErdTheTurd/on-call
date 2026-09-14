@@ -555,18 +555,22 @@ export function appleSignInNameForUser(userID) {
   return loadAppleSignInIdentity(userID);
 }
 
-/** Prefill / skip doctor name and any email-entry steps when Apple already shared them. */
+/** Prefill / skip doctor name and email-entry when Apple already shared them. */
 export function seedDoctorOnboardingFromApple(onb, userID) {
   const identity = appleSignInNameForUser(userID);
   const givenName = identity.givenName || onb.firstName || "";
   const familyName = identity.familyName || onb.lastName || "";
-  const email = identity.email || onb.email || "";
+  const appleEmail = String(identity.email || "").trim();
+  const email = appleEmail || onb.email || "";
   const skipNameStep = (onb.role || "Doctor") === "Doctor" && !!(givenName.trim() && familyName.trim());
-  const skipEmailStep = !!email.trim();
+  // Only skip typing an email Apple already provided — not Google/email session addresses.
+  const skipEmailStep = !!appleEmail;
+  // Web never sends this onboarding code; signup OTP / OAuth already verified the account.
+  const skipEmailConfirmStep = true;
   let step = onb.step || 0;
   if ((onb.role || "Doctor") === "Doctor" && skipNameStep && !(onb.step > 0)) step = 1;
-  if ((onb.role || "Doctor") === "Doctor" && skipEmailStep && step === 2) step = 3;
-  if ((onb.role || "") === "Hospital" && skipEmailStep && step === 1) step = 2;
+  if ((onb.role || "Doctor") === "Doctor" && skipEmailConfirmStep && step === 2) step = 3;
+  if ((onb.role || "") === "Hospital" && skipEmailConfirmStep && step === 1) step = 2;
   return {
     ...onb,
     firstName: givenName || onb.firstName,
@@ -574,7 +578,8 @@ export function seedDoctorOnboardingFromApple(onb, userID) {
     email,
     skipNameStep,
     skipEmailStep,
-    codeVerified: skipEmailStep ? true : onb.codeVerified,
+    skipEmailConfirmStep,
+    codeVerified: skipEmailConfirmStep ? true : onb.codeVerified,
     step
   };
 }

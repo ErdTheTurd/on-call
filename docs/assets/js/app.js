@@ -650,7 +650,9 @@ async function handleAuthSubmit({ email, password, confirm }) {
         beginSession({ userID, email: normalizedEmail, role: state.role });
       }
       state.route = "onboarding";
-      state.onb = { step: 0, role: state.role, specialties: [], verified: false, codeVerified: false, email: normalizedEmail };
+      state.onb = seedDoctorOnboardingFromApple({
+        step: 0, role: state.role, specialties: [], verified: false, codeVerified: false, email: normalizedEmail
+      }, appStore.session?.userID);
       update({ loading: false, verifyEmail: null, otpCode: "" });
       return;
     }
@@ -751,7 +753,8 @@ async function handleNpiVerify() {
         lastName: state.onb.lastName,
         credential: state.onb.credential,
         npiRecord: record,
-        email: providedEmail
+        email: providedEmail,
+        emailProvidedByApple: !!state.onb.skipEmailStep
       });
       if (!state.onb.skipEmailStep && !emailCheck.ok) {
         result.flags = [...(result.flags || []).filter((f) => !f.includes("institutional")), "Using non-institutional email — queued for review."];
@@ -799,7 +802,7 @@ function handleOnboardingNext() {
     if (state.onb.step === 1 && !state.onb.verified) {
       update({ onb: { ...state.onb, error: "Verify credentials first." } }); return;
     }
-    if (state.onb.step === 2 && !state.onb.skipEmailStep && state.onb.code !== "123456") {
+    if (state.onb.step === 2 && !state.onb.skipEmailStep && !state.onb.skipEmailConfirmStep && state.onb.code !== "123456") {
       update({ onb: { ...state.onb, error: "Incorrect or expired code." } }); return;
     }
     if (state.onb.step === 3 && !(state.onb.specialties?.length)) {
@@ -809,7 +812,7 @@ function handleOnboardingNext() {
     if (state.onb.step === 0 && (!state.onb.name?.trim() || !state.onb.npi)) {
       update({ onb: { ...state.onb, error: "Enter hospital name and NPI." } }); return;
     }
-    if (state.onb.step === 1 && !state.onb.skipEmailStep && state.onb.code !== "123456") {
+    if (state.onb.step === 1 && !state.onb.skipEmailStep && !state.onb.skipEmailConfirmStep && state.onb.code !== "123456") {
       update({ onb: { ...state.onb, error: "Enter the 6-digit code from your email." } }); return;
     }
   }
