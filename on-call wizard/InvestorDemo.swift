@@ -8,8 +8,19 @@ import SwiftUI
 // All mock calendar fills, ads placeholders, and demo seeding gate on this flag.
 
 enum InvestorDemo {
-    /// Master switch — leave `true` for ship demos with mock sample data.
-    static let isEnabled = true
+    /// True in DEBUG and TestFlight only. App Store Release stays off (Guideline 2.2).
+    static var isEnabled: Bool {
+        #if DEBUG
+        return true
+        #else
+        // TestFlight installs use the sandbox receipt filename.
+        if let url = Bundle.main.appStoreReceiptURL,
+           url.lastPathComponent == "sandboxReceipt" {
+            return true
+        }
+        return false
+        #endif
+    }
 
     private static let seededKey = "investor_demo_seeded_v2"
 

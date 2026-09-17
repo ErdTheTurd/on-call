@@ -581,13 +581,13 @@ struct AuthView: View {
             if ns.domain == ASAuthorizationError.errorDomain,
                ns.code == ASAuthorizationError.unknown.rawValue {
                 // Common on first-run / iPad when the sheet dismisses oddly — don't block review with a cryptic code.
-                errorMessage = "Apple Sign In did not complete. Try again, or use Explore as a doctor / hospital."
+                errorMessage = "Apple Sign In did not complete. Try again, or use email sign-in."
                 return
             }
             errorMessage = error.localizedDescription
         case .success(let authorization):
             guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
-                errorMessage = "Apple Sign In failed. Try Explore as a doctor / hospital, or email sign-in."
+                errorMessage = "Apple Sign In failed. Try again, or use email sign-in."
                 return
             }
             // Apple only includes fullName and email on the first authorization —
@@ -599,7 +599,7 @@ struct AuthView: View {
             )
             guard let tokenData = credential.identityToken,
                   let idToken = String(data: tokenData, encoding: .utf8) else {
-                errorMessage = "Apple Sign In failed. Try Explore as a doctor / hospital, or email sign-in."
+                errorMessage = "Apple Sign In failed. Try again, or use email sign-in."
                 return
             }
             isLoading = true
