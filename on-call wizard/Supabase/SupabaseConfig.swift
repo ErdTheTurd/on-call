@@ -101,7 +101,7 @@ struct SupabaseHTTPClient {
             return "Apple Sign In could not be verified. Please try again."
         }
         if lower.contains("id token") || lower.contains("id_token") || lower.contains("provider is not enabled") {
-            return "Sign in with Apple is temporarily unavailable. Use Explore as a doctor/hospital, or email sign-in."
+            return "Sign in with Apple is temporarily unavailable. Try email sign-in, or try again later."
         }
         return raw
     }
