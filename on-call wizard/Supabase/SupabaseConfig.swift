@@ -95,7 +95,7 @@ struct SupabaseHTTPClient {
             ?? "HTTP \(status)"
         let lower = raw.lowercased()
         if lower.contains("audience") || lower.contains("unacceptable") {
-            return "Apple Sign In is not configured for this app. Please try Explore mode or email sign-in."
+            return "Apple Sign In is not configured for this app. Please try email sign-in."
         }
         if lower.contains("nonce") {
             return "Apple Sign In could not be verified. Please try again."
