@@ -687,7 +687,7 @@ struct AuthView: View {
         guard !trimmedEmail.isEmpty else { errorMessage = "Please enter your email."; return }
         guard password.count >= 6 else { errorMessage = "Password must be at least 6 characters."; return }
 
-        // Screenshot-kit admin login is DEBUG-only — shipping review uses Explore or a real account.
+        // Screenshot-kit admin login is compiled into DEBUG only.
         #if DEBUG
         if mode == .signIn, DemoAccounts.matchAdmin(email: email, password: password) {
             DemoAccounts.enterAdminShowcase(auth: auth)

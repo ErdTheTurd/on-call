@@ -12,7 +12,7 @@ Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/
 | Primary category | Medical |
 | Secondary | Business (optional) |
 | Version | 1.0 |
-| Build | 8 |
+| Build | 9 |
 | Copyright | 2026 Edward Dunn / MD Shift |
 
 ## URLs
@@ -74,10 +74,17 @@ Hospital on-call coverage, doctor shift claims, trades, and verification. Sign i
 ```
 Hi App Review team,
 
-Thanks for the follow-up on MD Shift 1.0. This build is 8.
+Thanks for the follow-up on MD Shift 1.0. This build is 9.
 
-PRODUCT (Guideline 2.2)
-MD Shift is a complete public product for hospital on-call scheduling and doctor shift claims — not a demo, trial, or limited showcase. The App Store listing name is MD Shift. Sample-data Explore shortcuts are not in this App Store binary (they remain in TestFlight / DEBUG builds only).
+GUIDELINE 2.2
+MD Shift is a complete public product for hospital on-call scheduling and doctor shift claims. The home-screen name, the bundle name (CFBundleName), and every in-app title are MD Shift. This build has no screen, button, or feature titled Demo or MD Shift Demo.
+
+Please review with a real account. Do not look for a separate sample or preview mode in this binary.
+1. Choose Doctor or Hospital on the sign-in screen.
+2. Continue with Apple, or create / sign in with Google or email (one-time code and authenticator when required).
+3. For a hospital account, open fill rate, open shifts, and approvals. For a doctor account, open shift claims, trades, and profile.
+
+Sample-data Explore controls are not in this App Store release. They exist only in DEBUG and TestFlight builds.
 
 SIGN IN WITH APPLE (Guideline 4)
 The app requests fullName and email from Authentication Services. When Apple provides givenName, familyName, and/or email, we persist them (keyed by Apple user id), bind them to the Supabase session user, and do not ask the user to type those values again.
@@ -86,11 +93,6 @@ The app requests fullName and email from Authentication Services. When Apple pro
 • Hospital onboarding: Apple’s personal name is not the facility name, so we still ask for hospital name and NPI. If Apple email is present, the admin-email field is skipped and that address is used.
 • Later Sign in with Apple attempts often omit fullName/email (Apple only sends them on the first authorization). Empty later values never overwrite a name or email we already stored.
 • If Apple hid name and email and nothing is stored, we collect what we still need.
-
-HOW TO REVIEW
-1. Choose Doctor or Hospital on the sign-in screen.
-2. Continue with Apple, or create / sign in with Google or email (OTP / MFA when required).
-3. Walk hospital fill rate / open shifts / approvals, or doctor claim / trades / profile as appropriate.
 
 Support: https://mdshift.net/support/
 Privacy: https://mdshift.net/privacypolicy/
@@ -113,15 +115,19 @@ Native Apple tokens use the **Bundle ID** as audience. In Supabase:
    `com.eporthospine.mdshift.web,com.eporthospine.mdshift`
 3. Secret JWT must be valid if web Apple is enabled (regenerate if older than ~6 months)
 4. Apple Developer → Identifiers → App ID `com.eporthospine.mdshift` → Sign In with Apple ON
-5. Rebuild / upload build **8**, then test Continue with Apple on an iPad simulator or device before resubmitting
+5. Rebuild / upload build **9**, then test Continue with Apple on an iPad simulator or device before resubmitting
 
 Native SIWA is already wired (`com.apple.developer.applesignin` = Default; `SignInWithAppleButton` sends a hashed nonce to `signInWithAppleIDToken`). After Sign in with Apple, if Apple shares the name and/or email, the app uses them and does not ask the user to re-enter them (Guideline 4). The usual iPad review failure is missing **Bundle ID** in the Supabase Apple Client IDs list above — not a presentation-anchor bug. Do not ship iOS-only Client IDs.
 
 ### Sign in with Apple name and email (Guideline 4)
-Apple only sends `fullName` and `email` on the **first** authorization. Build 8 still persists given name, family name, **and email** (UserDefaults, keyed by Apple user id), binds that Apple user to the session after Supabase sign-in, and prefills / skips onboarding fields. Empty later values never overwrite stored non-empty values. Hospital onboarding still asks for **hospital** name (that is the facility, not the signed-in person’s Apple name).
+Apple only sends `fullName` and `email` on the **first** authorization. Build 9 still persists given name, family name, **and email** (UserDefaults, keyed by Apple user id), binds that Apple user to the session after Supabase sign-in, and prefills / skips onboarding fields. Empty later values never overwrite stored non-empty values. Hospital onboarding still asks for **hospital** name (that is the facility, not the signed-in person’s Apple name).
 
-### Demo / showcase framing (Guideline 2.2)
-The shipping product name is **MD Shift**. Explore as doctor/hospital is **TestFlight and DEBUG only** — not in the App Store Release binary. There is no admin/marketing shortcut in the shipping sign-in UI. Investor/demo mock seeding is off for App Store Release.
+### Guideline 2.2 — product title
+Build 8 still shipped with `PRODUCT_NAME` / the built `.app` set to **MD Shift Demo**. That string is `CFBundleName` and is what review sees as a feature title even when `CFBundleDisplayName` is already MD Shift. Build 9 sets `PRODUCT_NAME`, the product reference (`MD Shift.app`), `CFBundleName`, and `CFBundleDisplayName` to **MD Shift**.
+
+The App Store provisioning profile specifier stays **Md Shift Demo** (that name is only in the signing profile, not under the icon or in the app). Bundle ID is unchanged: `com.eporthospine.mdshift`.
+
+Explore as doctor/hospital stays **DEBUG and TestFlight only** (`InvestorDemo.isEnabled`). It is off for an App Store production receipt, so this release has no Explore buttons and does not seed investor mock data. There is no admin/marketing shortcut on the shipping sign-in screen.
 
 ## App Review account (form)
 
@@ -131,7 +137,7 @@ The shipping product name is **MD Shift**. Explore as doctor/hospital is **TestF
 | User | (optional) any registered email |
 | Password | (optional) that account’s password |
 
-Do **not** tell reviewers to use Explore; those buttons are not in this binary.
+Do **not** tell reviewers to use Explore. Those buttons are not shown on an App Store production install.
 
 ## Export compliance
 
