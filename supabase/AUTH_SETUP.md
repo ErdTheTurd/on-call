@@ -305,6 +305,22 @@ Or: `APPLE_CLIENT_ID` / `APPLE_SECRET` with `./scripts/configure-oauth-providers
 After email OTP (or OAuth), web and iOS prompt to enroll Google Authenticator / Authy.
 If enrolled, later sign-ins require the 6-digit authenticator code before entering the app.
 
+## 5b. Hospital signup outreach emails
+
+When a hospital finishes onboarding (facility NPI + **hospital work email** + email code):
+
+1. Ops (`erdunn706@gmail.com`) gets “New hospital signup” with name / email / NPI / flags
+2. The hospital work email gets “We'll be in touch”
+
+Both go through the `send-notification` Edge Function. Set secrets:
+
+```bash
+supabase secrets set RESEND_API_KEY=re_... RESEND_FROM_EMAIL=noreply@mdshift.net --project-ref yrnndfpvovuvjlzgivgu
+supabase functions deploy send-notification --project-ref yrnndfpvovuvjlzgivgu
+```
+
+Hospitals must use an institutional domain (not Gmail / iCloud / Apple Hide My Email). The onboarding **Skip this step** test button is removed; codes are required.
+
 ## 6. App behavior
 
 - Web/iOS: after email signup, user enters the 6-digit email code (`verifyOtp` / `/auth/v1/verify`).

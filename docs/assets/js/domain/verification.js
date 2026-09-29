@@ -6,7 +6,8 @@ const BLOCKED_EMAIL_DOMAINS = new Set([
   "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
   "icloud.com", "me.com", "mac.com", "aol.com",
   "protonmail.com", "proton.me", "tutanota.com",
-  "live.com", "msn.com", "ymail.com"
+  "live.com", "msn.com", "ymail.com",
+  "privaterelay.appleid.com"
 ]);
 
 export async function lookupNPI(npi, expectType = "NPI-1") {
@@ -87,6 +88,48 @@ export function validateInstitutionalEmail(email) {
     return { ok: false, error: "Please use your institutional or hospital email, not a personal address." };
   }
   return { ok: true, domain: parts[1] };
+}
+
+/** Soft check that the email domain looks related to the hospital name. */
+export function emailLikelyMatchesHospital(email, hospitalName) {
+  const parts = String(email || "").toLowerCase().split("@");
+  if (parts.length !== 2) return false;
+  const domainCore = parts[1].split(".").slice(0, -1).join("");
+  const words = String(hospitalName || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+  if (!words.length) return true;
+  return words.some((w) => domainCore.includes(w));
+}
+
+export function verifyHospitalCredentials({ name, npiRecord, email }) {
+  const flags = [];
+  const emailCheck = validateInstitutionalEmail(email);
+  const emailDomainValid = emailCheck.ok;
+  if (!emailDomainValid) flags.push(emailCheck.error);
+  else if (!emailLikelyMatchesHospital(email, name)) {
+    flags.push(`Email domain doesn't clearly match "${name}". Confirm this is your hospital work email — our team will review.`);
+  }
+
+  let nameMatches = true;
+  if (npiRecord && !npiRecord.offline) {
+    const regName = (npiRecord.organizationName || "").toLowerCase();
+    const words = String(name || "").toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    const hits = words.filter((w) => regName.includes(w));
+    nameMatches = words.length > 0 && hits.length / words.length >= 0.6;
+    if (!nameMatches) {
+      flags.push(`Hospital name "${name}" doesn't clearly match registry ("${npiRecord.organizationName || ""}").`);
+    }
+  } else if (npiRecord?.offline) {
+    flags.push("NPI registry unreachable from browser — facility queued for manual review.");
+  }
+
+  const automatedPassed = emailDomainValid && nameMatches && npiRecord && !npiRecord.offline;
+  return {
+    npiRecord,
+    nameMatches,
+    emailDomainValid,
+    finalStatus: automatedPassed ? "pending" : "flagged",
+    flags
+  };
 }
 
 export function verifyDoctorCredentials({ firstName, lastName, credential, npiRecord, email, emailProvidedByApple = false }) {

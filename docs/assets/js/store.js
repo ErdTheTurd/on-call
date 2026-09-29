@@ -561,16 +561,24 @@ export function seedDoctorOnboardingFromApple(onb, userID) {
   const givenName = identity.givenName || onb.firstName || "";
   const familyName = identity.familyName || onb.lastName || "";
   const appleEmail = String(identity.email || "").trim();
-  const email = appleEmail || onb.email || "";
-  const skipNameStep = (onb.role || "Doctor") === "Doctor" && !!(givenName.trim() && familyName.trim());
-  // Only skip typing an email Apple already provided — not Google/email session addresses.
-  const skipEmailStep = !!appleEmail;
-  // Web never sends this onboarding code; signup OTP / OAuth already verified the account.
-  const skipEmailConfirmStep = true;
+  const role = onb.role || "Doctor";
+  const isHospital = role === "Hospital";
+
+  // Hospitals must always enter a facility work email (not personal / Apple Hide My Email).
+  const skipEmailStep = !isHospital && !!appleEmail;
+  // Only skip the onboarding code when Apple already verified that same email for a doctor.
+  // Hospitals always confirm their work email with a 6-digit code.
+  const skipEmailConfirmStep = !isHospital && skipEmailStep;
+
+  const email = isHospital
+    ? (onb.email || "")
+    : (appleEmail || onb.email || "");
+
+  const skipNameStep = role === "Doctor" && !!(givenName.trim() && familyName.trim());
   let step = onb.step || 0;
-  if ((onb.role || "Doctor") === "Doctor" && skipNameStep && !(onb.step > 0)) step = 1;
-  if ((onb.role || "Doctor") === "Doctor" && skipEmailConfirmStep && step === 2) step = 3;
-  if ((onb.role || "") === "Hospital" && skipEmailConfirmStep && step === 1) step = 2;
+  if (role === "Doctor" && skipNameStep && !(onb.step > 0)) step = 1;
+  if (role === "Doctor" && skipEmailConfirmStep && step === 2) step = 3;
+  // Never auto-skip hospital email confirm step.
   return {
     ...onb,
     firstName: givenName || onb.firstName,
@@ -579,7 +587,8 @@ export function seedDoctorOnboardingFromApple(onb, userID) {
     skipNameStep,
     skipEmailStep,
     skipEmailConfirmStep,
-    codeVerified: skipEmailConfirmStep ? true : onb.codeVerified,
+    codeVerified: skipEmailConfirmStep ? true : !!onb.codeVerified,
+    codeSent: false,
     step
   };
 }

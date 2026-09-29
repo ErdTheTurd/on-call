@@ -119,7 +119,8 @@ public struct EmailDomainChecker {
         "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
         "icloud.com", "me.com", "mac.com", "aol.com",
         "protonmail.com", "proton.me", "tutanota.com",
-        "live.com", "msn.com", "ymail.com"
+        "live.com", "msn.com", "ymail.com",
+        "privaterelay.appleid.com"
     ]
 
     public static func validate(_ email: String) throws {
@@ -131,9 +132,18 @@ public struct EmailDomainChecker {
         if blockedDomains.contains(domain) {
             throw EmailVerificationError.freeProvider
         }
-        // Additional heuristic: must have at least one dot in domain after @
-        // and not be a generic non-medical TLD-only address
-        // Real production would hit an allowlist API here
+    }
+
+    /// Soft check: hospital name tokens should appear in the email domain when possible.
+    public static func domainLikelyMatchesHospital(email: String, hospitalName: String) -> Bool {
+        let parts = email.lowercased().split(separator: "@")
+        guard parts.count == 2 else { return false }
+        let domainCore = String(parts[1]).split(separator: ".").dropLast().joined(separator: "")
+        let words = hospitalName.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count > 3 }
+        guard !words.isEmpty else { return true }
+        return words.contains { domainCore.contains($0) }
     }
 }
 
@@ -258,16 +268,15 @@ public final class HospitalVerificationService {
     ) async -> HospitalVerificationResult {
         var result = HospitalVerificationResult()
 
-        // 1. Email domain check. Apple-provided emails must not force a different address.
-        if emailProvidedByApple && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        // 1. Hospital admin email must be institutional (never accept personal / Apple relay).
+        do {
+            try EmailDomainChecker.validate(email)
             result.emailDomainValid = true
-        } else {
-            do {
-                try EmailDomainChecker.validate(email)
-                result.emailDomainValid = true
-            } catch {
-                result.flags.append(error.localizedDescription)
+            if !EmailDomainChecker.domainLikelyMatchesHospital(email: email, hospitalName: hospitalName) {
+                result.flags.append("Email domain doesn't clearly match '\(hospitalName)'. Confirm this is your hospital work email — our team will review.")
             }
+        } catch {
+            result.flags.append(error.localizedDescription)
         }
 
         // 2. NPI registry — organization lookup
@@ -289,8 +298,8 @@ public final class HospitalVerificationService {
             result.flags.append("NPI lookup failed: \(error.localizedDescription)")
         }
 
-        // 3. Final status
-        let automatedPassed = result.nameMatches && result.emailDomainValid
+        // 3. Final status — institutional + NPI name match required to pass automated review
+        let automatedPassed = result.nameMatches && result.emailDomainValid && result.npiRecord != nil
         result.finalStatus = automatedPassed ? .pending : .flagged
 
         return result
