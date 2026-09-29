@@ -21,13 +21,14 @@ struct DoctorOnboardingView: View {
     @State private var email = ""
     @State private var selectedSpecialties: Set<String> = []
 
-    // Email verification
-    @State private var sentCode = ""
+    // Email verification (only when the account has no email yet)
     @State private var enteredCode = ""
     @State private var isSendingCode = false
     @State private var codeSent = false
     @State private var codeVerified = false
     @State private var codeError: String? = nil
+    @State private var verifiedEmail = ""
+    @State private var codeSentEmail = ""
 
     // NPI verification
     @State private var isVerifying = false
@@ -55,6 +56,7 @@ struct DoctorOnboardingView: View {
         _lastName = State(initialValue: family)
         _email = State(initialValue: mail)
         _codeVerified = State(initialValue: skipEmail)
+        _verifiedEmail = State(initialValue: skipEmail ? mail : "")
         _step = State(initialValue: skipName ? 1 : 0)
     }
 
@@ -115,7 +117,6 @@ struct DoctorOnboardingView: View {
                                     )
                             case 2: EmailVerificationStep(
                                         email: email,
-                                        sentCode: $sentCode,
                                         enteredCode: $enteredCode,
                                         isSendingCode: $isSendingCode,
                                         codeSent: $codeSent,
@@ -153,6 +154,18 @@ struct DoctorOnboardingView: View {
             }
         }
         .interactiveDismissDisabled()
+        .onChange(of: email) { oldValue, newValue in
+            guard !skipEmailStep else { return }
+            let previous = oldValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard previous != trimmed else { return }
+            codeVerified = !verifiedEmail.isEmpty && trimmed == verifiedEmail.lowercased()
+            let stillSent = !codeSentEmail.isEmpty && trimmed == codeSentEmail.lowercased()
+            if codeSent != stillSent { codeSent = stillSent }
+            if !stillSent { enteredCode = "" }
+            codeError = nil
+            verificationResult = nil
+        }
         .onAppear {
             // Do not present required name fields when Apple already provided a full name.
             if skipNameStep && step == 0 { step = 1 }
@@ -179,18 +192,22 @@ struct DoctorOnboardingView: View {
     private func sendVerificationCode() {
         isSendingCode = true
         codeError = nil
-        let code = EmailVerificationStore.shared.issue(for: email)
-        sentCode = code
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hadCode = codeSent && codeSentEmail.lowercased() == address.lowercased()
         Task {
             do {
-                try await SendGridService.shared.sendVerificationCode(
-                    to: email, code: code,
-                    recipientName: "\(firstName) \(lastName)"
-                )
-                await MainActor.run { isSendingCode = false; codeSent = true }
+                try await SupabaseAuthService.shared.requestEmailChange(to: address)
+                await MainActor.run {
+                    isSendingCode = false
+                    codeSent = true
+                    codeSentEmail = address
+                    codeVerified = false
+                    verifiedEmail = ""
+                }
             } catch {
                 await MainActor.run {
                     isSendingCode = false
+                    codeSent = hadCode
                     codeError = error.localizedDescription
                 }
             }
@@ -198,10 +215,23 @@ struct DoctorOnboardingView: View {
     }
 
     private func verifyCode() {
-        if EmailVerificationStore.shared.validate(email: email, code: enteredCode) {
-            withAnimation { codeVerified = true; codeError = nil }
-        } else {
-            codeError = "Incorrect or expired code. Try resending."
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = enteredCode
+        Task {
+            do {
+                try await SupabaseAuthService.shared.verifyEmailChange(email: address, token: code)
+                await MainActor.run {
+                    withAnimation {
+                        codeVerified = true
+                        verifiedEmail = address
+                        codeError = nil
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    codeError = error.localizedDescription
+                }
+            }
         }
     }
 
@@ -235,10 +265,15 @@ struct DoctorOnboardingView: View {
     private var stepSubtitle: String {
         [
             "Enter your name and credential type.",
-            "We check NPI, DEA#, license, and malpractice with federal registries.",
+            "We verify your NPI against the national registry. License and DEA numbers are reviewed by our team.",
             "Enter the 6-digit code we sent to your email.",
             "Select all specialties you're qualified to cover."
         ][step]
+    }
+
+    private var emailCodeAccepted: Bool {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return codeVerified && verifiedEmail.lowercased() == trimmed && !trimmed.isEmpty
     }
 
     private var stepValid: Bool {
@@ -249,7 +284,8 @@ struct DoctorOnboardingView: View {
             guard npi.count == 10, !licenseNumber.isEmpty, licenseState.count == 2 else { return false }
             if !skipEmailStep && email.trimmingCharacters(in: .whitespaces).isEmpty { return false }
             return verificationResult != nil && verificationResult?.npiRecord != nil
-        case 2: return skipEmailStep || codeVerified
+        case 2:
+            return skipEmailStep || emailCodeAccepted
         case 3: return !selectedSpecialties.isEmpty
         default: return false
         }
@@ -375,7 +411,7 @@ private struct Step2View: View {
                     if isVerifying {
                         HStack(spacing: 10) { ProgressView().tint(.white); Text("Checking NPI Registry…") }
                     } else {
-                        Label("Verify Credentials", systemImage: "checkmark.shield.fill")
+                        Label("Check NPI registry", systemImage: "checkmark.shield.fill")
                     }
                 }
                 .font(.headline).frame(maxWidth: .infinity).padding()
@@ -389,7 +425,7 @@ private struct Step2View: View {
 
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "lock.shield.fill").foregroundStyle(Color.accentColor)
-                Text("We cross-reference NPI, DEA, and state license with federal registries. Your documents are reviewed once and then deleted.")
+                Text("Your NPI is checked automatically against the national NPI registry. License and DEA numbers are saved for our team to review. We do not upload credential documents.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .cardStyle()
@@ -401,7 +437,6 @@ private struct Step2View: View {
 
 struct EmailVerificationStep: View {
     let email: String
-    @Binding var sentCode: String
     @Binding var enteredCode: String
     @Binding var isSendingCode: Bool
     @Binding var codeSent: Bool
@@ -443,6 +478,10 @@ struct EmailVerificationStep: View {
                         }
                         .buttonStyle(PrimaryButtonStyle())
                         .disabled(isSendingCode)
+
+                        if let err = codeError {
+                            Text(err).font(.caption).foregroundStyle(.red)
+                        }
                     } else {
                         Divider()
                         VStack(alignment: .leading, spacing: 8) {
@@ -476,15 +515,6 @@ struct EmailVerificationStep: View {
                     }
                 }
                 .cardStyle()
-
-                #if DEBUG
-                HStack(spacing: 8) {
-                    Image(systemName: "info.circle.fill").foregroundStyle(Color.accentColor)
-                    Text("DEBUG builds redirect verification codes to erdunn706@gmail.com.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .cardStyle()
-                #endif
             }
         }
     }

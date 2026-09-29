@@ -350,23 +350,19 @@ export async function fetchRoster(hospitalId) {
   if (!isConfigured()) return [];
   const supabase = getSupabase();
   const { data, error } = await supabase
-    .from("hospital_doctors")
-    .select("auto_approve, doctor_profiles(*)")
+    .from("hospital_roster")
+    .select("doctor_id, auto_approve, first_name, last_name, credential, specialties, verification_status")
     .eq("hospital_id", hospitalId);
   if (error) throw error;
-  return (data || []).map((row) => {
-    const d = row.doctor_profiles;
-    if (!d) return null;
-    return {
-      id: d.profile_id,
-      name: `${d.first_name} ${d.last_name}`,
-      credential: d.credential,
-      specialty: (d.specialties && d.specialties[0]) || "Internal Medicine",
-      npi: d.npi,
-      isAutoApproved: row.auto_approve,
-      verificationStatus: d.verification_status
-    };
-  }).filter(Boolean);
+  return (data || []).map((row) => ({
+    id: row.doctor_id,
+    name: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
+    credential: row.credential,
+    specialty: (row.specialties && row.specialties[0]) || "Internal Medicine",
+    npi: "",
+    isAutoApproved: row.auto_approve,
+    verificationStatus: row.verification_status
+  }));
 }
 
 export async function upsertRosterLink(hospitalId, doctorId, autoApprove) {

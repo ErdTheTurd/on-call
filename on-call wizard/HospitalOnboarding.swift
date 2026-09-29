@@ -17,12 +17,14 @@ struct HospitalOnboardingView: View {
     @State private var verificationResult: HospitalVerificationResult? = nil
     @State private var npiAutoFilledName: String? = nil
 
-    @State private var sentCode = ""
     @State private var enteredCode = ""
     @State private var isSendingCode = false
     @State private var codeSent = false
     @State private var codeVerified = false
     @State private var codeError: String? = nil
+    @State private var verifiedEmail = ""
+    @State private var codeSentEmail = ""
+    @State private var npiCheckedEmail = ""
 
     private let totalSteps = 2
 
@@ -61,7 +63,7 @@ struct HospitalOnboardingView: View {
                             Text(step == 0 ? "Verify Your Facility" : "Confirm Work Email")
                                 .font(.system(.title2, design: .rounded, weight: .bold))
                             Text(step == 0
-                                 ? "Enter your hospital name, facility NPI, and institutional work email."
+                                 ? "Enter your hospital name, facility NPI, and institutional work email. We look up the NPI in the national registry."
                                  : "Enter the 6-digit code we sent to your hospital email.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
@@ -74,7 +76,6 @@ struct HospitalOnboardingView: View {
                         } else {
                             EmailVerificationStep(
                                 email: email,
-                                sentCode: $sentCode,
                                 enteredCode: $enteredCode,
                                 isSendingCode: $isSendingCode,
                                 codeSent: $codeSent,
@@ -104,7 +105,7 @@ struct HospitalOnboardingView: View {
                                     finishOnboarding()
                                 }
                                 .buttonStyle(PrimaryButtonStyle())
-                                .disabled(!codeVerified || isVerifying)
+                                .disabled(!emailCodeAccepted || isVerifying)
                             }
                         }
                         .padding(.horizontal)
@@ -114,6 +115,21 @@ struct HospitalOnboardingView: View {
             }
         }
         .interactiveDismissDisabled()
+        .onChange(of: email) { oldValue, newValue in
+            let previous = oldValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard previous != trimmed else { return }
+            codeVerified = !verifiedEmail.isEmpty && trimmed == verifiedEmail.lowercased()
+            let stillSent = !codeSentEmail.isEmpty && trimmed == codeSentEmail.lowercased()
+            if codeSent != stillSent { codeSent = stillSent }
+            if !stillSent { enteredCode = "" }
+            codeError = nil
+        }
+    }
+
+    private var emailCodeAccepted: Bool {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return codeVerified && verifiedEmail.lowercased() == trimmed && !trimmed.isEmpty
     }
 
     private var facilityStep: some View {
@@ -190,6 +206,8 @@ struct HospitalOnboardingView: View {
     private var step0Valid: Bool {
         guard npi.count == 10, !hospitalName.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         guard (try? EmailDomainChecker.validate(email)) != nil else { return false }
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty, npiCheckedEmail == trimmed else { return false }
         return verificationResult?.npiRecord != nil && verificationResult?.emailDomainValid == true
     }
 
@@ -206,6 +224,7 @@ struct HospitalOnboardingView: View {
             await MainActor.run {
                 isVerifying = false
                 verificationResult = result
+                npiCheckedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 npiAutoFilledName = result.npiRecord?.organizationName
             }
         }
@@ -214,17 +233,24 @@ struct HospitalOnboardingView: View {
     private func sendVerificationCode() {
         isSendingCode = true
         codeError = nil
-        let code = EmailVerificationStore.shared.issue(for: email)
-        sentCode = code
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hadCode = codeSent && codeSentEmail.lowercased() == address.lowercased()
         Task {
             do {
-                try await SendGridService.shared.sendVerificationCode(
-                    to: email, code: code, recipientName: hospitalName
+                try await SendGridService.shared.requestVerificationCode(
+                    to: address, recipientName: hospitalName
                 )
-                await MainActor.run { isSendingCode = false; codeSent = true }
+                await MainActor.run {
+                    isSendingCode = false
+                    codeSent = true
+                    codeSentEmail = address
+                    codeVerified = false
+                    verifiedEmail = ""
+                }
             } catch {
                 await MainActor.run {
                     isSendingCode = false
+                    codeSent = hadCode
                     codeError = error.localizedDescription
                 }
             }
@@ -232,16 +258,29 @@ struct HospitalOnboardingView: View {
     }
 
     private func verifyCode() {
-        if EmailVerificationStore.shared.validate(email: email, code: enteredCode) {
-            withAnimation { codeVerified = true; codeError = nil }
-        } else {
-            codeError = "Incorrect or expired code. Try resending."
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let code = enteredCode
+        Task {
+            do {
+                try await SendGridService.shared.verifyCode(email: address, code: code)
+                await MainActor.run {
+                    withAnimation {
+                        codeVerified = true
+                        verifiedEmail = address
+                        codeError = nil
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    codeError = error.localizedDescription
+                }
+            }
         }
     }
 
     private func finishOnboarding() {
-        guard let result = verificationResult, codeVerified else { return }
         let trimmedEmail = email.lowercased().trimmingCharacters(in: .whitespaces)
+        guard let result = verificationResult, codeVerified, verifiedEmail.lowercased() == trimmedEmail else { return }
         var profile = HospitalProfile(
             userID: SessionStore.shared.currentUserID,
             name: hospitalName.trimmingCharacters(in: .whitespaces),
@@ -266,7 +305,7 @@ struct HospitalOnboardingView: View {
             for shift in Services.hospital.shifts.filter({ $0.hospitalID == profile.id }).prefix(200) {
                 try? await Repositories.shifts.upsert(shift)
             }
-            await SendGridService.shared.notifyHospitalSignup(
+            try? await SendGridService.shared.notifyHospitalSignup(
                 hospitalName: profile.name,
                 hospitalEmail: trimmedEmail,
                 npi: profile.npi,

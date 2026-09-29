@@ -779,7 +779,7 @@ private struct DoctorDayPayRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(doctor.name), \(doctor.credential)")
                         .font(.subheadline.weight(.semibold))
-                    Text(doctor.npi.isEmpty ? doctor.specialty : "NPI \(doctor.npi)")
+                    Text(doctor.specialty)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

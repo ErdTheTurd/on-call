@@ -103,6 +103,21 @@ Or run `./scripts/configure-otp-email-template.sh` (needs `SUPABASE_ACCESS_TOKEN
 
 Local CLI already points at `supabase/templates/confirmation.html`.
 
+### Change email (only when the account has no email)
+
+Doctor onboarding asks for a 6-digit code only when Apple shared no email **and** the Supabase session has no email. That path calls Auth `updateUser({ email })` and verifies with type `email_change` (Resend). Signup OTP is unchanged.
+
+Secure email change stays on (`double_confirm_changes` / `mailer_secure_email_change_enabled`). With no current address, only the new address must confirm.
+
+Update the hosted **Change email address** template so it shows `{{ .Token }}` (a code, not only a link):  
+https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/templates
+
+**Subject:** `Your MD Shift verification code`
+
+**Body:** same shape as Confirm signup, with `{{ .Token }}`. Local file: `supabase/templates/email_change.html`.
+
+This doctor path uses Supabase Auth email change. It does not use the `send-notification` function.
+
 **Still not sending?** Checklist:
 1. Resend domain shows **Verified** (SPF on mdshift.net must not be `v=spf1 -all`)
 2. Supabase Auth → SMTP enabled with `smtp.resend.com` / user `resend` / API key as password
@@ -305,21 +320,29 @@ Or: `APPLE_CLIENT_ID` / `APPLE_SECRET` with `./scripts/configure-oauth-providers
 After email OTP (or OAuth), web and iOS prompt to enroll Google Authenticator / Authy.
 If enrolled, later sign-ins require the 6-digit authenticator code before entering the app.
 
-## 5b. Hospital signup outreach emails
+## 5b. Hospital work-email codes and signup notices
 
-When a hospital finishes onboarding (facility NPI + **hospital work email** + email code):
+Hospitals always confirm a facility work email with a real 6-digit code. The code is generated and checked by `supabase/functions/send-notification` (not by the app). After signup, that same function emails ops and the verified hospital address. Subjects and HTML are built on the server. The function rejects any body that includes `to`, `subject`, or `html`.
 
-1. Ops (`erdunn706@gmail.com`) gets “New hospital signup” with name / email / NPI / flags
-2. The hospital work email gets “We'll be in touch”
+Actions:
 
-Both go through the `send-notification` Edge Function. Set secrets:
+- `send_code` — before the user is fully in the app. Stores a hash only after the provider accepts the send. Rate-limits per email and IP.
+- `verify_code` — checks the hash and records that this exact address was verified.
+- `hospital_signup` — requires the signed-in user's JWT (the anon key is rejected). Sends only to `OPS_EMAIL` and that verified address.
+
+Do not deploy this until you choose to. Apply `supabase/migrations/20260929035000_email_verification_challenges.sql` on the hosted database first (together with the RLS lockdown migration, when you approve that). The function fails closed without the tables and without `EMAIL_CODE_PEPPER`.
 
 ```bash
-supabase secrets set RESEND_API_KEY=re_... RESEND_FROM_EMAIL=noreply@mdshift.net --project-ref yrnndfpvovuvjlzgivgu
+supabase secrets set \
+  RESEND_API_KEY=re_... \
+  RESEND_FROM_EMAIL=noreply@mdshift.net \
+  EMAIL_CODE_PEPPER='<long random secret>' \
+  OPS_EMAIL=erdunn706@gmail.com \
+  --project-ref yrnndfpvovuvjlzgivgu
 supabase functions deploy send-notification --project-ref yrnndfpvovuvjlzgivgu
 ```
 
-Hospitals must use an institutional domain (not Gmail / iCloud / Apple Hide My Email). The onboarding **Skip this step** test button is removed; codes are required.
+`SENDGRID_API_KEY` and `SENDGRID_FROM` work instead of Resend if those are set and `RESEND_API_KEY` is not. Hospitals must use an institutional domain (not Gmail, iCloud, or Apple Hide My Email). There is no skip button and no test code.
 
 ## 6. App behavior
 

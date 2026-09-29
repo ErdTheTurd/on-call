@@ -491,7 +491,7 @@ enum SupabaseRosterRepository {
 
     static func fetch(hospitalID: UUID) async -> [DoctorSummary] {
         guard SupabaseConfig.isConfigured else { return [] }
-        let path = "rest/v1/hospital_doctors?select=auto_approve,doctor_profiles(*)&hospital_id=eq.\(hospitalID.uuidString)"
+        let path = "rest/v1/hospital_roster?select=doctor_id,auto_approve,first_name,last_name,credential,specialties,verification_status&hospital_id=eq.\(hospitalID.uuidString)"
         guard
             let data = try? await SupabaseHTTPClient.shared.request(
                 path: path,
@@ -501,20 +501,17 @@ enum SupabaseRosterRepository {
         else { return [] }
 
         return rows.compactMap { row -> DoctorSummary? in
-            guard
-                let d = row["doctor_profiles"] as? [String: Any],
-                let id = UUID(uuidString: d["profile_id"] as? String ?? "")
-            else { return nil }
-            let first = d["first_name"] as? String ?? ""
-            let last = d["last_name"] as? String ?? ""
-            let specialties = d["specialties"] as? [String] ?? []
-            let statusRaw = d["verification_status"] as? String ?? "unverified"
+            guard let id = UUID(uuidString: row["doctor_id"] as? String ?? "") else { return nil }
+            let first = row["first_name"] as? String ?? ""
+            let last = row["last_name"] as? String ?? ""
+            let specialties = row["specialties"] as? [String] ?? []
+            let statusRaw = row["verification_status"] as? String ?? "unverified"
             return DoctorSummary(
                 id: id,
                 name: "\(first) \(last)".trimmingCharacters(in: .whitespaces),
-                credential: d["credential"] as? String ?? "MD",
+                credential: row["credential"] as? String ?? "MD",
                 specialty: specialties.first ?? "Internal Medicine",
-                npi: d["npi"] as? String ?? "",
+                npi: "",
                 isAutoApproved: row["auto_approve"] as? Bool ?? false,
                 verificationStatus: VerificationStatus(rawValue: statusRaw) ?? .unverified
             )
