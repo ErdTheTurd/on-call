@@ -74,16 +74,19 @@ struct ContentView: View {
     @ViewBuilder
     private func onboardingView(for role: UserRole) -> some View {
         let appleIdentity = AppleSignInNameStore.identity(forSessionUserID: SessionStore.shared.currentUserID)
+        let appleEmail = appleIdentity.email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sessionEmail = SessionStore.shared.currentEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let knownEmail = appleEmail.isEmpty ? sessionEmail : appleEmail
         switch role {
         case .doctor:
             DoctorOnboardingView(
                 initialFirstName: appleIdentity.givenName,
                 initialLastName: appleIdentity.familyName,
-                initialEmail: appleIdentity.email
+                initialEmail: knownEmail
             ) { _ in auth.completeOnboarding(role: .doctor) }
                 .withContactSupport()
         case .hospital:
-            HospitalOnboardingView(initialEmail: appleIdentity.email) { _ in auth.completeOnboarding(role: .hospital) }
+            HospitalOnboardingView(initialEmail: knownEmail) { _ in auth.completeOnboarding(role: .hospital) }
                 .withContactSupport()
         }
     }
@@ -533,7 +536,6 @@ struct DoctorPreferencesView: View {
 
 struct MyInfoView: View {
     let profile: DoctorProfile?
-    @StateObject private var docStore = DocumentUploadService.shared
 
     var body: some View {
         ZStack {
@@ -552,33 +554,11 @@ struct MyInfoView: View {
                             CredRow(icon: "envelope.fill",  label: "Email",   value: p.email)
                         }
                         .cardStyle()
-                    }
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        SectionHeader(title: "Verification Documents", systemImage: "doc.badge.plus")
-                        Text("Upload your state license, DEA certificate, malpractice COI, and board certification.")
-                            .font(.caption).foregroundStyle(.secondary)
-
-                        if docStore.uploadedDocuments.isEmpty {
-                            DocumentPickerButton(label: "State License") { name in
-                                docStore.registerUpload(fileName: name)
-                            }
-                        } else {
-                            ForEach(docStore.uploadedDocuments) { doc in
-                                HStack {
-                                    Image(systemName: "doc.fill").foregroundStyle(Color.accentColor)
-                                    Text(doc.fileName).font(.subheadline)
-                                    Spacer()
-                                    Text(doc.reviewStatus.rawValue.capitalized)
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            DocumentPickerButton(label: "Additional Document") { name in
-                                docStore.registerUpload(fileName: name)
-                            }
-                        }
+                        Text("NPI is checked against the national NPI registry. License and DEA numbers are stored for our team to review. We do not collect credential document uploads.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .cardStyle()
                 }
                 .padding()
             }
@@ -1499,7 +1479,6 @@ private struct DetailRow: View {
 
 struct CredentialsView: View {
     let profile: DoctorProfile?
-    @StateObject private var docStore = DocumentUploadService.shared
 
     var body: some View {
         NavigationStack {
@@ -1528,19 +1507,9 @@ struct CredentialsView: View {
                                 .cardStyle()
                             }
                         }
-                        VStack(alignment: .leading, spacing: 12) {
-                            SectionHeader(title: "Documents")
-                            if docStore.uploadedDocuments.isEmpty {
-                                Text("No documents uploaded yet. Add them from My Info.")
-                                    .font(.subheadline).foregroundStyle(.secondary)
-                            } else {
-                                ForEach(docStore.uploadedDocuments) { doc in
-                                    CredRow(icon: "doc.fill", label: doc.fileName, value: doc.reviewStatus.rawValue.capitalized, valueColor: doc.reviewStatus == .approved ? .green : .orange)
-                                    if doc.id != docStore.uploadedDocuments.last?.id { Divider() }
-                                }
-                            }
-                        }
-                        .cardStyle()
+                        Text("NPI is checked against the national NPI registry. License and DEA numbers are stored for our team to review. We do not collect credential document uploads.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding()
                 }
@@ -4122,12 +4091,6 @@ struct DoctorDetailView: View {
                         }
                         Divider().opacity(0.4)
                         HStack(spacing: 20) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("NPI").font(.caption2.weight(.bold)).foregroundStyle(.secondary).tracking(0.8)
-                                Text(doctor.npi.isEmpty ? "—" : doctor.npi)
-                                    .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                            }
-                            Divider().frame(height: 30)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("UPCOMING SHIFTS").font(.caption2.weight(.bold)).foregroundStyle(.secondary).tracking(0.8)
                                 Text("\(scheduledCount)").font(.subheadline.weight(.medium))

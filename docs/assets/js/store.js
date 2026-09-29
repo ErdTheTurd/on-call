@@ -460,6 +460,33 @@ export async function resendSignupEmail(email) {
   return { ok: true };
 }
 
+/** Used only when the signed-in account has no email yet. Auth emails a 6-digit code via Resend. */
+export async function sendWorkEmailCode(email) {
+  if (!isConfigured()) throw new Error("Supabase is not configured.");
+  const address = String(email || "").trim();
+  if (!address.includes("@")) throw new Error("Enter an email address.");
+  const supabase = getSupabase();
+  const { error } = await supabase.auth.updateUser({ email: address });
+  if (error) throw error;
+}
+
+export async function verifyWorkEmailCode(email, token) {
+  if (!isConfigured()) throw new Error("Supabase is not configured.");
+  const code = String(token || "").replace(/\D/g, "");
+  if (code.length !== 6) throw new Error("Enter the 6-digit code from your email.");
+  const supabase = getSupabase();
+  const { data, error } = await supabase.auth.verifyOtp({
+    email: String(email || "").trim(),
+    token: code,
+    type: "email_change"
+  });
+  if (error) throw error;
+  const session = appStore.session;
+  if (data?.user?.email && session) {
+    appStore.setSession({ ...session, email: data.user.email });
+  }
+}
+
 const OAUTH_ROLE_KEY = "mdshift_oauth_role";
 
 export function stashOAuthRole(role) {
@@ -563,22 +590,23 @@ export function seedDoctorOnboardingFromApple(onb, userID) {
   const appleEmail = String(identity.email || "").trim();
   const role = onb.role || "Doctor";
   const isHospital = role === "Hospital";
+  const sessionEmail = String(appStore.session?.email || "").trim();
 
-  // Hospitals must always enter a facility work email (not personal / Apple Hide My Email).
-  const skipEmailStep = !isHospital && !!appleEmail;
-  // Only skip the onboarding code when Apple already verified that same email for a doctor.
-  // Hospitals always confirm their work email with a 6-digit code.
-  const skipEmailConfirmStep = !isHospital && skipEmailStep;
+  // Hospitals always type and confirm a facility work email.
+  // Doctors skip the code only when Apple or the session already has an address.
+  const skipEmailStep = !isHospital && !!(appleEmail || sessionEmail);
+  const skipEmailConfirmStep = skipEmailStep;
 
   const email = isHospital
     ? (onb.email || "")
-    : (appleEmail || onb.email || "");
+    : (appleEmail || sessionEmail || onb.email || "");
 
   const skipNameStep = role === "Doctor" && !!(givenName.trim() && familyName.trim());
   let step = onb.step || 0;
   if (role === "Doctor" && skipNameStep && !(onb.step > 0)) step = 1;
   if (role === "Doctor" && skipEmailConfirmStep && step === 2) step = 3;
-  // Never auto-skip hospital email confirm step.
+  const verifiedFor = normalizeEmail(onb.codeVerifiedEmail || "");
+  const emailNorm = normalizeEmail(email);
   return {
     ...onb,
     firstName: givenName || onb.firstName,
@@ -587,7 +615,7 @@ export function seedDoctorOnboardingFromApple(onb, userID) {
     skipNameStep,
     skipEmailStep,
     skipEmailConfirmStep,
-    codeVerified: skipEmailConfirmStep ? true : !!onb.codeVerified,
+    codeVerified: skipEmailConfirmStep ? true : (verifiedFor === emailNorm && !!onb.codeVerified && !!emailNorm),
     codeSent: false,
     step
   };

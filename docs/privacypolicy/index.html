@@ -35,7 +35,7 @@
     <main class="legal-main">
       <p class="legal-eyebrow">Legal</p>
       <h1>Privacy Policy</h1>
-      <p class="legal-meta">Effective date: August 21, 2026 · Last updated: August 21, 2026</p>
+      <p class="legal-meta">Effective date: September 29, 2026 · Last updated: September 29, 2026</p>
 
       <p>
         MD Shift (“<strong>MD Shift</strong>,” “<strong>we</strong>,” “<strong>us</strong>,” or “<strong>our</strong>”)
@@ -69,10 +69,19 @@
       <ul>
         <li>Role (doctor or hospital)</li>
         <li>Specialty and credential type (for example MD / DO)</li>
-        <li>NPI and license number / state (for verification)</li>
+        <li>National Provider Identifier (NPI)</li>
+        <li>State license number and state, and DEA number, when you enter them</li>
         <li>Hospital or organization name and related profile fields</li>
-        <li>Credential documents you choose to upload (for example license, DEA, malpractice COI, board certification)</li>
       </ul>
+      <p>
+        We do <strong>not</strong> collect uploads of credential documents (license scans, DEA certificates, malpractice certificates, or board certificates).
+      </p>
+      <p>
+        When you enter an NPI, the app and the website look that number up at the CMS NPI Registry
+        (<a href="https://npiregistry.cms.hhs.gov/">npiregistry.cms.hhs.gov</a>).
+        We store the NPI you entered and the name and specialty the registry returns, so we can compare them with what you typed.
+        License numbers and DEA numbers are stored so our team can review them. We do not send those numbers to a license board or to a DEA registry.
+      </p>
 
       <h3>Scheduling and product content</h3>
       <ul>
@@ -103,23 +112,29 @@
       <h2>3. How we use information</h2>
       <ul>
         <li>Provide, operate, and secure the Service (accounts, scheduling, trades, approvals)</li>
-        <li>Verify clinician or hospital identity where required for coverage workflows</li>
-        <li>Send transactional email such as sign-up verification codes</li>
+        <li>Check an NPI against the national registry, and hold license and DEA numbers for our team to review</li>
+        <li>Send transactional email such as sign-up and email-change verification codes</li>
         <li>Respond to support requests you send us</li>
         <li>Improve reliability and fix issues</li>
         <li>Comply with law and protect against abuse or fraud</li>
       </ul>
-      <p>We do <strong>not</strong> sell your personal information. We do not use your data for cross-app advertising tracking.</p>
+      <p>
+        We do <strong>not</strong> sell your personal information.
+        We do not use advertising or analytics SDKs today, and we do not use your data for cross-app tracking.
+      </p>
 
       <h2>4. How we share information</h2>
       <p>We share information only as needed to run the Service:</p>
       <ul>
-        <li><strong>Within your coverage network</strong> — hospitals and doctors who interact on a shift, request, approval, or trade may see the professional details required for that workflow (for example name, specialty, relevant schedule data).</li>
+        <li><strong>Within your coverage network</strong> — a hospital can see the name, credential, specialty, and verification status of doctors on its roster. Doctors who share a hospital or a trade can see that same limited card for each other. NPI, license number, DEA number, and email stay with the person who entered them and with MD Shift admins who review applications.</li>
         <li><strong>Service providers</strong> that process data on our behalf, including:
           <ul>
-            <li><strong>Supabase</strong> — authentication and database hosting</li>
-            <li><strong>Resend</strong> — transactional email delivery (for example one-time codes)</li>
-            <li><strong>Google / Apple</strong> — only if you choose those sign-in options</li>
+            <li><strong>Supabase</strong> — account hosting, authentication, and the database</li>
+            <li><strong>Resend</strong> — sign-in and email-change messages (6-digit codes)</li>
+            <li><strong>Apple and Google</strong> — only if you choose those sign-in options</li>
+            <li><strong>Stripe</strong> — only if paid plans are turned on later. We would not store card numbers in the app. Paid plans are not on today.</li>
+            <li><strong>esm.sh</strong> — the website loads its database library from this content network. That request can include your IP address and browser type. Your account data is sent to Supabase, not stored in that library file.</li>
+            <li><strong>CMS NPI Registry</strong> — the NPI number you ask us to look up, as described above</li>
           </ul>
         </li>
         <li><strong>Legal / safety</strong> — if required by law, regulation, legal process, or to protect rights, safety, and security</li>
@@ -129,7 +144,9 @@
       <p>
         We retain account and scheduling information for as long as your account is active and as needed to
         provide the Service, resolve disputes, enforce agreements, and meet legal obligations.
-        You may request deletion of your account as described below.
+        You may ask us to delete your account, or to send you a copy of it, by emailing
+        <a href="mailto:erdunn706@gmail.com">erdunn706@gmail.com</a>.
+        We will delete the account data we host unless we have to keep a record to meet a legal duty or to finish a dispute.
       </p>
 
       <h2>6. Security</h2>

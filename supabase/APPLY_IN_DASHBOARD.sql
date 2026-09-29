@@ -1,4 +1,10 @@
 -- =============================================================================
+-- HISTORICAL paste for an older project (xapkoawwyfhyzusnzhzk).
+-- Do NOT run this file against the live MD Shift project (yrnndfpvovuvjlzgivgu).
+-- It still creates the old open policies (USING true).
+-- The lockdown lives in supabase/migrations/20260929021900_lock_down_rls.sql
+-- and must be applied on purpose, after review, not by pasting this file.
+-- =============================================================================
 -- ON CALL — paste this entire file into Supabase → SQL Editor → Run
 -- Project: xapkoawwyfhyzusnzhzk
 -- =============================================================================

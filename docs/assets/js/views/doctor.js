@@ -234,10 +234,7 @@ function renderCredentials(profile) {
                 ${sectionHeader("Verification", "credentials")}
                 ${verificationBadge(profile.verificationStatus)}
               </div>
-              <p class="subtitle">Document uploads sync from the iOS app. Web upload support uses the same credential records.</p>
-              ${(profile.documents || []).length ? profile.documents.map((d) => `
-                <div class="list-row"><strong>${escapeHtml(d.type || "Document")}</strong><span class="muted">${escapeHtml(d.status || "uploaded")}</span></div>
-              `).join("") : `<div class="empty-inline">No documents uploaded yet.</div>`}
+              <p class="subtitle">NPI is checked against the national NPI registry. License and DEA numbers are stored for our team to review. We do not collect credential document uploads.</p>
             </section>
             <section class="card stack">
               ${sectionHeader("Account security", "lock")}

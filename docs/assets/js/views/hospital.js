@@ -437,7 +437,7 @@ function renderDoctors(state, profile) {
                 ${escapeHtml(d.name)}
                 ${d.isAutoApproved ? `<span class="pill pill-solid" style="background:var(--success)">AUTO</span>` : ""}
               </span>
-              <span class="doctor-meta">${escapeHtml(d.specialty)} · NPI ${escapeHtml(d.npi)}</span>
+              <span class="doctor-meta">${escapeHtml(d.specialty)}</span>
               ${verificationBadge(d.verificationStatus, true)}
             </span>
           </button>
@@ -839,7 +839,6 @@ function renderDoctorDetailSheet(doctorId, profile) {
         <div class="subtitle">${escapeHtml(d.credential)} · ${escapeHtml(d.specialty)}</div>
         ${verificationBadge(d.verificationStatus)}
         <div class="divider"></div>
-        <div><span class="tertiary">NPI</span><div>${escapeHtml(d.npi)}</div></div>
         <label class="toggle-row">
           <span>Auto-approve token requests</span>
           <input type="checkbox" data-roster-auto="${d.id}" ${d.isAutoApproved ? "checked" : ""} />

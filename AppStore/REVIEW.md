@@ -146,14 +146,16 @@ Do **not** tell reviewers to use Explore. Those buttons are not shown on an App 
 
 ## Privacy nutrition labels (declare)
 
-Collect / linked to identity (typical for this app):
+Collect / linked to the user / purpose App Functionality. Not used for tracking:
 
+- Name (doctor and hospital profiles)
 - Email address (account)
-- Name (doctor / hospital profile)
-- Other user content (NPI, license, specialties, shift notes) as needed for scheduling
-- Product interaction / diagnostics only if you enable analytics (currently none required)
+- User ID (Supabase auth id)
+- Other user content: NPI, DEA number, license number and state, specialties, and schedule data (shifts, trades, roster)
 
-Do **not** claim tracking unless you add ATT / ad SDKs.
+Do **not** declare credential document uploads. The app does not upload license, DEA, or malpractice files.
+
+Do **not** claim tracking. There is no ad SDK and no analytics SDK. Face ID is used to unlock the app and stays on the device (`NSFaceIDUsageDescription` stays). `PrivacyInfo.xcprivacy` declares UserDefaults (CA92.1) only.
 
 ## Age rating
 

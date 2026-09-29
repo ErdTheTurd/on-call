@@ -179,6 +179,48 @@ final class SupabaseAuthService: NSObject {
         }
     }
 
+    /// Adds an email to an account that does not have one yet (for example Sign in with Apple
+    /// when Apple shared no address). Supabase Auth emails a 6-digit code through Resend.
+    /// The hosted Change Email template must include `{{ .Token }}`.
+    func requestEmailChange(to email: String) async throws {
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard address.contains("@") else { throw SupabaseError.server("Enter an email address.") }
+        let body: [String: Any] = ["email": address]
+        _ = try await SupabaseHTTPClient.shared.request(
+            path: "auth/v1/user",
+            method: "PUT",
+            body: try JSONSerialization.data(withJSONObject: body),
+            accessToken: accessToken
+        )
+    }
+
+    func verifyEmailChange(email: String, token: String) async throws {
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let code = token.filter(\.isNumber)
+        guard code.count == 6 else { throw AuthServiceError.invalidOTP }
+        let body: [String: Any] = [
+            "email": address,
+            "token": code,
+            "type": "email_change"
+        ]
+        let data = try await SupabaseHTTPClient.shared.request(
+            path: "auth/v1/verify",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: body),
+            accessToken: accessToken
+        )
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let access = json["access_token"] as? String,
+           let user = json["user"] as? [String: Any],
+           let idStr = user["id"] as? String,
+           let userID = UUID(uuidString: idStr) {
+            persistSession(access: access, refresh: json["refresh_token"] as? String, userID: userID)
+        }
+        if let userID = currentUserID, let role = SessionStore.shared.currentRole {
+            SessionStore.shared.beginSession(userID: userID, email: address, role: role)
+        }
+    }
+
     func resendSignupEmail(email: String) async throws {
         let body: [String: Any] = [
             "email": email,

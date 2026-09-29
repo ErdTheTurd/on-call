@@ -116,8 +116,9 @@ struct SupabaseHTTPClient {
         let token = accessToken ?? SupabaseConfig.anonKey ?? ""
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw SupabaseError.invalidResponse
+        guard let http = response as? HTTPURLResponse else { throw SupabaseError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SupabaseError.server(Self.humanizeError(data: data, status: http.statusCode))
         }
         return data
     }

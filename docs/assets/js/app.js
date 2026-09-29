@@ -2,6 +2,7 @@ import { isConfigured, getSupabase } from "./supabase-client.js";
 import {
   authState, beginSession, registerAccount, signInLocal,
   signInRemote, signUpRemote, resendSignupEmail, verifySignupOtp,
+  sendWorkEmailCode, verifyWorkEmailCode,
   signInWithOAuth, completeOAuthSession, completeMfaSession, signOut, appStore, syncEverything, startPeriodicSync,
   normalizeEmail, syncStatus, seedDoctorOnboardingFromApple
 } from "./store.js";
@@ -372,8 +373,9 @@ function render() {
       }
     });
     root.querySelectorAll("[data-field]").forEach((el) => {
-      el.addEventListener("change", () => Object.assign(state.onb, readOnboardingFields(root)));
-      el.addEventListener("input", () => Object.assign(state.onb, readOnboardingFields(root)));
+      const apply = () => applyOnboardingFields(root);
+      el.addEventListener("change", apply);
+      el.addEventListener("input", apply);
     });
     return;
   }
@@ -787,10 +789,12 @@ async function handleNpiVerify() {
         npiRecord: record,
         email: workEmail
       });
+      const checkedEmail = normalizeEmail(workEmail);
       update({
         onb: {
           ...state.onb,
           verified: !!result.emailDomainValid && !!record,
+          npiCheckedEmail: checkedEmail,
           verificationStatus: result.finalStatus,
           verificationFlags: result.flags,
           name: state.onb.name || record.organizationName || state.onb.name,
@@ -804,65 +808,134 @@ async function handleNpiVerify() {
   }
 }
 
+function onboardingAddress(onb) {
+  if ((onb.role || "Doctor") === "Hospital") return normalizeEmail(onb.email || "");
+  return normalizeEmail(onb.email || appStore.session?.email || "");
+}
+
+function codeMatchesAddress(onb) {
+  const email = onboardingAddress(onb);
+  return !!onb.codeVerified && normalizeEmail(onb.codeVerifiedEmail || "") === email && email.includes("@");
+}
+
+function applyOnboardingFields(root) {
+  const prevEmail = onboardingAddress(state.onb);
+  const fields = readOnboardingFields(root);
+  Object.assign(state.onb, fields);
+  const nextEmail = onboardingAddress(state.onb);
+  if (nextEmail === prevEmail) return;
+  const verifiedFor = normalizeEmail(state.onb.codeVerifiedEmail || "");
+  state.onb.codeVerified = !!verifiedFor && verifiedFor === nextEmail;
+  const sentFor = normalizeEmail(state.onb.codeSentEmail || "");
+  state.onb.codeSent = !!sentFor && sentFor === nextEmail;
+  if ((state.onb.role || "Doctor") === "Hospital") {
+    const checked = normalizeEmail(state.onb.npiCheckedEmail || "");
+    state.onb.verified = !!checked && checked === nextEmail;
+  } else if (!state.onb.skipEmailStep) {
+    state.onb.verified = false;
+    state.onb.verificationFlags = [];
+    state.onb.verificationStatus = "";
+    state.onb.npiRecord = null;
+  }
+}
+
 async function handleSendOnboardingCode() {
   const root = document.getElementById("app");
-  Object.assign(state.onb, readOnboardingFields(root));
-  const email = state.onb.email || appStore.session?.email || "";
-  const name = state.onb.name || `${state.onb.firstName || ""} ${state.onb.lastName || ""}`.trim();
+  applyOnboardingFields(root);
+  const role = state.onb.role || "Doctor";
+  const email = onboardingAddress(state.onb);
+  const hadCode = !!state.onb.codeSent && normalizeEmail(state.onb.codeSentEmail || "") === email;
+  if (!email.includes("@")) {
+    update({ onb: { ...state.onb, error: "Enter a valid email first." } });
+    return;
+  }
+  if (role === "Hospital") {
+    const emailCheck = validateInstitutionalEmail(email);
+    if (!emailCheck.ok) {
+      update({ onb: { ...state.onb, error: emailCheck.error } });
+      return;
+    }
+  }
+  const name = role === "Hospital"
+    ? (state.onb.name || "")
+    : `${state.onb.firstName || ""} ${state.onb.lastName || ""}`.trim();
   update({ onb: { ...state.onb, loading: true, error: null } });
   try {
-    await sendOnboardingEmailCode(email, name);
-    update({ onb: { ...state.onb, loading: false, codeSent: true, error: null } });
+    if (role === "Hospital") await sendOnboardingEmailCode(email, name);
+    else await sendWorkEmailCode(email);
+    update({
+      onb: {
+        ...state.onb,
+        loading: false,
+        codeSent: true,
+        codeSentEmail: email,
+        codeVerified: false,
+        codeVerifiedEmail: "",
+        error: null
+      }
+    });
   } catch (err) {
-    update({ onb: { ...state.onb, loading: false, error: err.message || "Could not send code." } });
+    update({
+      onb: {
+        ...state.onb,
+        loading: false,
+        codeSent: hadCode,
+        codeSentEmail: hadCode ? email : (state.onb.codeSentEmail || ""),
+        error: err.message || "Could not send code."
+      }
+    });
   }
 }
 
 function handleOnboardingNext() {
   const root = document.getElementById("app");
-  Object.assign(state.onb, readOnboardingFields(root));
+  applyOnboardingFields(root);
   const role = state.onb.role;
   const steps = role === "Doctor" ? 4 : 3;
+  const onConfirm = (role === "Doctor" && state.onb.step === 2) || (role === "Hospital" && state.onb.step === 1);
 
   if (role === "Doctor") {
     if (state.onb.step === 0 && !state.onb.skipNameStep && (!state.onb.firstName?.trim() || !state.onb.lastName?.trim())) {
       update({ onb: { ...state.onb, error: "Enter your name." } }); return;
     }
     if (state.onb.step === 1 && !state.onb.verified) {
-      update({ onb: { ...state.onb, error: "Verify credentials first." } }); return;
+      update({ onb: { ...state.onb, error: "Check your NPI before continuing." } }); return;
     }
-    if (state.onb.step === 2 && !state.onb.skipEmailConfirmStep) {
-      if (state.onb.codeVerified) { /* ok */ }
-      else if (!validateOnboardingEmailCode(state.onb.email || appStore.session?.email, state.onb.code)) {
-        update({ onb: { ...state.onb, error: "Send the code, then enter the 6 digits from your email." } }); return;
-      } else {
-        state.onb.codeVerified = true;
-      }
+    if (state.onb.step === 1 && !state.onb.skipEmailStep && !onboardingAddress(state.onb).includes("@")) {
+      update({ onb: { ...state.onb, error: "Enter an email address." } }); return;
     }
     if (state.onb.step === 3 && !(state.onb.specialties?.length)) {
       update({ onb: { ...state.onb, error: "Choose your specialty." } }); return;
     }
-  } else {
-    if (state.onb.step === 0) {
-      if (!state.onb.name?.trim() || !state.onb.npi) {
-        update({ onb: { ...state.onb, error: "Enter hospital name and NPI." } }); return;
-      }
-      const emailCheck = validateInstitutionalEmail(state.onb.email || "");
-      if (!emailCheck.ok) {
-        update({ onb: { ...state.onb, error: emailCheck.error } }); return;
-      }
-      if (!state.onb.verified) {
-        update({ onb: { ...state.onb, error: "Verify facility NPI first." } }); return;
-      }
+  } else if (state.onb.step === 0) {
+    if (!state.onb.name?.trim() || !state.onb.npi) {
+      update({ onb: { ...state.onb, error: "Enter hospital name and NPI." } }); return;
     }
-    if (state.onb.step === 1) {
-      if (state.onb.codeVerified) { /* ok */ }
-      else if (!validateOnboardingEmailCode(state.onb.email, state.onb.code)) {
-        update({ onb: { ...state.onb, error: "Send the code, then enter the 6 digits from your hospital email." } }); return;
-      } else {
+    const emailCheck = validateInstitutionalEmail(state.onb.email || "");
+    if (!emailCheck.ok) {
+      update({ onb: { ...state.onb, error: emailCheck.error } }); return;
+    }
+    const checked = normalizeEmail(state.onb.npiCheckedEmail || "");
+    if (!state.onb.verified || checked !== onboardingAddress(state.onb)) {
+      update({ onb: { ...state.onb, error: "Verify facility NPI first." } }); return;
+    }
+  }
+
+  if (onConfirm && !state.onb.skipEmailConfirmStep && !codeMatchesAddress(state.onb)) {
+    const email = onboardingAddress(state.onb);
+    update({ loading: true, onb: { ...state.onb, error: null } });
+    (async () => {
+      try {
+        if (role === "Hospital") await validateOnboardingEmailCode(email, state.onb.code);
+        else await verifyWorkEmailCode(email, state.onb.code);
         state.onb.codeVerified = true;
+        state.onb.codeVerifiedEmail = email;
+        advanceOnboarding(role, steps);
+      } catch (err) {
+        update({ loading: false, onb: { ...state.onb, error: err.message || "Incorrect or expired code." } });
       }
-    }
+    })();
+    return;
   }
 
   if (state.onb.step >= steps - 1) {
@@ -880,7 +953,25 @@ function handleOnboardingNext() {
     return;
   }
 
-  update({ onb: { ...state.onb, step: nextOnboardingStep(state.onb), error: null } });
+  update({ loading: false, onb: { ...state.onb, step: nextOnboardingStep(state.onb), error: null } });
+}
+
+function advanceOnboarding(role, steps) {
+  if (state.onb.step >= steps - 1) {
+    update({ loading: true });
+    (async () => {
+      try {
+        if (role === "Doctor") await finishDoctorOnboarding(state.onb);
+        else await finishHospitalOnboarding(state.onb);
+        state.route = role === "Hospital" ? "hospital" : "doctor";
+        update({ onb: { ...state.onb, error: null }, loading: false });
+      } catch (err) {
+        update({ onb: { ...state.onb, error: err.message || "Could not save profile." }, loading: false });
+      }
+    })();
+    return;
+  }
+  update({ loading: false, onb: { ...state.onb, step: nextOnboardingStep(state.onb), error: null } });
 }
 
 boot();

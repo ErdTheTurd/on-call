@@ -266,6 +266,11 @@ sender_name = "MD Shift"
 subject = "Your MD Shift verification code"
 content_path = "./supabase/templates/confirmation.html"
 
+# Used when an account has no email yet (Apple hid the address) and onboarding adds one.
+[auth.email.template.email_change]
+subject = "Your MD Shift verification code"
+content_path = "./supabase/templates/email_change.html"
+
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
 # enabled = true

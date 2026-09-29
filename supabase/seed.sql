@@ -1,0 +1,2 @@
+-- Intentionally empty. Local `supabase db reset` expects this file
+-- (see config.toml [db.seed]). The RLS test inserts its own rows and rolls them back.

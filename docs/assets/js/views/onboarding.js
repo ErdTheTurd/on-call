@@ -1,9 +1,25 @@
 import { escapeHtml, SPECIALTIES, CREDENTIALS } from "../brand.js";
 import { appStore, finishDoctorProfile, finishHospitalProfile, defaultPolicy } from "../store.js";
 
+function onboardingAddress(state) {
+  const role = state.role || "Doctor";
+  const raw = role === "Hospital" ? (state.email || "") : (state.email || appStore.session?.email || "");
+  return String(raw).trim().toLowerCase();
+}
+
+function codeIsVerified(state) {
+  const email = onboardingAddress(state);
+  return !!state.codeVerified && String(state.codeVerifiedEmail || "").trim().toLowerCase() === email && email.includes("@");
+}
+
+function codeWasSent(state) {
+  const email = onboardingAddress(state);
+  return !!state.codeSent && String(state.codeSentEmail || "").trim().toLowerCase() === email;
+}
+
 const DOCTOR_STEPS = [
   { icon: "👤", title: "Who are you?", subtitle: "Enter your name and credential type." },
-  { icon: "📄", title: "Verify Credentials", subtitle: "We check NPI, DEA#, license, and malpractice with federal registries." },
+  { icon: "📄", title: "Verify Credentials", subtitle: "We verify your NPI against the national registry. License and DEA numbers are reviewed by our team." },
   { icon: "✉", title: "Confirm Email", subtitle: "Enter the 6-digit code we sent to your email." },
   { icon: "🏥", title: "Your Specialty", subtitle: "Choose the one specialty you cover on call." }
 ];
@@ -82,8 +98,9 @@ function doctorStepBody(state) {
           <div class="form-field"><label>License state</label><input data-field="licenseState" maxlength="2" value="${escapeHtml(state.licenseState || "")}" /></div>
           ${state.skipEmailStep ? "" : `<div class="form-field"><label>Email</label><input data-field="email" type="email" value="${escapeHtml(state.email || appStore.session?.email || "")}" /></div>`}
           <button type="button" class="btn-secondary" data-verify-npi ${state.verified || state.loading ? "disabled" : ""}>
-            ${state.loading ? `<span class="spinner"></span>` : (state.verified ? "✓ Credentials verified" : "Verify with NPI Registry")}
+            ${state.loading ? `<span class="spinner"></span>` : (state.verified ? "✓ NPI checked" : "Check NPI registry")}
           </button>
+          <p class="subtitle">Your NPI is checked automatically against the national NPI registry. License and DEA numbers are saved for our team to review. We do not upload credential documents.</p>
           ${state.verified && state.verificationFlags?.length ? `
             <div class="subtitle" style="font-size:12px">${state.verificationFlags.map(escapeHtml).join("<br>")}</div>` : ""}
           ${state.npiRecord && !state.npiRecord.offline ? `
@@ -97,11 +114,11 @@ function doctorStepBody(state) {
       return `
         <div class="form-stack" style="text-align:center">
           <p class="subtitle">We sent (or will send) a 6-digit code to <strong>${escapeHtml(state.email || appStore.session?.email || "")}</strong>.</p>
-          ${state.codeVerified ? `<p class="subtitle" style="color:var(--success,#34c759)">Email verified.</p>` : `
+          ${codeIsVerified(state) ? `<p class="subtitle" style="color:var(--success,#34c759)">Email verified.</p>` : `
           <button type="button" class="btn-secondary" data-send-code ${state.loading ? "disabled" : ""}>
-            ${state.loading ? `<span class="spinner"></span>` : (state.codeSent ? "Resend code" : "Send verification code")}
+            ${state.loading ? `<span class="spinner"></span>` : (codeWasSent(state) ? "Resend code" : "Send verification code")}
           </button>
-          <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" placeholder="000000" value="${escapeHtml(state.code || "")}" /></div>
+          <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" value="${escapeHtml(state.code || "")}" /></div>
           `}
         </div>`;
     default:
@@ -134,11 +151,11 @@ function hospitalStepBody(state) {
       return `
         <div class="form-stack" style="text-align:center">
           <p class="subtitle">Confirm <strong>${escapeHtml(state.email || "")}</strong> with the 6-digit code from your inbox.</p>
-          ${state.codeVerified ? `<p class="subtitle" style="color:var(--success,#34c759)">Email verified.</p>` : `
+          ${codeIsVerified(state) ? `<p class="subtitle" style="color:var(--success,#34c759)">Email verified.</p>` : `
           <button type="button" class="btn-secondary" data-send-code ${state.loading ? "disabled" : ""}>
-            ${state.loading ? `<span class="spinner"></span>` : (state.codeSent ? "Resend code" : "Send verification code")}
+            ${state.loading ? `<span class="spinner"></span>` : (codeWasSent(state) ? "Resend code" : "Send verification code")}
           </button>
-          <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" placeholder="000000" value="${escapeHtml(state.code || "")}" /></div>
+          <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" value="${escapeHtml(state.code || "")}" /></div>
           `}
         </div>`;
     default:
@@ -199,6 +216,10 @@ export async function finishDoctorOnboarding(state) {
 }
 
 export async function finishHospitalOnboarding(state) {
+  const email = String(state.email || "").trim().toLowerCase();
+  if (!state.codeVerified || String(state.codeVerifiedEmail || "").trim().toLowerCase() !== email || !email.includes("@")) {
+    throw new Error("Verify your hospital work email before continuing.");
+  }
   const policy = defaultPolicy();
   policy.granularity = state.granularity || "day";
   policy.administratorApproveShifts = !!state.adminApprove;

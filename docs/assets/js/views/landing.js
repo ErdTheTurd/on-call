@@ -155,7 +155,7 @@ function features() {
     ["Real-time coverage gaps", "Hospitals see open slots the moment they appear — and fill them before patient care is affected."],
     ["Rates that react", "Pricing escalates as a shift approaches, so the hard days clear early instead of at midnight."],
     ["Instant notifications", "Push and email alerts keep both sides moving without anyone chasing a reply."],
-    ["Verified clinicians only", "NPI and licence checks happen up front, so claiming a shift takes a tap and not a phone call."],
+    ["Verified clinicians only", "NPI is checked against the national registry. License and DEA numbers are reviewed by our team."],
     ["Audit trail & reporting", "Every trade, approval and schedule change is recorded and exportable."]
   ];
 
