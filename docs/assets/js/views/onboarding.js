@@ -1,5 +1,7 @@
 import { escapeHtml, SPECIALTIES, CREDENTIALS } from "../brand.js";
 import { appStore, finishDoctorProfile, finishHospitalProfile, defaultPolicy } from "../store.js";
+import { isConfigured } from "../supabase-client.js";
+import { upsertHospitalProfile, upsertPolicy } from "../domain/sync.js";
 
 function onboardingAddress(state) {
   const role = state.role || "Doctor";
@@ -224,8 +226,9 @@ export async function finishHospitalOnboarding(state) {
   policy.granularity = state.granularity || "day";
   policy.administratorApproveShifts = !!state.adminApprove;
 
+  const pendingKey = "mdshift_pending_hospital_id";
   const profile = {
-    id: crypto.randomUUID(),
+    id: state.savedHospitalId || sessionStorage.getItem(pendingKey) || crypto.randomUUID(),
     userID: appStore.session?.userID,
     name: state.name.trim(),
     npi: state.npi,
@@ -236,14 +239,31 @@ export async function finishHospitalOnboarding(state) {
     priorityPosting: false,
     autoPay: false
   };
+  state.savedHospitalId = profile.id;
+  try { sessionStorage.setItem(pendingKey, profile.id); } catch { /* private mode */ }
+
+  if (isConfigured()) {
+    let remoteSaved = false;
+    try {
+      await upsertHospitalProfile(profile);
+      if (profile.schedulingPolicy) await upsertPolicy(profile.id, profile.schedulingPolicy);
+      remoteSaved = true;
+      const { notifyHospitalSignup } = await import("../domain/email.js");
+      await notifyHospitalSignup({
+        name: profile.name,
+        email: profile.email,
+        npi: profile.npi,
+        flags: profile.verificationFlags
+      });
+    } catch (err) {
+      const detail = err?.message || "Could not finish hospital signup.";
+      if (remoteSaved) {
+        throw new Error(`Your hospital profile was saved, but the signup email failed. ${detail}`);
+      }
+      throw new Error(detail);
+    }
+  }
+
+  try { sessionStorage.removeItem(pendingKey); } catch { /* private mode */ }
   await finishHospitalProfile(profile);
-  try {
-    const { notifyHospitalSignup } = await import("../domain/email.js");
-    await notifyHospitalSignup({
-      name: profile.name,
-      email: profile.email,
-      npi: profile.npi,
-      flags: profile.verificationFlags
-    });
-  } catch { /* non-blocking — profile already saved */ }
 }

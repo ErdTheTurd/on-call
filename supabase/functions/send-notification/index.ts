@@ -1,22 +1,30 @@
 // Purpose-specific mail only. Not an open relay.
-// Not deployed. The owner deploys this after reviewing AUTH_SETUP.md.
+// Not deployed. The owner deploys this after applying the review-findings migration.
 //
-// Actions:
-//   send_code        — pre-auth. Server makes a 6-digit code, emails it, then stores a hash.
-//   verify_code      — pre-auth. Checks the hash and records that this exact address is verified.
-//   hospital_signup  — signed-in user JWT. Emails ops and that verified address. HTML is built here.
+// Actions (each requires the signed-in user's JWT, not the anon key):
+//   send_code        — Server makes a 6-digit code, emails it, then stores a hash for that user.
+//   verify_code      — Checks the hash and records that this user verified this address.
+//   hospital_signup  — Emails ops and that user's verified address. HTML is built here.
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const OPS_EMAIL_DEFAULT = "erdunn706@gmail.com"
 const CODE_TTL_MS = 10 * 60 * 1000
-const VERIFIED_TTL_MS = 24 * 60 * 60 * 1000
-const MIN_RESEND_MS = 30 * 1000
+const MIN_RESEND_SECONDS = 30
 const MAX_SENDS_PER_EMAIL = 5
 const MAX_SENDS_PER_IP = 20
-const WINDOW_MS = 60 * 60 * 1000
+const MAX_SENDS_PER_USER = 5
+const WINDOW_SECONDS = 60 * 60
 const MAX_ATTEMPTS = 5
+
+const BLOCKED_EMAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "ymail.com",
+  "hotmail.com", "outlook.com", "live.com", "msn.com",
+  "icloud.com", "me.com", "mac.com", "aol.com",
+  "protonmail.com", "proton.me", "tutanota.com",
+  "privaterelay.appleid.com",
+])
 
 const ALLOWED_ORIGINS = new Set([
   "https://mdshift.net",
@@ -60,6 +68,19 @@ function validEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 320
 }
 
+function emailDomain(email: string): string {
+  return email.split("@")[1] || ""
+}
+
+function isPersonalDomain(email: string): boolean {
+  const domain = emailDomain(email)
+  if (BLOCKED_EMAIL_DOMAINS.has(domain)) return true
+  for (const blocked of BLOCKED_EMAIL_DOMAINS) {
+    if (domain.endsWith(`.${blocked}`)) return true
+  }
+  return false
+}
+
 async function sha256(text: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("")
@@ -80,10 +101,37 @@ function newCode(): string {
   return String(buf[0] % 1_000_000).padStart(6, "0")
 }
 
+// Cloudflare sets cf-connecting-ip and overwrites a client-supplied value.
+// X-Forwarded-For is appended by proxies, so the leftmost hop is caller-controlled.
 function clientIp(req: Request): string {
-  const forwarded = req.headers.get("x-forwarded-for") || ""
-  const first = forwarded.split(",")[0]?.trim()
-  return first || req.headers.get("cf-connecting-ip") || "unknown"
+  const cf = (req.headers.get("cf-connecting-ip") || "").trim()
+  if (cf) return cf
+  const hops = (req.headers.get("x-forwarded-for") || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (hops.length) return hops[hops.length - 1]
+  const real = (req.headers.get("x-real-ip") || "").trim()
+  return real || "unknown"
+}
+
+function bearerJwt(req: Request, anonKey: string): string {
+  const header = req.headers.get("authorization") || ""
+  const jwt = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : ""
+  if (!jwt || jwt === anonKey) return ""
+  return jwt
+}
+
+async function userIdFromJwt(
+  req: Request,
+  admin: ReturnType<typeof createClient>,
+  anonKey: string,
+): Promise<{ id: string } | Response> {
+  const jwt = bearerJwt(req, anonKey)
+  if (!jwt) return json(req, 401, { error: "Sign in before continuing." })
+  const { data, error } = await admin.auth.getUser(jwt)
+  if (error || !data?.user?.id) return json(req, 401, { error: "Sign in before continuing." })
+  return { id: data.user.id }
 }
 
 async function sendEmail(to: string, subject: string, html: string) {
@@ -166,8 +214,8 @@ serve(async (req) => {
     const admin = createClient(url, serviceKey)
     const action = String(body?.action || "")
 
-    if (action === "send_code") return await handleSendCode(req, admin, pepper, body)
-    if (action === "verify_code") return await handleVerifyCode(req, admin, pepper, body)
+    if (action === "send_code") return await handleSendCode(req, admin, anonKey, pepper, body)
+    if (action === "verify_code") return await handleVerifyCode(req, admin, anonKey, pepper, body)
     if (action === "hospital_signup") return await handleHospitalSignup(req, admin, anonKey, body)
     return json(req, 400, { error: "Unknown action." })
   } catch (err) {
@@ -175,36 +223,39 @@ serve(async (req) => {
   }
 })
 
-async function handleSendCode(req: Request, admin: ReturnType<typeof createClient>, pepper: string, body: Record<string, unknown>) {
+async function handleSendCode(
+  req: Request,
+  admin: ReturnType<typeof createClient>,
+  anonKey: string,
+  pepper: string,
+  body: Record<string, unknown>,
+) {
+  const user = await userIdFromJwt(req, admin, anonKey)
+  if (user instanceof Response) return user
+
   const email = normalizeEmail(body?.email)
   if (!validEmail(email)) return json(req, 400, { error: "Enter a valid email address." })
+  if (isPersonalDomain(email)) {
+    return json(req, 400, { error: "Please use your institutional or hospital email, not a personal address." })
+  }
 
   const ipHash = await sha256(`${pepper}:ip:${clientIp(req)}`)
-  const now = new Date()
-  const { data: ipRow } = await admin.from("email_verification_ip_windows").select("*").eq("ip_hash", ipHash).maybeSingle()
-  let ipCount = 1
-  let ipWindow = now.toISOString()
-  if (ipRow?.window_started_at && now.getTime() - new Date(ipRow.window_started_at).getTime() < WINDOW_MS) {
-    ipCount = Number(ipRow.send_count || 0) + 1
-    ipWindow = ipRow.window_started_at
-    if (Number(ipRow.send_count || 0) >= MAX_SENDS_PER_IP) {
-      return json(req, 429, { error: "Too many verification emails from this network. Try again later." })
-    }
-  }
-
-  const { data: row } = await admin.from("email_verification_challenges").select("*").eq("email", email).maybeSingle()
-  if (row?.last_sent_at && now.getTime() - new Date(row.last_sent_at).getTime() < MIN_RESEND_MS) {
-    return json(req, 429, { error: "Wait a moment before requesting another code." })
-  }
-  let sends = 1
-  let windowStart = now.toISOString()
-  if (row?.window_started_at && now.getTime() - new Date(row.window_started_at).getTime() < WINDOW_MS) {
-    sends = Number(row.sends_in_window || 0) + 1
-    windowStart = row.window_started_at
-    if (Number(row.sends_in_window || 0) >= MAX_SENDS_PER_EMAIL) {
-      return json(req, 429, { error: "Too many codes sent to this email. Try again later." })
-    }
-  }
+  const { data: reserved, error: reserveError } = await admin.rpc("reserve_verification_send", {
+    p_user_id: user.id,
+    p_email: email,
+    p_ip_hash: ipHash,
+    p_max_per_email: MAX_SENDS_PER_EMAIL,
+    p_max_per_ip: MAX_SENDS_PER_IP,
+    p_max_per_user: MAX_SENDS_PER_USER,
+    p_window_seconds: WINDOW_SECONDS,
+    p_min_resend_seconds: MIN_RESEND_SECONDS,
+  })
+  if (reserveError) return json(req, 500, { error: "Could not send a verification code." })
+  if (reserved === "resend") return json(req, 429, { error: "Wait a moment before requesting another code." })
+  if (reserved === "email_limit") return json(req, 429, { error: "Too many codes sent to this email. Try again later." })
+  if (reserved === "ip_limit") return json(req, 429, { error: "Too many verification emails from this network. Try again later." })
+  if (reserved === "user_limit") return json(req, 429, { error: "Too many verification emails for this account. Try again later." })
+  if (reserved !== "ok") return json(req, 400, { error: "Enter a valid email address." })
 
   const code = newCode()
   const recipientName = escapeHtml(String(body?.recipientName || "there").slice(0, 120))
@@ -218,61 +269,62 @@ async function handleSendCode(req: Request, admin: ReturnType<typeof createClien
     <p style="color:#888;font-size:14px">This code expires in 10 minutes. If you did not request it, you can ignore this email.</p>
   </div>`
 
-  // Send first. A failed send must not replace a code the inbox already has.
-  await sendEmail(email, "Your MD Shift verification code", html)
+  try {
+    await sendEmail(email, "Your MD Shift verification code", html)
+  } catch {
+    return json(req, 502, { error: "Could not send email." })
+  }
 
   const codeHash = await sha256(`${pepper}:${email}:${code}`)
-  const { error } = await admin.from("email_verification_challenges").upsert({
-    email,
-    code_hash: codeHash,
-    expires_at: new Date(now.getTime() + CODE_TTL_MS).toISOString(),
-    attempts: 0,
-    verified_at: null,
-    last_sent_at: now.toISOString(),
-    sends_in_window: sends,
-    window_started_at: windowStart,
+  const { error } = await admin.rpc("store_verification_code", {
+    p_user_id: user.id,
+    p_email: email,
+    p_code_hash: codeHash,
+    p_expires_at: new Date(Date.now() + CODE_TTL_MS).toISOString(),
   })
   if (error) return json(req, 500, { error: "Could not store the verification code." })
-
-  await admin.from("email_verification_ip_windows").upsert({
-    ip_hash: ipHash,
-    window_started_at: ipWindow,
-    send_count: ipCount,
-  })
-
   return json(req, 200, { ok: true })
 }
 
-async function handleVerifyCode(req: Request, admin: ReturnType<typeof createClient>, pepper: string, body: Record<string, unknown>) {
+async function handleVerifyCode(
+  req: Request,
+  admin: ReturnType<typeof createClient>,
+  anonKey: string,
+  pepper: string,
+  body: Record<string, unknown>,
+) {
+  const user = await userIdFromJwt(req, admin, anonKey)
+  if (user instanceof Response) return user
+
   const email = normalizeEmail(body?.email)
   const code = String(body?.code || "").replace(/\D/g, "")
   if (!validEmail(email) || code.length !== 6) {
     return json(req, 400, { error: "Enter the 6-digit code from your email." })
   }
 
-  const { data: row } = await admin.from("email_verification_challenges").select("*").eq("email", email).maybeSingle()
-  if (!row?.code_hash || !row.expires_at || new Date(row.expires_at).getTime() < Date.now()) {
-    return json(req, 400, { error: "That code is expired. Send a new one." })
-  }
-  if (Number(row.attempts || 0) >= MAX_ATTEMPTS) {
-    return json(req, 400, { error: "Too many attempts. Send a new code." })
+  const { data: rows, error: rpcError } = await admin.rpc("consume_email_attempt", {
+    p_user_id: user.id,
+    p_email: email,
+    p_max: MAX_ATTEMPTS,
+  })
+  if (rpcError) return json(req, 500, { error: "Could not check the code." })
+  const row = Array.isArray(rows) ? rows[0] : null
+  if (!row?.code_hash) {
+    return json(req, 400, { error: "Incorrect, expired, or too many attempts. Send a new code." })
   }
 
   const expected = await sha256(`${pepper}:${email}:${code}`)
   if (!timingSafeEqual(expected, String(row.code_hash))) {
-    await admin.from("email_verification_challenges").update({
-      attempts: Number(row.attempts || 0) + 1,
-    }).eq("email", email)
     return json(req, 400, { error: "Incorrect or expired code." })
   }
 
-  const { error } = await admin.from("email_verification_challenges").update({
-    code_hash: null,
-    expires_at: null,
-    attempts: 0,
-    verified_at: new Date().toISOString(),
-  }).eq("email", email)
+  const { data: verified, error } = await admin.rpc("complete_email_verification", {
+    p_user_id: user.id,
+    p_email: email,
+    p_code_hash: expected,
+  })
   if (error) return json(req, 500, { error: "Could not record verification." })
+  if (verified !== true) return json(req, 400, { error: "Incorrect or expired code." })
   return json(req, 200, { ok: true, email })
 }
 
@@ -282,27 +334,25 @@ async function handleHospitalSignup(
   anonKey: string,
   body: Record<string, unknown>,
 ) {
-  const header = req.headers.get("authorization") || ""
-  const jwt = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : ""
-  if (!jwt || jwt === anonKey) return json(req, 401, { error: "Sign in before finishing hospital signup." })
-
-  const url = Deno.env.get("SUPABASE_URL")!
-  const userClient = createClient(url, anonKey, {
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
-  })
-  const { data: userData, error: userError } = await userClient.auth.getUser()
-  if (userError || !userData?.user) return json(req, 401, { error: "Sign in before finishing hospital signup." })
+  const user = await userIdFromJwt(req, admin, anonKey)
+  if (user instanceof Response) return user
 
   const email = normalizeEmail(body?.email)
   if (!validEmail(email)) return json(req, 400, { error: "Enter the hospital work email." })
+  if (isPersonalDomain(email)) {
+    return json(req, 400, { error: "Please use your institutional or hospital email, not a personal address." })
+  }
 
-  const { data: row } = await admin.from("email_verification_challenges").select("verified_at, signup_notified_at").eq("email", email).maybeSingle()
-  if (!row?.verified_at || Date.now() - new Date(row.verified_at).getTime() > VERIFIED_TTL_MS) {
+  const { data: claim, error: claimError } = await admin.rpc("claim_hospital_signup_notice", {
+    p_user_id: user.id,
+    p_email: email,
+  })
+  if (claimError) return json(req, 500, { error: "Could not send the signup notice." })
+  if (claim === "unverified") {
     return json(req, 403, { error: "Verify that work email before we can send the signup notice." })
   }
-  if (row.signup_notified_at && Date.now() - new Date(row.signup_notified_at).getTime() < WINDOW_MS) {
-    return json(req, 429, { error: "A signup notice for this email was already sent. Try again later." })
-  }
+  if (claim === "already_sent") return json(req, 200, { ok: true })
+  if (claim !== "ok") return json(req, 403, { error: "Verify that work email before we can send the signup notice." })
 
   const name = escapeHtml(String(body?.name || "Hospital").trim().slice(0, 200) || "Hospital")
   const npi = escapeHtml(String(body?.npi || "").replace(/\D/g, "").slice(0, 10))
@@ -333,10 +383,16 @@ async function handleHospitalSignup(
   </div>`
 
   const subjectName = String(body?.name || "Hospital").replace(/[\r\n]/g, " ").slice(0, 120)
-  await sendEmail(ops, `New hospital signup — ${subjectName}`, opsHtml)
-  await sendEmail(email, "We'll be in touch — MD Shift", hospitalHtml)
-  await admin.from("email_verification_challenges").update({
-    signup_notified_at: new Date().toISOString(),
-  }).eq("email", email)
+  try {
+    await sendEmail(ops, `New hospital signup — ${subjectName}`, opsHtml)
+    await sendEmail(email, "We'll be in touch — MD Shift", hospitalHtml)
+  } catch {
+    await admin
+      .from("email_verification_challenges")
+      .update({ signup_notified_at: null })
+      .eq("user_id", user.id)
+      .eq("email", email)
+    return json(req, 502, { error: "Could not send the signup notice. Try again." })
+  }
   return json(req, 200, { ok: true })
 }

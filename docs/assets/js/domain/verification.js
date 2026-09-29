@@ -3,7 +3,7 @@
 const NPI_API = "https://npiregistry.cms.hhs.gov/api/";
 
 const BLOCKED_EMAIL_DOMAINS = new Set([
-  "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
+  "gmail.com", "googlemail.com", "yahoo.com", "hotmail.com", "outlook.com",
   "icloud.com", "me.com", "mac.com", "aol.com",
   "protonmail.com", "proton.me", "tutanota.com",
   "live.com", "msn.com", "ymail.com",
@@ -84,7 +84,10 @@ export function validateInstitutionalEmail(email) {
   if (parts.length !== 2 || !parts[0] || !parts[1].includes(".")) {
     return { ok: false, error: "That doesn't look like a valid email address." };
   }
-  if (BLOCKED_EMAIL_DOMAINS.has(parts[1])) {
+  const domain = parts[1];
+  const personal = BLOCKED_EMAIL_DOMAINS.has(domain)
+    || [...BLOCKED_EMAIL_DOMAINS].some((blocked) => domain.endsWith(`.${blocked}`));
+  if (personal) {
     return { ok: false, error: "Please use your institutional or hospital email, not a personal address." };
   }
   return { ok: true, domain: parts[1] };

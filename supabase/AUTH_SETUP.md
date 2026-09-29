@@ -324,13 +324,17 @@ If enrolled, later sign-ins require the 6-digit authenticator code before enteri
 
 Hospitals always confirm a facility work email with a real 6-digit code. The code is generated and checked by `supabase/functions/send-notification` (not by the app). After signup, that same function emails ops and the verified hospital address. Subjects and HTML are built on the server. The function rejects any body that includes `to`, `subject`, or `html`.
 
-Actions:
+`20260929021900_lock_down_rls.sql` and `20260929035000_email_verification_challenges.sql` are already applied on project `yrnndfpvovuvjlzgivgu`. Do not run them again.
 
-- `send_code` — before the user is fully in the app. Stores a hash only after the provider accepts the send. Rate-limits per email and IP.
-- `verify_code` — checks the hash and records that this exact address was verified.
-- `hospital_signup` — requires the signed-in user's JWT (the anon key is rejected). Sends only to `OPS_EMAIL` and that verified address.
+`20260929160000_review_findings.sql` is **not** applied. Read it and apply it yourself before deploying the functions below. Until that migration is applied, `send_code` / `verify_code` / `hospital_signup` fail closed because they call the new database functions.
 
-Do not deploy this until you choose to. Apply `supabase/migrations/20260929035000_email_verification_challenges.sql` on the hosted database first (together with the RLS lockdown migration, when you approve that). The function fails closed without the tables and without `EMAIL_CODE_PEPPER`.
+Actions (all three require the signed-in user's access token; the anon key is rejected):
+
+- `send_code` — binds the code to that user and email. Rate limits per email, per user, and per real client IP are one locked update each.
+- `verify_code` — counts every guess in one locked update, then records verification for that same user.
+- `hospital_signup` — calls `auth.getUser(jwt)`. Sends only to `OPS_EMAIL` and the address this user verified. The website and iOS show the error when this fails.
+
+The database, not the app, rejects a hospital row whose email is a personal domain or has no verified code for that user. A doctor who adds themselves to a hospital cannot see its roster until the hospital sets `hospital_doctors.approved_at`.
 
 ```bash
 supabase secrets set \
@@ -339,8 +343,13 @@ supabase secrets set \
   EMAIL_CODE_PEPPER='<long random secret>' \
   OPS_EMAIL=erdunn706@gmail.com \
   --project-ref yrnndfpvovuvjlzgivgu
+
 supabase functions deploy send-notification --project-ref yrnndfpvovuvjlzgivgu
+supabase functions deploy request-trade --project-ref yrnndfpvovuvjlzgivgu
+supabase functions deploy respond-trade --project-ref yrnndfpvovuvjlzgivgu
 ```
+
+`request-trade` sets the sender from the JWT. `respond-trade` allows only the invited doctor, the hospital that owns the shift, or an admin.
 
 `SENDGRID_API_KEY` and `SENDGRID_FROM` work instead of Resend if those are set and `RESEND_API_KEY` is not. Hospitals must use an institutional domain (not Gmail, iCloud, or Apple Hide My Email). There is no skip button and no test code.
 

@@ -25,6 +25,9 @@ struct HospitalOnboardingView: View {
     @State private var verifiedEmail = ""
     @State private var codeSentEmail = ""
     @State private var npiCheckedEmail = ""
+    @State private var isFinishing = false
+    @State private var signupError: String? = nil
+    @State private var finishingProfileID: UUID?
 
     private let totalSteps = 2
 
@@ -105,11 +108,18 @@ struct HospitalOnboardingView: View {
                                     finishOnboarding()
                                 }
                                 .buttonStyle(PrimaryButtonStyle())
-                                .disabled(!emailCodeAccepted || isVerifying)
+                                .disabled(!emailCodeAccepted || isVerifying || isFinishing)
                             }
                         }
                         .padding(.horizontal)
-                        .padding(.bottom, 40)
+                        if let signupError {
+                            Text(signupError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
+                        Spacer().frame(height: 40)
                     }
                 }
             }
@@ -280,8 +290,12 @@ struct HospitalOnboardingView: View {
 
     private func finishOnboarding() {
         let trimmedEmail = email.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !isFinishing else { return }
         guard let result = verificationResult, codeVerified, verifiedEmail.lowercased() == trimmedEmail else { return }
+        let profileID = finishingProfileID ?? UUID()
+        finishingProfileID = profileID
         var profile = HospitalProfile(
+            id: profileID,
             userID: SessionStore.shared.currentUserID,
             name: hospitalName.trimmingCharacters(in: .whitespaces),
             npi: npi,
@@ -291,28 +305,52 @@ struct HospitalOnboardingView: View {
             npiRegistryName: result.npiRecord?.organizationName
         )
         SessionStore.shared.linkHospitalProfile(&profile)
-        profile.save()
-        SchedulingPolicyStore.shared.setPolicy(profile.schedulingPolicy, for: profile.id)
-        Services.hospital.ensureDailyShifts(
-            from: Date(),
-            days: 120,
-            hospitalID: profile.id,
-            hospitalName: profile.name,
-            policy: profile.schedulingPolicy
-        )
+        isFinishing = true
+        signupError = nil
         Task {
-            await SupabaseProfileSync.upsertHospital(profile)
-            for shift in Services.hospital.shifts.filter({ $0.hospitalID == profile.id }).prefix(200) {
-                try? await Repositories.shifts.upsert(shift)
+            var remoteSaved = false
+            do {
+                if SupabaseConfig.isConfigured {
+                    try await SupabaseProfileSync.upsertHospital(profile)
+                    remoteSaved = true
+                    try await SendGridService.shared.notifyHospitalSignup(
+                        hospitalName: profile.name,
+                        hospitalEmail: trimmedEmail,
+                        npi: profile.npi,
+                        flags: profile.verificationFlags
+                    )
+                }
+                await MainActor.run {
+                    profile.save()
+                    SchedulingPolicyStore.shared.setPolicy(profile.schedulingPolicy, for: profile.id)
+                    Services.hospital.ensureDailyShifts(
+                        from: Date(),
+                        days: 120,
+                        hospitalID: profile.id,
+                        hospitalName: profile.name,
+                        policy: profile.schedulingPolicy
+                    )
+                    onComplete(profile)
+                }
+                if SupabaseConfig.isConfigured {
+                    for shift in Services.hospital.shifts.filter({ $0.hospitalID == profile.id }).prefix(200) {
+                        try? await Repositories.shifts.upsert(shift)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isFinishing = false
+                    let detail = error.localizedDescription
+                    if remoteSaved {
+                        signupError = "Your hospital profile was saved, but the signup email failed. \(detail)"
+                    } else if detail.isEmpty {
+                        signupError = "Your hospital profile could not be saved. Try again."
+                    } else {
+                        signupError = detail
+                    }
+                }
             }
-            try? await SendGridService.shared.notifyHospitalSignup(
-                hospitalName: profile.name,
-                hospitalEmail: trimmedEmail,
-                npi: profile.npi,
-                flags: profile.verificationFlags
-            )
         }
-        onComplete(profile)
     }
 }
 

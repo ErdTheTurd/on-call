@@ -375,7 +375,7 @@ enum SupabaseProfileSync {
         )
     }
 
-    static func upsertHospital(_ profile: HospitalProfile) async {
+    static func upsertHospital(_ profile: HospitalProfile) async throws {
         guard SupabaseConfig.isConfigured, let userID = profile.userID ?? SessionStore.shared.currentUserID else { return }
         let row: [String: Any] = [
             "id": profile.id.uuidString,
@@ -386,7 +386,7 @@ enum SupabaseProfileSync {
             "email": profile.email,
             "verification_flags": profile.verificationFlags
         ]
-        _ = try? await SupabaseHTTPClient.shared.request(
+        _ = try await SupabaseHTTPClient.shared.request(
             path: "rest/v1/hospital_profiles?on_conflict=id",
             method: "POST",
             body: try JSONSerialization.data(withJSONObject: row),
@@ -459,7 +459,7 @@ final class DataSyncCoordinator: ObservableObject {
                 await SupabaseProfileSync.upsertDoctor(doctor)
             }
             if let hospital = HospitalProfile.load() {
-                await SupabaseProfileSync.upsertHospital(hospital)
+                try await SupabaseProfileSync.upsertHospital(hospital)
             }
 
             lastError = nil
