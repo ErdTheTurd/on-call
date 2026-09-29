@@ -8,7 +8,11 @@ async function callMail(action, payload, { requireUser = false } = {}) {
   const supabase = getSupabase();
   const { data: sessionData } = await supabase.auth.getSession();
   const userToken = sessionData?.session?.access_token || "";
-  if (requireUser && !userToken) throw new Error("Sign in before finishing hospital signup.");
+  if (requireUser && !userToken) {
+    throw new Error(action === "hospital_signup"
+      ? "Sign in before finishing hospital signup."
+      : "Sign in before verifying this email.");
+  }
   const token = userToken || cfg.supabaseAnonKey;
   const res = await fetch(`${cfg.supabaseUrl}/functions/v1/send-notification`, {
     method: "POST",
@@ -28,7 +32,7 @@ async function callMail(action, payload, { requireUser = false } = {}) {
 export async function sendOnboardingEmailCode(email, recipientName = "") {
   const normalized = String(email || "").trim().toLowerCase();
   if (!normalized.includes("@")) throw new Error("Enter a valid email first.");
-  await callMail("send_code", { email: normalized, recipientName });
+  await callMail("send_code", { email: normalized, recipientName }, { requireUser: true });
   return true;
 }
 
@@ -36,7 +40,7 @@ export async function validateOnboardingEmailCode(email, code) {
   const normalized = String(email || "").trim().toLowerCase();
   const entered = String(code || "").replace(/\D/g, "");
   if (entered.length !== 6) throw new Error("Enter the 6-digit code from your email.");
-  const body = await callMail("verify_code", { email: normalized, code: entered });
+  const body = await callMail("verify_code", { email: normalized, code: entered }, { requireUser: true });
   if (body?.ok !== true || String(body.email || "").toLowerCase() !== normalized) {
     throw new Error("Incorrect or expired code.");
   }

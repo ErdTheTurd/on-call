@@ -116,7 +116,7 @@ public enum EmailVerificationError: LocalizedError {
 public struct EmailDomainChecker {
     // Common free/personal providers — not exhaustive but covers the obvious ones
     private static let blockedDomains: Set<String> = [
-        "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
+        "gmail.com", "googlemail.com", "yahoo.com", "hotmail.com", "outlook.com",
         "icloud.com", "me.com", "mac.com", "aol.com",
         "protonmail.com", "proton.me", "tutanota.com",
         "live.com", "msn.com", "ymail.com",
@@ -129,7 +129,7 @@ public struct EmailDomainChecker {
             throw EmailVerificationError.invalidFormat
         }
         let domain = String(parts[1])
-        if blockedDomains.contains(domain) {
+        if blockedDomains.contains(domain) || blockedDomains.contains(where: { domain.hasSuffix(".\($0)") }) {
             throw EmailVerificationError.freeProvider
         }
     }

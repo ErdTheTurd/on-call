@@ -888,6 +888,7 @@ async function handleSendOnboardingCode() {
 }
 
 function handleOnboardingNext() {
+  if (state.onb.loading) return;
   const root = document.getElementById("app");
   applyOnboardingFields(root);
   const role = state.onb.role;
@@ -923,55 +924,56 @@ function handleOnboardingNext() {
 
   if (onConfirm && !state.onb.skipEmailConfirmStep && !codeMatchesAddress(state.onb)) {
     const email = onboardingAddress(state.onb);
-    update({ loading: true, onb: { ...state.onb, error: null } });
+    update({ onb: { ...state.onb, loading: true, error: null } });
     (async () => {
       try {
         if (role === "Hospital") await validateOnboardingEmailCode(email, state.onb.code);
         else await verifyWorkEmailCode(email, state.onb.code);
         state.onb.codeVerified = true;
         state.onb.codeVerifiedEmail = email;
+        state.onb.loading = false;
         advanceOnboarding(role, steps);
       } catch (err) {
-        update({ loading: false, onb: { ...state.onb, error: err.message || "Incorrect or expired code." } });
+        update({ onb: { ...state.onb, loading: false, error: err.message || "Incorrect or expired code." } });
       }
     })();
     return;
   }
 
   if (state.onb.step >= steps - 1) {
-    update({ loading: true });
+    update({ onb: { ...state.onb, loading: true, error: null } });
     (async () => {
       try {
         if (role === "Doctor") await finishDoctorOnboarding(state.onb);
         else await finishHospitalOnboarding(state.onb);
         state.route = role === "Hospital" ? "hospital" : "doctor";
-        update({ onb: { ...state.onb, error: null }, loading: false });
+        update({ onb: { ...state.onb, loading: false, error: null } });
       } catch (err) {
-        update({ onb: { ...state.onb, error: err.message || "Could not save profile." }, loading: false });
+        update({ onb: { ...state.onb, loading: false, error: err.message || "Could not save profile." } });
       }
     })();
     return;
   }
 
-  update({ loading: false, onb: { ...state.onb, step: nextOnboardingStep(state.onb), error: null } });
+  update({ onb: { ...state.onb, loading: false, step: nextOnboardingStep(state.onb), error: null } });
 }
 
 function advanceOnboarding(role, steps) {
   if (state.onb.step >= steps - 1) {
-    update({ loading: true });
+    update({ onb: { ...state.onb, loading: true, error: null } });
     (async () => {
       try {
         if (role === "Doctor") await finishDoctorOnboarding(state.onb);
         else await finishHospitalOnboarding(state.onb);
         state.route = role === "Hospital" ? "hospital" : "doctor";
-        update({ onb: { ...state.onb, error: null }, loading: false });
+        update({ onb: { ...state.onb, loading: false, error: null } });
       } catch (err) {
-        update({ onb: { ...state.onb, error: err.message || "Could not save profile." }, loading: false });
+        update({ onb: { ...state.onb, loading: false, error: err.message || "Could not save profile." } });
       }
     })();
     return;
   }
-  update({ loading: false, onb: { ...state.onb, step: nextOnboardingStep(state.onb), error: null } });
+  update({ onb: { ...state.onb, loading: false, step: nextOnboardingStep(state.onb), error: null } });
 }
 
 boot();

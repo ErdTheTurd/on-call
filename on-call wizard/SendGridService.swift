@@ -24,6 +24,9 @@ final class SendGridService {
         }
         let address = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard address.contains("@") else { throw SendError.server("Enter a valid email first.") }
+        guard let token = SupabaseAuthService.shared.accessToken, !token.isEmpty else {
+            throw SendError.server("Sign in before verifying this email.")
+        }
         _ = try await SupabaseHTTPClient.shared.invokeFunction(
             name: "send-notification",
             body: [
@@ -31,7 +34,7 @@ final class SendGridService {
                 "email": address,
                 "recipientName": recipientName
             ],
-            accessToken: SupabaseAuthService.shared.accessToken
+            accessToken: token
         )
     }
 
@@ -42,6 +45,9 @@ final class SendGridService {
         let address = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let digits = String(code.filter { $0.isNumber }.prefix(6))
         guard digits.count == 6 else { throw SendError.invalidCode }
+        guard let token = SupabaseAuthService.shared.accessToken, !token.isEmpty else {
+            throw SendError.server("Sign in before verifying this email.")
+        }
         let data = try await SupabaseHTTPClient.shared.invokeFunction(
             name: "send-notification",
             body: [
@@ -49,7 +55,7 @@ final class SendGridService {
                 "email": address,
                 "code": digits
             ],
-            accessToken: SupabaseAuthService.shared.accessToken
+            accessToken: token
         )
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let ok = json?["ok"] as? Bool == true
