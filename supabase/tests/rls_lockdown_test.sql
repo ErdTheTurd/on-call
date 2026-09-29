@@ -880,6 +880,20 @@ begin
     if sqlerrm like '%doctor B assigned a shift without%' then raise; end if;
     if sqlerrm not like '%doctors cannot create assignments%' then raise; end if;
   end;
+  begin
+    update public.trade_requests
+      set shift_id = '77777777-7777-4777-8777-77777777777a',
+          from_doctor_id = '11111111-1111-4111-8111-111111111111'
+      where to_doctor_id = auth.uid() and state = 'pending';
+    raise exception 'doctor B retargeted a trade';
+  exception when others then
+    if sqlerrm like '%doctor B retargeted a trade%' then raise; end if;
+    if sqlerrm not like '%cannot retarget a trade%' then raise; end if;
+  end;
+  if (select shift_id from public.trade_requests where to_doctor_id = auth.uid() and state = 'pending')
+     is distinct from '77777777-7777-4777-8777-777777777777' then
+    raise exception 'a pending trade was moved onto another shift';
+  end if;
   update public.trade_requests
     set state = 'rejected'
     where to_doctor_id = auth.uid() and state = 'pending';

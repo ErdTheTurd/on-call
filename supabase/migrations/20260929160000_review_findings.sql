@@ -26,7 +26,8 @@
 -- 8. Only the doctor who was asked, the hospital that owns the shift, or an
 --    admin may update a trade. The doctor who sent it cannot accept it.
 --    A trade can be opened only by the doctor who currently holds that shift,
---    and not to themselves. The service role does not skip that check.
+--    and not to themselves. The shift and the two doctors cannot be changed
+--    later, including by the invited doctor or the service role.
 -- 9. public.is_admin() moves to the private schema so it is not a public API,
 --    and policies keep working. public.rls_auto_enable() is not callable by
 --    the website key if that helper exists.
@@ -888,6 +889,16 @@ begin
       and a.status::text <> 'canceled'
   ) then
     raise exception 'only the assigned doctor can request a trade';
+  end if;
+
+  -- The invited doctor can accept or reject. They cannot point the row at
+  -- another shift or another doctor. The service role does not skip this.
+  if tg_op = 'UPDATE' and (
+    new.shift_id is distinct from old.shift_id
+    or new.from_doctor_id is distinct from old.from_doctor_id
+    or new.to_doctor_id is distinct from old.to_doctor_id
+  ) then
+    raise exception 'cannot retarget a trade request';
   end if;
 
   return new;
