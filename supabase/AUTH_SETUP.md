@@ -349,7 +349,7 @@ supabase functions deploy request-trade --project-ref yrnndfpvovuvjlzgivgu
 supabase functions deploy respond-trade --project-ref yrnndfpvovuvjlzgivgu
 ```
 
-`request-trade` sets the sender from the JWT and only opens a trade when that doctor currently holds the shift, and not to themselves. `respond-trade` allows only the invited doctor, the hospital that owns the shift, or an admin, and moves the assignment only while the offering doctor still holds it.
+`request-trade` sets the sender from the JWT and only opens a trade when that doctor currently holds the shift, and not to themselves. After that, the shift and the two doctors on the row cannot be changed, including by the invited doctor. `respond-trade` allows only the invited doctor, the hospital that owns the shift, or an admin, and moves the assignment only while the offering doctor still holds it.
 
 `SENDGRID_API_KEY` and `SENDGRID_FROM` work instead of Resend if those are set and `RESEND_API_KEY` is not. Hospitals must use an institutional domain (not Gmail, iCloud, or Apple Hide My Email). There is no skip button and no test code.
 
