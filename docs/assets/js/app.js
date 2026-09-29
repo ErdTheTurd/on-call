@@ -21,7 +21,8 @@ import {
 } from "./views/onboarding.js";
 import { renderDoctorApp, bindDoctor } from "./views/doctor.js";
 import { renderHospitalApp, bindHospital } from "./views/hospital.js";
-import { lookupNPI, verifyDoctorCredentials, validateInstitutionalEmail } from "./domain/verification.js";
+import { lookupNPI, verifyDoctorCredentials, verifyHospitalCredentials, validateInstitutionalEmail } from "./domain/verification.js";
+import { sendOnboardingEmailCode, validateOnboardingEmailCode } from "./domain/email.js";
 import { refreshPlusMembership, setPlusMembership } from "./domain/plus.js";
 
 const state = {
@@ -364,6 +365,7 @@ function render() {
       },
       onNext: handleOnboardingNext,
       onVerify: handleNpiVerify,
+      onSendCode: handleSendOnboardingCode,
       onToggleSpecialty: (sp) => {
         const current = state.onb.specialties?.[0];
         update({ onb: { ...state.onb, specialties: current === sp ? [] : [sp] } });
@@ -772,20 +774,47 @@ async function handleNpiVerify() {
         }
       });
     } else {
+      const workEmail = state.onb.email || "";
+      const emailCheck = validateInstitutionalEmail(workEmail);
+      if (!emailCheck.ok) {
+        update({ onb: { ...state.onb, loading: false, error: emailCheck.error } });
+        return;
+      }
       const record = await lookupNPI(npi, "NPI-2");
       if (record.organizationName && !state.onb.name) state.onb.name = record.organizationName;
+      const result = verifyHospitalCredentials({
+        name: state.onb.name || record.organizationName || "",
+        npiRecord: record,
+        email: workEmail
+      });
       update({
         onb: {
           ...state.onb,
-          verified: true,
+          verified: !!result.emailDomainValid && !!record,
+          verificationStatus: result.finalStatus,
+          verificationFlags: result.flags,
           name: state.onb.name || record.organizationName || state.onb.name,
           loading: false,
-          error: null
+          error: result.emailDomainValid ? null : (result.flags[0] || "Use your hospital work email.")
         }
       });
     }
   } catch (err) {
     update({ onb: { ...state.onb, loading: false, error: err.message || "Verification failed." } });
+  }
+}
+
+async function handleSendOnboardingCode() {
+  const root = document.getElementById("app");
+  Object.assign(state.onb, readOnboardingFields(root));
+  const email = state.onb.email || appStore.session?.email || "";
+  const name = state.onb.name || `${state.onb.firstName || ""} ${state.onb.lastName || ""}`.trim();
+  update({ onb: { ...state.onb, loading: true, error: null } });
+  try {
+    await sendOnboardingEmailCode(email, name);
+    update({ onb: { ...state.onb, loading: false, codeSent: true, error: null } });
+  } catch (err) {
+    update({ onb: { ...state.onb, loading: false, error: err.message || "Could not send code." } });
   }
 }
 
@@ -802,18 +831,37 @@ function handleOnboardingNext() {
     if (state.onb.step === 1 && !state.onb.verified) {
       update({ onb: { ...state.onb, error: "Verify credentials first." } }); return;
     }
-    if (state.onb.step === 2 && !state.onb.skipEmailStep && !state.onb.skipEmailConfirmStep && state.onb.code !== "123456") {
-      update({ onb: { ...state.onb, error: "Incorrect or expired code." } }); return;
+    if (state.onb.step === 2 && !state.onb.skipEmailConfirmStep) {
+      if (state.onb.codeVerified) { /* ok */ }
+      else if (!validateOnboardingEmailCode(state.onb.email || appStore.session?.email, state.onb.code)) {
+        update({ onb: { ...state.onb, error: "Send the code, then enter the 6 digits from your email." } }); return;
+      } else {
+        state.onb.codeVerified = true;
+      }
     }
     if (state.onb.step === 3 && !(state.onb.specialties?.length)) {
       update({ onb: { ...state.onb, error: "Choose your specialty." } }); return;
     }
   } else {
-    if (state.onb.step === 0 && (!state.onb.name?.trim() || !state.onb.npi)) {
-      update({ onb: { ...state.onb, error: "Enter hospital name and NPI." } }); return;
+    if (state.onb.step === 0) {
+      if (!state.onb.name?.trim() || !state.onb.npi) {
+        update({ onb: { ...state.onb, error: "Enter hospital name and NPI." } }); return;
+      }
+      const emailCheck = validateInstitutionalEmail(state.onb.email || "");
+      if (!emailCheck.ok) {
+        update({ onb: { ...state.onb, error: emailCheck.error } }); return;
+      }
+      if (!state.onb.verified) {
+        update({ onb: { ...state.onb, error: "Verify facility NPI first." } }); return;
+      }
     }
-    if (state.onb.step === 1 && !state.onb.skipEmailStep && !state.onb.skipEmailConfirmStep && state.onb.code !== "123456") {
-      update({ onb: { ...state.onb, error: "Enter the 6-digit code from your email." } }); return;
+    if (state.onb.step === 1) {
+      if (state.onb.codeVerified) { /* ok */ }
+      else if (!validateOnboardingEmailCode(state.onb.email, state.onb.code)) {
+        update({ onb: { ...state.onb, error: "Send the code, then enter the 6 digits from your hospital email." } }); return;
+      } else {
+        state.onb.codeVerified = true;
+      }
     }
   }
 

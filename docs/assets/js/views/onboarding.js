@@ -24,7 +24,7 @@ export function nextOnboardingStep(state) {
   const role = state.role || "Doctor";
   const skipConfirm = state.skipEmailConfirmStep || state.skipEmailStep;
   if (role === "Doctor" && step === 2 && skipConfirm) step = 3;
-  if (role === "Hospital" && step === 1 && skipConfirm) step = 2;
+  // Hospitals always stop on email confirm (step 1).
   return step;
 }
 
@@ -33,7 +33,6 @@ export function previousOnboardingStep(state) {
   const role = state.role || "Doctor";
   const skipConfirm = state.skipEmailConfirmStep || state.skipEmailStep;
   if (role === "Doctor" && step === 2 && skipConfirm) step = 1;
-  if (role === "Hospital" && step === 1 && skipConfirm) step = 0;
   return Math.max(minOnboardingStep(state), step);
 }
 
@@ -97,8 +96,13 @@ function doctorStepBody(state) {
     case 2:
       return `
         <div class="form-stack" style="text-align:center">
-          <p class="subtitle">Enter the 6-digit code we sent to your email.</p>
-          <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" placeholder="123456" /></div>
+          <p class="subtitle">We sent (or will send) a 6-digit code to <strong>${escapeHtml(state.email || appStore.session?.email || "")}</strong>.</p>
+          ${state.codeVerified ? `<p class="subtitle" style="color:var(--success,#34c759)">Email verified.</p>` : `
+          <button type="button" class="btn-secondary" data-send-code ${state.loading ? "disabled" : ""}>
+            ${state.loading ? `<span class="spinner"></span>` : (state.codeSent ? "Resend code" : "Send verification code")}
+          </button>
+          <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" placeholder="000000" value="${escapeHtml(state.code || "")}" /></div>
+          `}
         </div>`;
     default:
       return `
@@ -118,16 +122,24 @@ function hospitalStepBody(state) {
         <div class="form-stack">
           <div class="form-field"><label>Hospital name</label><input data-field="name" value="${escapeHtml(state.name || "")}" /></div>
           <div class="form-field"><label>NPI</label><input data-field="npi" maxlength="10" inputmode="numeric" value="${escapeHtml(state.npi || "")}" /></div>
-          ${state.skipEmailStep ? "" : `<div class="form-field"><label>Email</label><input data-field="email" type="email" value="${escapeHtml(state.email || appStore.session?.email || "")}" /></div>`}
+          <div class="form-field"><label>Hospital work email</label><input data-field="email" type="email" placeholder="admin@yourhospital.org" value="${escapeHtml(state.email || "")}" /></div>
+          <p class="subtitle" style="font-size:12px">Use an email on your hospital’s domain — not Gmail, iCloud, or Apple Hide My Email.</p>
           <button type="button" class="btn-secondary" data-verify-npi ${state.verified || state.loading ? "disabled" : ""}>
-            ${state.loading ? `<span class="spinner"></span>` : (state.verified ? "✓ Facility NPI verified" : "Verify facility NPI")}
+            ${state.loading ? `<span class="spinner"></span>` : (state.verified ? "✓ Facility verified" : "Verify facility NPI")}
           </button>
+          ${state.verificationFlags?.length ? `
+            <div class="subtitle" style="font-size:12px">${state.verificationFlags.map(escapeHtml).join("<br>")}</div>` : ""}
         </div>`;
     case 1:
       return `
         <div class="form-stack" style="text-align:center">
-          <p class="subtitle">Enter the 6-digit code we sent to your email.</p>
-          <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" /></div>
+          <p class="subtitle">Confirm <strong>${escapeHtml(state.email || "")}</strong> with the 6-digit code from your inbox.</p>
+          ${state.codeVerified ? `<p class="subtitle" style="color:var(--success,#34c759)">Email verified.</p>` : `
+          <button type="button" class="btn-secondary" data-send-code ${state.loading ? "disabled" : ""}>
+            ${state.loading ? `<span class="spinner"></span>` : (state.codeSent ? "Resend code" : "Send verification code")}
+          </button>
+          <div class="form-field"><label>6-digit code</label><input data-field="code" maxlength="6" inputmode="numeric" placeholder="000000" value="${escapeHtml(state.code || "")}" /></div>
+          `}
         </div>`;
     default:
       return `
@@ -160,6 +172,7 @@ export function bindOnboarding(root, handlers) {
   root.querySelector("[data-onb-back]")?.addEventListener("click", handlers.onBack);
   root.querySelector("[data-onb-next]")?.addEventListener("click", handlers.onNext);
   root.querySelector("[data-verify-npi]")?.addEventListener("click", handlers.onVerify);
+  root.querySelector("[data-send-code]")?.addEventListener("click", handlers.onSendCode);
   root.querySelectorAll("[data-specialty]").forEach((btn) => {
     btn.addEventListener("click", () => handlers.onToggleSpecialty(btn.dataset.specialty));
   });
@@ -196,11 +209,20 @@ export async function finishHospitalOnboarding(state) {
     name: state.name.trim(),
     npi: state.npi,
     email: state.email || appStore.session?.email,
-    verificationStatus: state.verified ? "pending" : "pending",
-    verificationFlags: [],
+    verificationStatus: state.verificationStatus || (state.verified ? "pending" : "pending"),
+    verificationFlags: state.verificationFlags || [],
     schedulingPolicy: policy,
     priorityPosting: false,
     autoPay: false
   };
   await finishHospitalProfile(profile);
+  try {
+    const { notifyHospitalSignup } = await import("../domain/email.js");
+    await notifyHospitalSignup({
+      name: profile.name,
+      email: profile.email,
+      npi: profile.npi,
+      flags: profile.verificationFlags
+    });
+  } catch { /* non-blocking — profile already saved */ }
 }

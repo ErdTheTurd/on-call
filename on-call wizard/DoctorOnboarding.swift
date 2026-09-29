@@ -443,20 +443,6 @@ struct EmailVerificationStep: View {
                         }
                         .buttonStyle(PrimaryButtonStyle())
                         .disabled(isSendingCode)
-
-                        VStack(spacing: 6) {
-                            Button {
-                                withAnimation { codeVerified = true; codeError = nil }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "chevron.forward.circle")
-                                    Text("Skip this step")
-                                }
-                                .font(.footnote.weight(.semibold))
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.secondary)
-                        }
                     } else {
                         Divider()
                         VStack(alignment: .leading, spacing: 8) {
@@ -491,12 +477,14 @@ struct EmailVerificationStep: View {
                 }
                 .cardStyle()
 
+                #if DEBUG
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle.fill").foregroundStyle(Color.accentColor)
-                    Text("During development all codes are redirected to erdunn706@gmail.com.")
+                    Text("DEBUG builds redirect verification codes to erdunn706@gmail.com.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .cardStyle()
+                #endif
             }
         }
     }

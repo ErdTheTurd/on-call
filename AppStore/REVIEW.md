@@ -12,7 +12,7 @@ Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/
 | Primary category | Medical |
 | Secondary | Business (optional) |
 | Version | 1.0 |
-| Build | 9 |
+| Build | 10 |
 | Copyright | 2026 Edward Dunn / MD Shift |
 
 ## URLs
