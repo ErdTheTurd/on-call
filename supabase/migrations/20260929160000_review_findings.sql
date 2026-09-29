@@ -13,10 +13,12 @@
 -- 5. A doctor who adds themselves to a hospital stays pending. They cannot see
 --    that hospital's roster or peer directory cards until the hospital approves.
 --    Opening a trade does not reveal an unrelated doctor's card.
--- 6. A doctor cannot approve their own token request, create an assignment, or
---    move an assignment onto a different shift. Hospitals, admins, and the
---    service role keep those abilities. A hospital's auto-approve setting can
---    still mark a request auto-approved.
+-- 6. A doctor cannot approve their own token request or move an assignment
+--    onto a different shift. A doctor can create an assignment only for
+--    themselves, and only on a shift covered by their approved or
+--    auto-approved token for that hospital and UTC date. Hospitals, admins,
+--    and the service role can still create any assignment. A hospital's
+--    auto-approve setting can still mark a request auto-approved.
 -- 7. Doctors can write savings and penalty rows only for a hospital that has
 --    approved them or that they already have an assignment at. Those rows
 --    cannot be moved to a different hospital.
@@ -625,10 +627,26 @@ begin
   end if;
 
   if tg_op = 'INSERT' then
-    raise exception 'doctors cannot create assignments';
+    -- Accept Shift on web and iOS inserts this row after a token is approved.
+    -- The edge function uses the service role and skips this branch. A direct
+    -- insert is allowed only for the signed-in doctor, and only when that
+    -- token covers this shift's hospital and UTC calendar date.
+    if not exists (
+      select 1
+      from public.shifts s
+      join public.token_requests tr
+        on tr.hospital_id = s.hospital_id
+       and tr.doctor_id = new.doctor_id
+       and tr.shift_date = (s.date at time zone 'utc')::date
+       and tr.status::text in ('approved', 'auto_approved')
+      where s.id = new.shift_id
+        and new.doctor_id = auth.uid()
+    ) then
+      raise exception 'doctors cannot create assignments';
+    end if;
   end if;
 
-  if new.shift_id is distinct from old.shift_id then
+  if tg_op = 'UPDATE' and new.shift_id is distinct from old.shift_id then
     raise exception 'cannot change assignment shift';
   end if;
   return new;

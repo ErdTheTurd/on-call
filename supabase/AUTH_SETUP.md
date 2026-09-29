@@ -334,7 +334,7 @@ Actions (all three require the signed-in user's access token; the anon key is re
 - `verify_code` — counts every guess in one locked update, then records verification for that same user.
 - `hospital_signup` — calls `auth.getUser(jwt)`. Sends only to `OPS_EMAIL` and the address this user verified. The website and iOS show the error when this fails.
 
-The database, not the app, rejects a hospital row whose email is a personal domain or has no verified code for that user. A doctor who adds themselves to a hospital cannot see its roster until the hospital sets `hospital_doctors.approved_at`.
+The database, not the app, rejects a hospital row whose email is a personal domain or has no verified code for that user. A doctor who adds themselves to a hospital cannot see its roster until the hospital sets `hospital_doctors.approved_at`. A doctor can insert an assignment only for a shift covered by their own approved or auto-approved token. Accept Shift on the website and in the app uses that path (and the `accept-shift` function, which runs as the service role). No website or iOS code calls `is_admin()`; admin screens read the `profiles.is_admin` column, and policies call `private.is_admin()`.
 
 ```bash
 supabase secrets set \

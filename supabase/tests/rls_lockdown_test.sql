@@ -690,6 +690,25 @@ end $$;
 
 reset role;
 
+insert into public.shifts (id, hospital_id, hospital_name, specialty, date, rate_floor)
+values
+  (
+    '77777777-7777-4777-8777-77777777777a',
+    '66666666-6666-4666-8666-666666666666',
+    'Riverside General',
+    'Cardiology',
+    ((current_date + 2)::timestamp at time zone 'utc'),
+    1500
+  ),
+  (
+    '77777777-7777-4777-8777-77777777777b',
+    '66666666-6666-4666-8666-666666666666',
+    'Riverside General',
+    'Cardiology',
+    ((current_date + 40)::timestamp at time zone 'utc'),
+    1500
+  );
+
 -- Doctor A cannot approve a token, create an assignment, or retarget savings.
 select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
@@ -709,9 +728,11 @@ begin
       where doctor_id = auth.uid() and shift_date = current_date + 11) is distinct from 'pending' then
     raise exception 'doctor A approved their own token request';
   end if;
+  insert into public.assignments (shift_id, doctor_id, status)
+  values ('77777777-7777-4777-8777-77777777777a', auth.uid(), 'scheduled');
   begin
     insert into public.assignments (shift_id, doctor_id, status)
-    values ('77777777-7777-4777-8777-777777777777', auth.uid(), 'scheduled');
+    values ('77777777-7777-4777-8777-77777777777b', auth.uid(), 'scheduled');
     raise exception 'doctor A created an assignment';
   exception when others then
     if sqlerrm like '%doctor A created an assignment%' then raise; end if;
@@ -795,7 +816,18 @@ end $$;
 reset role;
 drop policy if exists "penalty_ledger_update_test" on public.penalty_ledger;
 
+insert into public.shifts (id, hospital_id, hospital_name, specialty, date, rate_floor)
+values (
+  '77777777-7777-4777-8777-777777777779',
+  '66666666-6666-4666-8666-666666666666',
+  'Riverside General',
+  'Cardiology',
+  ((current_date + 12)::timestamp at time zone 'utc'),
+  1800
+);
+
 -- Doctor B is auto-approved on the roster, so the hospital's flag still works.
+-- That approved token is what lets Accept Shift insert one assignment.
 select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 set local role authenticated;
@@ -809,6 +841,16 @@ begin
       where doctor_id = auth.uid() and shift_date = current_date + 12) is distinct from 'auto_approved' then
     raise exception 'hospital auto-approve flag did not stick for doctor B';
   end if;
+  insert into public.assignments (shift_id, doctor_id, status)
+  values ('77777777-7777-4777-8777-777777777779', auth.uid(), 'scheduled');
+  begin
+    insert into public.assignments (shift_id, doctor_id, status)
+    values ('77777777-7777-4777-8777-777777777777', auth.uid(), 'scheduled');
+    raise exception 'doctor B assigned a shift without an approved token';
+  exception when others then
+    if sqlerrm like '%doctor B assigned a shift without%' then raise; end if;
+    if sqlerrm not like '%doctors cannot create assignments%' then raise; end if;
+  end;
   update public.trade_requests
     set state = 'rejected'
     where to_doctor_id = auth.uid() and state = 'pending';
