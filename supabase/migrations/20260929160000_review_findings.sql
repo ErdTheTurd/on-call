@@ -13,17 +13,20 @@
 -- 5. A doctor who adds themselves to a hospital stays pending. They cannot see
 --    that hospital's roster or peer directory cards until the hospital approves.
 --    Opening a trade does not reveal an unrelated doctor's card.
--- 6. A doctor cannot approve their own token request or move an assignment
---    onto a different shift. A doctor can create an assignment only for
---    themselves, and only on a shift covered by their approved or
---    auto-approved token for that hospital and UTC date. Hospitals, admins,
---    and the service role can still create any assignment. A hospital's
---    auto-approve setting can still mark a request auto-approved.
+-- 6. A doctor cannot approve their own token request, retarget an existing
+--    token's hospital or date, or move an assignment onto a different shift.
+--    A doctor can create an assignment only for themselves, and only on a
+--    shift covered by their approved or auto-approved token for that hospital
+--    and UTC date. Hospitals, admins, and the service role can still create
+--    any assignment. A hospital's auto-approve setting can still mark a
+--    request auto-approved.
 -- 7. Doctors can write savings and penalty rows only for a hospital that has
 --    approved them or that they already have an assignment at. Those rows
 --    cannot be moved to a different hospital.
 -- 8. Only the doctor who was asked, the hospital that owns the shift, or an
 --    admin may update a trade. The doctor who sent it cannot accept it.
+--    A trade can be opened only by the doctor who currently holds that shift,
+--    and not to themselves. The service role does not skip that check.
 -- 9. public.is_admin() moves to the private schema so it is not a public API,
 --    and policies keep working. public.rls_auto_enable() is not callable by
 --    the website key if that helper exists.
@@ -585,8 +588,18 @@ security definer
 set search_path = public
 as $$
 begin
-  if private.db_admin_bypass() or private.owns_hospital(new.hospital_id) then
+  if private.db_admin_bypass()
+     or (tg_op = 'INSERT' and private.owns_hospital(new.hospital_id))
+     or (tg_op = 'UPDATE' and private.owns_hospital(old.hospital_id)) then
     return new;
+  end if;
+
+  if tg_op = 'UPDATE' and (
+    new.hospital_id is distinct from old.hospital_id
+    or new.shift_date is distinct from old.shift_date
+    or new.doctor_id is distinct from old.doctor_id
+  ) then
+    raise exception 'cannot retarget a token request';
   end if;
 
   if new.status::text in ('approved', 'denied')
@@ -852,6 +865,42 @@ revoke all on public.hospital_roster from anon, public;
 -- Edge functions use the service role. Hosted Supabase already grants it every
 -- table; this keeps a local database aligned and does not grant the anon key.
 grant all on all tables in schema public to service_role;
+
+-- A trade can be opened only by the doctor who currently holds the shift,
+-- and not to themselves. This applies to the service role as well, because
+-- the trade edge functions insert with that role.
+create or replace function private.guard_trade_parties()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.from_doctor_id = new.to_doctor_id then
+    raise exception 'cannot trade a shift to yourself';
+  end if;
+
+  if tg_op = 'INSERT' and not exists (
+    select 1
+    from public.assignments a
+    where a.shift_id = new.shift_id
+      and a.doctor_id = new.from_doctor_id
+      and a.status::text <> 'canceled'
+  ) then
+    raise exception 'only the assigned doctor can request a trade';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function private.guard_trade_parties() from public, anon;
+grant execute on function private.guard_trade_parties() to authenticated, service_role;
+
+drop trigger if exists trade_requests_guard_parties on public.trade_requests;
+create trigger trade_requests_guard_parties
+  before insert or update on public.trade_requests
+  for each row execute function private.guard_trade_parties();
 
 -- The sender cannot accept or reject their own trade through the API.
 drop policy if exists "trade_requests_update" on public.trade_requests;

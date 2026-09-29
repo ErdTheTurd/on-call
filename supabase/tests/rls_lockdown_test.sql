@@ -523,8 +523,20 @@ end $$;
 reset role;
 set local role service_role;
 
+do $$
+begin
+  begin
+    insert into public.trade_requests (shift_id, from_doctor_id, to_doctor_id, state)
+    values ('77777777-7777-4777-8777-777777777777', '33333333-3333-4333-8333-333333333333', '11111111-1111-4111-8111-111111111111', 'pending');
+    raise exception 'service role opened a trade for a doctor who does not hold the shift';
+  exception when others then
+    if sqlerrm like '%service role opened a trade%' then raise; end if;
+    if sqlerrm not like '%only the assigned doctor can request a trade%' then raise; end if;
+  end;
+end $$;
+
 insert into public.trade_requests (shift_id, from_doctor_id, to_doctor_id, state)
-values ('77777777-7777-4777-8777-777777777777', '33333333-3333-4333-8333-333333333333', '11111111-1111-4111-8111-111111111111', 'pending');
+values ('77777777-7777-4777-8777-777777777777', '11111111-1111-4111-8111-111111111111', '33333333-3333-4333-8333-333333333333', 'pending');
 
 do $$
 begin
@@ -731,6 +743,23 @@ begin
   insert into public.assignments (shift_id, doctor_id, status)
   values ('77777777-7777-4777-8777-77777777777a', auth.uid(), 'scheduled');
   begin
+    update public.token_requests
+      set shift_date = current_date + 40
+      where doctor_id = auth.uid() and shift_date = current_date + 2;
+    raise exception 'doctor A retargeted an approved token';
+  exception when others then
+    if sqlerrm like '%doctor A retargeted an approved token%' then raise; end if;
+    if sqlerrm not like '%cannot retarget a token request%' then raise; end if;
+  end;
+  begin
+    insert into public.trade_requests (shift_id, from_doctor_id, to_doctor_id, state)
+    values ('77777777-7777-4777-8777-777777777777', auth.uid(), auth.uid(), 'pending');
+    raise exception 'doctor A traded a shift to themselves';
+  exception when others then
+    if sqlerrm like '%doctor A traded a shift to themselves%' then raise; end if;
+    if sqlerrm not like '%cannot trade a shift to yourself%' then raise; end if;
+  end;
+  begin
     insert into public.assignments (shift_id, doctor_id, status)
     values ('77777777-7777-4777-8777-77777777777b', auth.uid(), 'scheduled');
     raise exception 'doctor A created an assignment';
@@ -886,8 +915,17 @@ end $$;
 insert into public.hospital_doctors (hospital_id, doctor_id, auto_approve)
 values ('66666666-6666-4666-8666-666666666666', auth.uid(), false);
 
-insert into public.trade_requests (shift_id, from_doctor_id, to_doctor_id, state)
-values ('77777777-7777-4777-8777-777777777777', auth.uid(), '11111111-1111-4111-8111-111111111111', 'pending');
+do $$
+begin
+  begin
+    insert into public.trade_requests (shift_id, from_doctor_id, to_doctor_id, state)
+    values ('77777777-7777-4777-8777-777777777777', auth.uid(), '11111111-1111-4111-8111-111111111111', 'pending');
+    raise exception 'doctor C requested a trade for a shift they do not hold';
+  exception when others then
+    if sqlerrm like '%doctor C requested a trade%' then raise; end if;
+    if sqlerrm not like '%only the assigned doctor can request a trade%' then raise; end if;
+  end;
+end $$;
 
 do $$
 begin

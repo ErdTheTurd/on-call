@@ -36,6 +36,13 @@ serve(async (req) => {
   const { data: trade } = await admin.from("trade_requests").select("*").eq("id", tradeId).maybeSingle()
   if (!trade) return new Response(JSON.stringify({ error: "Not found" }), { status: 404 })
 
+  if (trade.from_doctor_id === trade.to_doctor_id) {
+    return new Response(JSON.stringify({ error: "This trade is not valid." }), { status: 403 })
+  }
+  if (trade.state !== "pending") {
+    return new Response(JSON.stringify({ error: "This trade is no longer pending." }), { status: 400 })
+  }
+
   const actorId = userData.user.id
   const { data: shift } = await admin.from("shifts").select("hospital_id").eq("id", trade.shift_id).maybeSingle()
   const { data: hospital } = shift?.hospital_id
@@ -53,15 +60,47 @@ serve(async (req) => {
   }
 
   const state = body?.accept === true ? "accepted" : "rejected"
-  const { error: updateError } = await admin.from("trade_requests").update({ state }).eq("id", tradeId)
+  if (state === "accepted") {
+    const { data: assignment } = await admin
+      .from("assignments")
+      .select("id, doctor_id")
+      .eq("shift_id", trade.shift_id)
+      .neq("status", "canceled")
+      .maybeSingle()
+    if (!assignment || assignment.doctor_id !== trade.from_doctor_id) {
+      return new Response(JSON.stringify({
+        error: "The doctor who offered this shift no longer holds it.",
+      }), { status: 403 })
+    }
+  }
+
+  const { data: updated, error: updateError } = await admin
+    .from("trade_requests")
+    .update({ state })
+    .eq("id", tradeId)
+    .eq("state", "pending")
+    .select("id")
+    .maybeSingle()
   if (updateError) return new Response(JSON.stringify({ error: updateError.message }), { status: 400 })
+  if (!updated) {
+    return new Response(JSON.stringify({ error: "This trade is no longer pending." }), { status: 400 })
+  }
 
   if (state === "accepted") {
-    const { error: assignError } = await admin
+    const { data: moved, error: assignError } = await admin
       .from("assignments")
       .update({ doctor_id: trade.to_doctor_id })
       .eq("shift_id", trade.shift_id)
-    if (assignError) return new Response(JSON.stringify({ error: assignError.message }), { status: 400 })
+      .eq("doctor_id", trade.from_doctor_id)
+      .neq("status", "canceled")
+      .select("id")
+      .maybeSingle()
+    if (assignError || !moved) {
+      await admin.from("trade_requests").update({ state: "pending" }).eq("id", tradeId)
+      return new Response(JSON.stringify({
+        error: "The doctor who offered this shift no longer holds it.",
+      }), { status: 403 })
+    }
   }
 
   return new Response(JSON.stringify({ state }), { status: 200 })

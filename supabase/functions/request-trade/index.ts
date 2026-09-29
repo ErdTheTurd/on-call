@@ -41,6 +41,21 @@ serve(async (req) => {
   if (!shiftId || !toDoctorId) {
     return new Response(JSON.stringify({ error: "Choose a shift and a doctor." }), { status: 400 })
   }
+  if (toDoctorId === actorId) {
+    return new Response(JSON.stringify({ error: "You cannot trade a shift to yourself." }), { status: 403 })
+  }
+
+  const { data: assignment } = await admin
+    .from("assignments")
+    .select("doctor_id, status")
+    .eq("shift_id", shiftId)
+    .neq("status", "canceled")
+    .maybeSingle()
+  if (!assignment || assignment.doctor_id !== actorId) {
+    return new Response(JSON.stringify({
+      error: "Only the doctor assigned to this shift can request a trade.",
+    }), { status: 403 })
+  }
 
   const row: Record<string, unknown> = {
     shift_id: shiftId,
