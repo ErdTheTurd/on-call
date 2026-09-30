@@ -608,15 +608,13 @@ struct DoctorStockBoard: View {
     @State private var compared: Set<FinancePeriod> = []
 
     private var specialties: [String] {
-        if InvestorDemo.isEnabled {
+        if InvestorDemo.usesLocalSampleData {
             return [
                 "Anesthesiology", "Cardiology", "Emergency Medicine", "General Surgery",
                 "Internal Medicine", "Neurology", "Orthopedics", "Pediatrics",
             ]
         }
-        let fromRoster = Array(Set(roster.doctors.map(\.specialty))).sorted()
-        if !fromRoster.isEmpty { return fromRoster }
-        return ["Cardiology", "Emergency Medicine", "Orthopedics", "General Surgery", "Internal Medicine"]
+        return Array(Set(roster.doctors.map(\.specialty))).sorted()
     }
 
     var body: some View {
@@ -676,9 +674,8 @@ struct DoctorStockBoard: View {
     }
 
     private func doctorCount(_ specialty: String) -> Int {
-        if InvestorDemo.isEnabled { return mockDoctors(for: specialty).count }
-        let n = roster.doctors.filter { $0.specialty == specialty }.count
-        return n > 0 ? n : mockDoctors(for: specialty).count
+        if InvestorDemo.usesLocalSampleData { return mockDoctors(for: specialty).count }
+        return roster.doctors.filter { $0.specialty == specialty }.count
     }
 
     private func sparkValues(for specialty: String) -> [Double] {
@@ -688,9 +685,8 @@ struct DoctorStockBoard: View {
     }
 
     private func doctors(for specialty: String) -> [DoctorSummary] {
-        if InvestorDemo.isEnabled { return mockDoctors(for: specialty) }
-        let live = roster.doctors.filter { $0.specialty == specialty }
-        return live.isEmpty ? mockDoctors(for: specialty) : live
+        if InvestorDemo.usesLocalSampleData { return mockDoctors(for: specialty) }
+        return roster.doctors.filter { $0.specialty == specialty }
     }
 }
 
@@ -746,12 +742,10 @@ struct SpecialtyDoctorStockList: View {
     }
 
     private var doctors: [DoctorSummary] {
-        if InvestorDemo.isEnabled {
+        if InvestorDemo.usesLocalSampleData {
             return mockDoctors(for: specialty).sorted { $0.name < $1.name }
         }
-        let live = roster.doctors.filter { $0.specialty == specialty }.sorted { $0.name < $1.name }
-        if !live.isEmpty { return live }
-        return mockDoctors(for: specialty).sorted { $0.name < $1.name }
+        return roster.doctors.filter { $0.specialty == specialty }.sorted { $0.name < $1.name }
     }
 
     private var doctorNames: [String] { doctors.map(\.name) }

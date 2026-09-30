@@ -17,6 +17,9 @@ public final class AssignedShiftsStore: ObservableObject {
 
     public var currentDoctorID: UUID { SessionStore.shared.currentDoctorID }
 
+    /// Marks a shift another doctor already holds, without revealing who.
+    public static let coveredBySomeoneElse = UUID(uuidString: "00000000-0000-4000-8000-00000000F111")!
+
     /// Fast lookup for filled shifts (avoids O(n) scan per calendar cell).
     private var filledShiftIDs: Set<UUID> = []
 
@@ -91,6 +94,41 @@ public final class AssignedShiftsStore: ObservableObject {
             save()
             syncFromService()
         }
+    }
+
+    public func replaceAll(_ remote: [AssignedShift]) {
+        assignedShifts = remote
+        save()
+        syncFromService()
+    }
+
+    public func clearAll() {
+        assignedShifts = []
+        incomingTrades = []
+        outgoingTrades = []
+        save()
+    }
+
+    /// Filled days the signed-in doctor does not hold. The sentinel is never written back to the server.
+    public func markFilledByOthers(shiftIDs: Set<UUID>, knownShifts: [Shift]) {
+        let held = Set(
+            assignedShifts
+                .filter { $0.status != .canceled && $0.doctorID != Self.coveredBySomeoneElse }
+                .map(\.shift.id)
+        )
+        var byID: [UUID: Shift] = [:]
+        for shift in knownShifts { byID[shift.id] = shift }
+        let extras: [AssignedShift] = shiftIDs.compactMap { id in
+            guard !held.contains(id), let shift = byID[id] else { return nil }
+            return AssignedShift(
+                id: id,
+                shift: shift,
+                doctorID: Self.coveredBySomeoneElse,
+                status: .scheduled
+            )
+        }
+        assignedShifts = assignedShifts.filter { $0.doctorID != Self.coveredBySomeoneElse } + extras
+        save()
     }
 
     /// Repoints shifts held under a pre-Supabase doctor id. See `DoctorIdentity`.
@@ -497,6 +535,7 @@ public final class AssignedShiftsStore: ObservableObject {
 
     /// Seeds two realistic incoming trade offers into the trade service (not a local-only array).
     public func seedMockIncomingTradesIfNeeded() {
+        guard InvestorDemo.usesLocalSampleData else { return }
         syncFromService()
         guard incomingTrades.isEmpty else { return }
         DoctorRosterStore.shared.seedMockDoctorsIfNeeded()
@@ -670,6 +709,7 @@ public final class AssignedShiftsStore: ObservableObject {
     /// Seeds realistic upcoming shifts and trade partners when the doctor has no active shifts.
     /// Cleans up stale mock shifts seeded under a different doctor ID before checking.
     public func seedMockShiftsIfNeeded() {
+        guard InvestorDemo.usesLocalSampleData else { return }
         let docID = currentDoctorID
         let specialties = DoctorProfile.load()?.specialties ?? []
         assignedShifts.removeAll { Self.mockShiftIDs.contains($0.shift.id) && $0.doctorID != docID }
@@ -833,6 +873,16 @@ public final class PenaltyLedgerStore: ObservableObject {
         if changed { save() }
     }
 
+    public func replaceAll(_ next: [Entry]) {
+        entries = next
+        save()
+    }
+
+    public func clearAll() {
+        entries = []
+        save()
+    }
+
     public func totalPenalties(for doctorID: UUID) -> Decimal {
         entries.filter { $0.doctorID == doctorID }.map(\.amount).reduce(0, +)
     }
@@ -861,6 +911,12 @@ public final class SchedulingPolicyStore: ObservableObject {
     private var policiesByHospital: [UUID: SchedulingPolicy] = [:]
 
     public init() { load() }
+
+    public func clearAll() {
+        policiesByHospital = [:]
+        policy = SchedulingPolicy()
+        save()
+    }
 
     public func policy(for hospitalID: UUID) -> SchedulingPolicy {
         policiesByHospital[hospitalID] ?? policy

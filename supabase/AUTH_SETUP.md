@@ -361,3 +361,38 @@ supabase functions deploy respond-trade --project-ref yrnndfpvovuvjlzgivgu
 - iOS: Google via `ASWebAuthenticationSession` (`oncallwizard://auth-callback`); Apple via native Sign in with Apple + `id_token` grant.
 
 **Parity rule:** any auth/security change ships on web and iOS together (see `.cursor/rules/web-ios-auth-parity.mdc`).
+
+## 7. App Review demo accounts
+
+Reviewers sign in as a doctor and as a hospital. Both accounts are fully onboarded in the database, so a fresh install goes to the main app. Do not enroll MFA on either account.
+
+Apply in this order. Do not put a password in git.
+
+1. Apply migrations, including `supabase/migrations/20260930150000_app_review_access.sql`.
+2. Create the hospital login with the Auth admin API, email already confirmed, and no password yet:
+
+```bash
+curl -X POST "$SUPABASE_URL/auth/v1/admin/users" \
+  -H "apikey: $SERVICE_ROLE_KEY" \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"review-hospital@mdshift.net","email_confirm":true}'
+```
+
+3. Run `supabase/seed/app_review_demo.sql` in the SQL editor as the database owner (postgres). It is idempotent. The doctor `jdunn@eporthospine.com` (`d10290cb-1dd6-4e65-8a9d-7efb4ea83419`) must already exist.
+4. Set the hospital password in the dashboard, or:
+
+```bash
+curl -X PUT "$SUPABASE_URL/auth/v1/admin/users/<USER_ID>" \
+  -H "apikey: $SERVICE_ROLE_KEY" \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"password":"<OWNER_SETS_THIS>"}'
+```
+
+The doctor password is the one already on that account. Cleanup SQL is commented at the bottom of the seed file. Deploy `request-trade` after the migration so new trades can store the display columns.
+
+Suggested App Review notes (fill in the passwords):
+
+- Doctor: `jdunn@eporthospine.com` / `<OWNER_CHOOSES>`. Sign in with email. You land in the app, not Verify Credentials. Open the calendar for October and November 2026. Orthopedics has open days. Assigned days are 6, 14, and 22 Oct, and 3, 12, and 20 Nov. My Shifts lists those days. Incoming trades are from Maya Patel and Daniel Brooks. The outgoing trade is to Maya Patel.
+- Hospital: `review-hospital@mdshift.net` / `<OWNER_SETS_THIS>`. Sign in with email. Home shows coverage requests for Maya Patel, Grace Liu, Omar Haddad, and Daniel Brooks. Doctors shows a six-person roster, including Sofia Ramirez still pending. The calendar covers October and November 2026. 26 Nov is blocked. Savings and penalties are on the finance screens. Explore is not required.

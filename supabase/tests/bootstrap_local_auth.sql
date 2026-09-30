@@ -55,6 +55,24 @@ as $$
   select nullif(current_setting('request.jwt.claim.role', true), '');
 $$;
 
+-- Columns the hosted GoTrue schema has. The App Review seed inserts them.
+-- Nullable or defaulted so the older lockdown fixture inserts still work.
+alter table auth.users add column if not exists email_confirmed_at timestamptz;
+alter table auth.users add column if not exists email_change_token_new text default '';
+alter table auth.users add column if not exists email_change_token_current text default '';
+alter table auth.users add column if not exists reauthentication_token text default '';
+alter table auth.users add column if not exists phone_change text default '';
+alter table auth.users add column if not exists phone_change_token text default '';
+alter table auth.users add column if not exists banned_until timestamptz;
+alter table auth.users add column if not exists is_sso_user boolean not null default false;
+alter table auth.users add column if not exists is_anonymous boolean not null default false;
+
+create table if not exists auth.mfa_factors (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  status text
+);
+
 grant usage on schema auth to postgres, anon, authenticated, service_role;
 grant execute on function auth.uid() to postgres, anon, authenticated, service_role;
 grant execute on function auth.role() to postgres, anon, authenticated, service_role;

@@ -531,9 +531,45 @@ struct AuthView: View {
     }
 
     private func finishAuth(userID: UUID, email: String, role: UserRole) {
+        // Drop the previous account before the session id is rewritten onto its records.
+        LocalAccountData.prepareForSignIn(userID: userID)
         SessionStore.shared.beginSession(userID: userID, email: email, role: role)
-        let hasProfile = role == .doctor ? DoctorProfile.load() != nil : HospitalProfile.load() != nil
-        if hasProfile { auth.completeOnboarding(role: role) } else { auth.selectRole(role) }
+
+        guard SupabaseAuthService.shared.accessToken != nil else {
+            routeFromLocalProfile(role: role)
+            return
+        }
+
+        isLoading = true
+        Task {
+            do {
+                if let serverRole = try await SupabaseProfileSync.hydrate(preferredRole: role, email: email) {
+                    SessionStore.shared.beginSession(userID: userID, email: email, role: serverRole)
+                    await DataSyncCoordinator.shared.syncAll()
+                    auth.completeOnboarding(role: serverRole)
+                } else {
+                    auth.beginOnboarding(role)
+                }
+            } catch {
+                routeFromLocalProfile(role: role)
+            }
+            isLoading = false
+        }
+    }
+
+    private func routeFromLocalProfile(role: UserRole) {
+        let complete: Bool
+        switch role {
+        case .doctor:
+            complete = DoctorProfile.load()?.isOnboardingComplete == true
+        case .hospital:
+            complete = HospitalProfile.load()?.isOnboardingComplete == true
+        }
+        if complete {
+            auth.completeOnboarding(role: role)
+        } else {
+            auth.selectRole(role)
+        }
     }
 
     private func startGoogleSignIn() {

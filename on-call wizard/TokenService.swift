@@ -283,9 +283,24 @@ public final class TokenStore: ObservableObject {
         var changed = false
         for req in remote {
             if let idx = requestedDays.firstIndex(where: { $0.id == req.id }) {
-                if requestedDays[idx].status != req.status {
-                    requestedDays[idx].status = req.status
-                    requestedDays[idx].approvedAt = req.approvedAt
+                let current = requestedDays[idx]
+                let incomingName = req.doctorName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let nameChanged = !incomingName.isEmpty && incomingName != "Doctor" && incomingName != current.doctorName
+                if current.status != req.status || nameChanged || current.credential != req.credential {
+                    requestedDays[idx] = TokenRequest(
+                        id: current.id,
+                        doctorID: current.doctorID,
+                        doctorName: nameChanged ? incomingName : current.doctorName,
+                        credential: req.credential.isEmpty ? current.credential : req.credential,
+                        hospitalID: current.hospitalID,
+                        date: current.date,
+                        status: req.status,
+                        hospitalName: req.hospitalName.isEmpty ? current.hospitalName : req.hospitalName,
+                        specialty: current.specialty,
+                        requestedAt: current.requestedAt,
+                        approvedAt: req.approvedAt ?? current.approvedAt,
+                        shiftRate: req.shiftRate ?? current.shiftRate
+                    )
                     changed = true
                 }
             } else {
@@ -294,6 +309,16 @@ public final class TokenStore: ObservableObject {
             }
         }
         if changed { save() }
+    }
+
+    public func replaceRemote(_ remote: [TokenRequest]) {
+        requestedDays = remote
+        save()
+    }
+
+    public func clearAll() {
+        requestedDays = []
+        save()
     }
 
     private func load() {

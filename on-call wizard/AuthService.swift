@@ -42,15 +42,19 @@ final class AuthService: ObservableObject {
     // MARK: - Role Selection
 
     func selectRole(_ role: UserRole) {
-        let hasDoctor   = DoctorProfile.load() != nil
-        let hasHospital = HospitalProfile.load() != nil
-
         switch role {
         case .doctor:
-            state = hasDoctor ? .locked(.doctor) : .needsOnboarding(.doctor)
+            let complete = DoctorProfile.load()?.isOnboardingComplete == true
+            state = complete ? .locked(.doctor) : .needsOnboarding(.doctor)
         case .hospital:
-            state = hasHospital ? .locked(.hospital) : .needsOnboarding(.hospital)
+            let complete = HospitalProfile.load()?.isOnboardingComplete == true
+            state = complete ? .locked(.hospital) : .needsOnboarding(.hospital)
         }
+    }
+
+    /// Server profile is missing or unfinished. Do not treat a leftover device copy as done.
+    func beginOnboarding(_ role: UserRole) {
+        state = .needsOnboarding(role)
     }
 
     // MARK: - Biometric Auth
@@ -97,6 +101,7 @@ final class AuthService: ObservableObject {
     // MARK: - Sign Out
 
     func signOut() {
+        LocalAccountData.clearOnSignOut()
         UserDefaults.standard.removeObject(forKey: roleKey)
         SessionStore.shared.endSession()
         SupabaseAuthService.shared.signOut()

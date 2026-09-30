@@ -115,6 +115,12 @@ export async function hydrateLocalProfiles({ userID, role, email }) {
       .maybeSingle();
     if (error) throw error;
     if (!data) return null;
+    let schedulingPolicy = null;
+    try {
+      schedulingPolicy = await fetchPolicy(data.id);
+    } catch {
+      schedulingPolicy = null;
+    }
     return {
       kind: "hospital",
       profile: {
@@ -126,6 +132,7 @@ export async function hydrateLocalProfiles({ userID, role, email }) {
         verificationStatus: data.verification_status || "pending",
         verificationFlags: data.verification_flags || [],
         npiRegistryName: data.npi_registry_name || null,
+        ...(schedulingPolicy ? { schedulingPolicy } : {}),
         priorityPosting: false,
         autoPay: false
       }
@@ -287,12 +294,19 @@ export async function createAssignment(shiftId, doctorId, meta = {}) {
 export async function fetchTokenRequests(hospitalID, doctorID) {
   if (!isConfigured()) return [];
   const supabase = getSupabase();
-  let q = supabase.from("token_requests").select("*").order("requested_at", { ascending: false });
-  if (hospitalID) q = q.eq("hospital_id", hospitalID);
-  if (doctorID) q = q.eq("doctor_id", doctorID);
-  const { data, error } = await q.limit(200);
-  if (error) throw error;
-  return (data || []).map(mapTokenRow);
+  const load = async (table) => {
+    let q = supabase.from(table).select("*").order("requested_at", { ascending: false });
+    if (hospitalID) q = q.eq("hospital_id", hospitalID);
+    if (doctorID) q = q.eq("doctor_id", doctorID);
+    const { data, error } = await q.limit(200);
+    if (error) throw error;
+    return (data || []).map(mapTokenRow);
+  };
+  try {
+    return await load("token_request_queue");
+  } catch {
+    return await load("token_requests");
+  }
 }
 
 export async function submitTokenRequest(req) {

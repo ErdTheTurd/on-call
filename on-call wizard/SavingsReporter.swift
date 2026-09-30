@@ -151,6 +151,11 @@ public final class SavingsReporter: ObservableObject {
         )
     }
 
+    public func clearAll() {
+        events = []
+        save()
+    }
+
     /// Pulls this hospital's rows (including ones doctors wrote) into the local cache.
     public func refresh(hospitalID: UUID) async {
         guard SupabaseConfig.isConfigured,

@@ -261,6 +261,7 @@ async function boot() {
           }
         } catch { /* keep savedRole */ }
 
+        appStore.prepareForUser(sessionUser.id);
         beginSession({
           userID: sessionUser.id,
           email: sessionUser.email,

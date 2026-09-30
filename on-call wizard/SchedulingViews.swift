@@ -252,7 +252,7 @@ struct SpecialtyPayEditor: View {
 
     // MARK: Derived
 
-    private var useMockData: Bool { roster.doctors.isEmpty }
+    private var useMockData: Bool { InvestorDemo.usesLocalSampleData && roster.doctors.isEmpty }
 
     private var specialties: [String] {
         useMockData

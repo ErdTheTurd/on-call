@@ -138,6 +138,16 @@ final class InMemoryHospitalService: HospitalService, ObservableObject {
         shift(on: date, specialty: "Internal Medicine", hospitalID: hospitalID, hospitalName: hospitalName, policy: policy)
     }
 
+    func replaceAll(_ next: [Shift]) {
+        shifts = next
+        persist()
+    }
+
+    func clearAll() {
+        shifts = []
+        persist()
+    }
+
     func upsertShift(_ shift: Shift) {
         let day = shift.date.onlyDate()
         if let idx = shifts.firstIndex(where: {

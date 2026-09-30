@@ -905,7 +905,8 @@ struct DoctorHomeView: View {
             )
         }
         .onAppear {
-            // Seed only this doctor's specialties for ~2 months — not every specialty for 120 days.
+            // Explore still fills a local board. A signed-in doctor uses the shifts just loaded from the server.
+            guard InvestorDemo.usesLocalSampleData else { return }
             let specs = profile?.specialties.isEmpty == false
                 ? profile!.specialties
                 : [doctorSpecialty]
@@ -1582,6 +1583,7 @@ struct HospitalRootView: View {
         .onAppear {
             if let profile {
                 policyBootstrap(profile)
+                guard InvestorDemo.usesLocalSampleData else { return }
                 InvestorDemo.bootstrapIfNeeded(
                     hospitalID: profile.id,
                     hospitalName: profile.name
@@ -2400,7 +2402,7 @@ struct AlterShiftsView: View {
             .navigationTitle("Alter Shifts")
             .onAppear {
                 policyStore.loadForHospital(profile)
-                if let hospitalID {
+                if let hospitalID, InvestorDemo.usesLocalSampleData {
                     hospitalService.ensureDailyShifts(
                         from: Date(),
                         days: 120,
@@ -2414,6 +2416,8 @@ struct AlterShiftsView: View {
                         hospitalName: hospitalName,
                         policy: policyStore.policy
                     )
+                }
+                if hospitalID != nil {
                     loadShift(for: selectedDate)
                 }
             }
@@ -2472,7 +2476,7 @@ struct AlterShiftsView: View {
                                 loadShift(for: date.onlyDate())
                             }
                             .onChange(of: calendarMonth) { _, month in
-                                guard let hospitalID else { return }
+                                guard InvestorDemo.usesLocalSampleData, let hospitalID else { return }
                                 hospitalService.ensureMonthShifts(
                                     for: month,
                                     hospitalID: hospitalID,
@@ -2824,19 +2828,35 @@ struct AlterShiftsView: View {
                 policyStore.policy.caseVolumeRewardAuto = assigned.caseVolumeRewardAuto
             }
         }
-        hospitalService.ensureMonthShifts(
-            for: date,
-            hospitalID: hospitalID,
-            hospitalName: hospitalName,
-            policy: policyStore.policy
-        )
-        let shift = hospitalService.shift(
-            on: date,
-            specialty: specialty,
-            hospitalID: hospitalID,
-            hospitalName: hospitalName,
-            policy: policyStore.policy
-        )
+        if InvestorDemo.usesLocalSampleData {
+            hospitalService.ensureMonthShifts(
+                for: date,
+                hospitalID: hospitalID,
+                hospitalName: hospitalName,
+                policy: policyStore.policy
+            )
+        }
+        let day = date.onlyDate()
+        let existing = hospitalService.shifts.first {
+            $0.hospitalID == hospitalID &&
+            $0.specialty == specialty &&
+            Calendar.current.isDate($0.date, inSameDayAs: day)
+        }
+        let shift: Shift
+        if let existing {
+            shift = existing
+        } else if InvestorDemo.usesLocalSampleData {
+            shift = hospitalService.shift(
+                on: date,
+                specialty: specialty,
+                hospitalID: hospitalID,
+                hospitalName: hospitalName,
+                policy: policyStore.policy
+            )
+        } else {
+            editingShiftID = nil
+            return
+        }
         editingShiftID = shift.id
         useAlgorithm = policyStore.policy.usesAlgorithmPricing(for: specialty)
         if case .flat(let r) = shift.escalationMode {
@@ -3343,7 +3363,7 @@ struct HospitalAnalyticsView: View {
 
     /// Prefer full mock analytics in investor demo (calendar seed has fills but no trade/cancel ledger).
     private var noRealData: Bool {
-        InvestorDemo.isEnabled || (hospitalShifts.isEmpty && hospitalLedger.isEmpty)
+        InvestorDemo.usesLocalSampleData
     }
 
     private var tradedCount:   Int { noRealData ? 34  : tradedShifts.count }
@@ -3827,7 +3847,7 @@ struct SpecialtySavingsChart: View {
         allSpecialtyLedger.filter { Calendar.current.component(.year, from: $0.createdAt) == currentYear }
     }
     private var noRealData: Bool {
-        InvestorDemo.isEnabled || (specialtyLedger.isEmpty && specialtyShifts.isEmpty)
+        InvestorDemo.usesLocalSampleData
     }
 
     private var tradedCount:   Int    { noRealData ? Int((34.0 * (0.4 + mockScale * 0.6)).rounded()) : specialtyTradedShifts.count }

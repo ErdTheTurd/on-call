@@ -11,8 +11,8 @@ Paste these into App Store Connect. Screenshots live in `../AppStoreScreenshots/
 | SKU | `mdshift-ios` (or your ASC SKU) |
 | Primary category | Medical |
 | Secondary | Business (optional) |
-| Version | 1.0 |
-| Build | 10 |
+| Version | 1.0.1 |
+| Build | 11 |
 | Copyright | 2026 Edward Dunn / MD Shift |
 
 ## URLs

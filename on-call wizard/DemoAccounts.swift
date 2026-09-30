@@ -61,6 +61,7 @@ enum DemoAccounts {
     }
 
     static func enterAdminShowcase(auth: AuthService) {
+        LocalAccountData.prepareForSignIn(userID: adminUserID)
         SessionStore.shared.beginSession(
             userID: adminUserID,
             email: "info@erdanimates.shop",
@@ -71,6 +72,7 @@ enum DemoAccounts {
 
     static func enter(email: String, role: UserRole, auth: AuthService) {
         let userID = role == .doctor ? doctorUserID : hospitalUserID
+        LocalAccountData.prepareForSignIn(userID: userID)
         seedProfile(email: email, role: role, userID: userID)
         SessionStore.shared.beginSession(userID: userID, email: email, role: role)
 

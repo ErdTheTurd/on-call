@@ -278,6 +278,20 @@ public final class ShiftTradeService {
         persist()
     }
 
+    public func clearAll() {
+        shifts.removeAll()
+        trades.removeAll()
+        policies.removeAll()
+        persist()
+    }
+
+    public func replaceTrades(_ remote: [ShiftTradeRequest]) {
+        var next: [UUID: ShiftTradeRequest] = [:]
+        for trade in remote { next[trade.id] = trade }
+        trades = next
+        persist()
+    }
+
     public func cancelShift(shiftID: UUID, by doctorID: UUID) throws -> Decimal {
         let policy: SchedulingPolicy
         let start: Date
