@@ -73,6 +73,23 @@ begin
   ) then
     raise exception 'token_request_queue exposes a credential column it should not';
   end if;
+  if not exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'token_request_queue'
+      and c.reloptions @> array['security_invoker=true']
+  ) or not exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'shift_coverage'
+      and c.reloptions @> array['security_invoker=true']
+  ) then
+    raise exception 'approval or coverage view is not security_invoker';
+  end if;
 end $$;
 
 -- A real, non-demo hospital so we can prove ordinary doctors still see ordinary shifts.
@@ -187,6 +204,10 @@ begin
   end if;
   if (select count(*) from public.assignments where doctor_id = auth.uid()) <> 6 then
     raise exception 'demo doctor cannot see their six assignments';
+  end if;
+  if (select count(*) from public.shift_coverage
+      where hospital_id = 'de000000-0000-4000-8000-000000000001' and is_filled) <> 124 then
+    raise exception 'demo doctor cannot see which demo shifts are filled';
   end if;
   if (select count(*) from public.trade_requests
       where state = 'pending' and (from_doctor_id = auth.uid() or to_doctor_id = auth.uid())) <> 3 then

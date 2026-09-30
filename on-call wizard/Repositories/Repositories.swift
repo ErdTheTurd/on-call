@@ -478,8 +478,8 @@ enum SupabaseProfileSync {
     }
 
     private static func fetchServerRole(userID: UUID, token: String) async throws -> UserRole? {
-        let rows = try await rows(path: "rest/v1/profiles?id=eq.\(userID.uuidString)&select=role", token: token)
-        guard let raw = rows.first?["role"] as? String else { return nil }
+        let profileRows = try await Self.rows(path: "rest/v1/profiles?id=eq.\(userID.uuidString)&select=role", token: token)
+        guard let raw = profileRows.first?["role"] as? String else { return nil }
         switch raw.lowercased() {
         case "hospital": return .hospital
         case "doctor": return .doctor
@@ -488,8 +488,8 @@ enum SupabaseProfileSync {
     }
 
     private static func fetchDoctor(userID: UUID, email: String, token: String) async throws -> DoctorProfile? {
-        let rows = try await rows(path: "rest/v1/doctor_profiles?profile_id=eq.\(userID.uuidString)&select=*", token: token)
-        guard let row = rows.first else { return nil }
+        let profileRows = try await Self.rows(path: "rest/v1/doctor_profiles?profile_id=eq.\(userID.uuidString)&select=*", token: token)
+        guard let row = profileRows.first else { return nil }
         let credential = DoctorProfile.CredentialType(rawValue: row["credential"] as? String ?? "") ?? .md
         let status = VerificationStatus(rawValue: row["verification_status"] as? String ?? "") ?? .pending
         return DoctorProfile(
@@ -512,11 +512,11 @@ enum SupabaseProfileSync {
     }
 
     private static func fetchHospital(userID: UUID, email: String, token: String) async throws -> HospitalProfile? {
-        let rows = try await rows(path: "rest/v1/hospital_profiles?profile_id=eq.\(userID.uuidString)&select=*", token: token)
-        guard let row = rows.first, let id = UUID(uuidString: row["id"] as? String ?? "") else { return nil }
+        let profileRows = try await Self.rows(path: "rest/v1/hospital_profiles?profile_id=eq.\(userID.uuidString)&select=*", token: token)
+        guard let row = profileRows.first, let id = UUID(uuidString: row["id"] as? String ?? "") else { return nil }
         let status = VerificationStatus(rawValue: row["verification_status"] as? String ?? "") ?? .pending
         var policy = SchedulingPolicy()
-        let policyRows = try await rows(
+        let policyRows = try await Self.rows(
             path: "rest/v1/scheduling_policies?hospital_id=eq.\(id.uuidString)&select=policy",
             token: token
         )

@@ -174,10 +174,71 @@ grant execute on function private.guard_hospital_work_email() to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Names on the approval queue. Display name and credential only.
+-- The views run as the caller (security_invoker). The helpers below are the
+-- only place that reads another person's profile or assignment, and they
+-- return the same columns the views always exposed.
 -- ---------------------------------------------------------------------------
 
+create or replace function private.token_request_doctor_card(doctor uuid, hospital uuid)
+returns table (doctor_name text, credential text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    btrim(concat_ws(
+      ' ',
+      nullif(btrim(d.first_name), ''),
+      nullif(btrim(d.last_name), '')
+    )),
+    d.credential
+  from public.doctor_profiles d
+  where d.profile_id = doctor
+    and (
+      private.is_admin()
+      or doctor = auth.uid()
+      or private.owns_hospital(hospital)
+    )
+    and exists (
+      select 1
+      from public.token_requests tr
+      where tr.doctor_id = doctor
+        and tr.hospital_id = hospital
+    );
+$$;
+
+revoke all on function private.token_request_doctor_card(uuid, uuid) from public, anon;
+grant execute on function private.token_request_doctor_card(uuid, uuid) to authenticated, service_role;
+
+create or replace function private.token_request_hospital_name(hospital uuid, doctor uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select hp.name
+  from public.hospital_profiles hp
+  where hp.id = hospital
+    and (
+      private.is_admin()
+      or private.owns_hospital(hospital)
+      or doctor = auth.uid()
+    )
+    and exists (
+      select 1
+      from public.token_requests tr
+      where tr.hospital_id = hospital
+        and tr.doctor_id = doctor
+    );
+$$;
+
+revoke all on function private.token_request_hospital_name(uuid, uuid) from public, anon;
+grant execute on function private.token_request_hospital_name(uuid, uuid) to authenticated, service_role;
+
 create or replace view public.token_request_queue
-with (security_barrier = true, security_invoker = false) as
+with (security_barrier = true, security_invoker = true) as
 select
   tr.id,
   tr.doctor_id,
@@ -186,19 +247,11 @@ select
   tr.status,
   tr.specialty,
   tr.requested_at,
-  btrim(concat_ws(
-    ' ',
-    nullif(btrim(d.first_name), ''),
-    nullif(btrim(d.last_name), '')
-  )) as doctor_name,
-  d.credential,
-  hp.name as hospital_name
+  card.doctor_name,
+  card.credential,
+  private.token_request_hospital_name(tr.hospital_id, tr.doctor_id) as hospital_name
 from public.token_requests tr
-join public.doctor_profiles d on d.profile_id = tr.doctor_id
-join public.hospital_profiles hp on hp.id = tr.hospital_id
-where private.is_admin()
-   or tr.doctor_id = auth.uid()
-   or private.owns_hospital(tr.hospital_id);
+cross join lateral private.token_request_doctor_card(tr.doctor_id, tr.hospital_id) card;
 
 comment on view public.token_request_queue is
   'Token requests plus the doctor display name and credential. The hospital that owns the request can read that name. NPI, license, DEA, and email are not in this view.';
@@ -207,21 +260,46 @@ grant select on public.token_request_queue to authenticated, service_role;
 revoke all on public.token_request_queue from anon, public;
 
 -- Filled or not, for shifts the caller can already see. No doctor identity.
+-- Returns null when the caller cannot see the shift, so a direct call does
+-- not reveal coverage of a hidden hospital.
+create or replace function private.shift_is_filled(target uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when private.is_admin()
+      or private.owns_hospital((select s.hospital_id from public.shifts s where s.id = target))
+      or (
+        private.is_doctor()
+        and private.hospital_visible_to_doctor((select s.hospital_id from public.shifts s where s.id = target))
+      )
+    then exists (
+      select 1
+      from public.assignments a
+      where a.shift_id = target
+        and a.status::text <> 'canceled'
+    )
+    else null
+  end;
+$$;
+
+revoke all on function private.shift_is_filled(uuid) from public, anon;
+grant execute on function private.shift_is_filled(uuid) to authenticated, service_role;
+
 create or replace view public.shift_coverage
-with (security_barrier = true, security_invoker = false) as
-select
-  s.id as shift_id,
-  s.hospital_id,
-  exists (
-    select 1
-    from public.assignments a
-    where a.shift_id = s.id
-      and a.status::text <> 'canceled'
-  ) as is_filled
-from public.shifts s
-where private.is_admin()
-   or private.owns_hospital(s.hospital_id)
-   or (private.is_doctor() and private.hospital_visible_to_doctor(s.hospital_id));
+with (security_barrier = true, security_invoker = true) as
+select shift_id, hospital_id, is_filled
+from (
+  select
+    s.id as shift_id,
+    s.hospital_id,
+    private.shift_is_filled(s.id) as is_filled
+  from public.shifts s
+) coverage
+where is_filled is not null;
 
 comment on view public.shift_coverage is
   'Whether a visible shift is filled. Does not name the doctor who holds it.';
