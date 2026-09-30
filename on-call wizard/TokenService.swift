@@ -311,8 +311,34 @@ public final class TokenStore: ObservableObject {
         if changed { save() }
     }
 
+    /// Server rows win. A pending request that never uploaded stays until it does.
+    /// `approvedAt` stays when the server omits it.
     public func replaceRemote(_ remote: [TokenRequest]) {
-        requestedDays = remote
+        let localByID = Dictionary(requestedDays.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let remoteIDs = Set(remote.map(\.id))
+        var merged = remote.map { incoming -> TokenRequest in
+            guard let local = localByID[incoming.id] else { return incoming }
+            let incomingName = incoming.doctorName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = (!incomingName.isEmpty && incomingName != "Doctor") ? incomingName : local.doctorName
+            return TokenRequest(
+                id: incoming.id,
+                doctorID: incoming.doctorID,
+                doctorName: name,
+                credential: incoming.credential.isEmpty ? local.credential : incoming.credential,
+                hospitalID: incoming.hospitalID,
+                date: incoming.date,
+                status: incoming.status,
+                hospitalName: incoming.hospitalName.isEmpty ? local.hospitalName : incoming.hospitalName,
+                specialty: incoming.specialty.isEmpty ? local.specialty : incoming.specialty,
+                requestedAt: incoming.requestedAt,
+                approvedAt: incoming.approvedAt ?? local.approvedAt,
+                shiftRate: incoming.shiftRate ?? local.shiftRate
+            )
+        }
+        for local in requestedDays where !remoteIDs.contains(local.id) && local.status == .pending {
+            merged.append(local)
+        }
+        requestedDays = merged
         save()
     }
 

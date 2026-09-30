@@ -748,10 +748,13 @@ export function authState() {
   return { kind: "authenticated", role };
 }
 
-export function signOut() {
+export async function signOut() {
   appStore.clearUserData();
-  if (isConfigured()) {
-    try { getSupabase().auth.signOut(); } catch { /* ignore */ }
+  if (!isConfigured()) return;
+  try {
+    await getSupabase().auth.signOut();
+  } catch {
+    /* Local data is already cleared. */
   }
 }
 

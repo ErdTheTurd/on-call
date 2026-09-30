@@ -320,4 +320,159 @@ end $$;
 
 reset role;
 
+-- ---------------------------------------------------------------------------
+-- More than 1000 older shifts must not hide the Oct–Nov board.
+-- The client window is the UTC start of the month containing 2026-09-30,
+-- minus 7 days (2026-08-25), paged at 1000. An unfiltered oldest page of
+-- 1000 does not include 20 Nov.
+-- ---------------------------------------------------------------------------
+
+insert into public.shifts (id, hospital_id, hospital_name, specialty, date, rate_floor)
+select gen_random_uuid(),
+       'de000000-0000-4000-8000-000000000001',
+       'MD Shift Demo Medical Center',
+       'Orthopedics',
+       ((date '2020-01-01' + g.i) + time '12:00') at time zone 'UTC',
+       100
+from generate_series(0, 1099) as g(i);
+
+insert into public.shifts (id, hospital_id, hospital_name, specialty, date, rate_floor)
+select gen_random_uuid(),
+       'aa000000-0000-4000-8000-0000000000cc',
+       'Real Community Hospital',
+       'History ' || (g.i % 50),
+       ((date '2026-08-25' + (g.i / 50)) + time '12:00') at time zone 'UTC',
+       100
+from generate_series(0, 999) as g(i);
+
+select set_config('request.jwt.claim.sub', 'd10290cb-1dd6-4e65-8a9d-7efb4ea83419', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"d10290cb-1dd6-4e65-8a9d-7efb4ea83419","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare
+  v_hosp uuid := 'de000000-0000-4000-8000-000000000001';
+  v_window timestamptz := timestamptz '2026-08-25 00:00:00+00';
+  v_nov20 uuid;
+  v_page0 int;
+  v_oct_nov int;
+  v_open int;
+  v_assigned int;
+begin
+  select id into v_nov20
+  from public.shifts
+  where hospital_id = v_hosp
+    and specialty = 'Orthopedics'
+    and date = timestamptz '2026-11-20 12:00:00+00';
+  if v_nov20 is null then
+    raise exception '20 Nov Orthopedics shift is missing';
+  end if;
+
+  if exists (
+    select 1 from (
+      select id from public.shifts
+      order by date asc, id asc
+      limit 1000
+    ) oldest
+    where oldest.id = v_nov20
+  ) then
+    raise exception 'unfiltered first 1000 rows still include the 20 Nov shift';
+  end if;
+
+  select count(*) into v_page0
+  from (
+    select id from public.shifts
+    where date >= v_window
+    order by date asc, id asc
+    limit 1000 offset 0
+  ) page;
+  if v_page0 <> 1000 then
+    raise exception 'expected a full first window page, got %', v_page0;
+  end if;
+  if exists (
+    select 1 from (
+      select id from public.shifts
+      where date >= v_window
+      order by date asc, id asc
+      limit 1000 offset 0
+    ) page
+    where page.id = v_nov20
+  ) then
+    raise exception '20 Nov fit on the first window page, so paging is not what saved it';
+  end if;
+
+  select count(*) into v_oct_nov
+  from (
+    (
+      select id from public.shifts
+      where date >= v_window
+      order by date asc, id asc
+      limit 1000 offset 0
+    )
+    union all
+    (
+      select id from public.shifts
+      where date >= v_window
+      order by date asc, id asc
+      limit 1000 offset 1000
+    )
+  ) pages
+  join public.shifts s on s.id = pages.id
+  where s.hospital_id = v_hosp
+    and s.date >= timestamptz '2026-10-01 00:00:00+00'
+    and s.date < timestamptz '2026-12-01 00:00:00+00';
+  if v_oct_nov <> 240 then
+    raise exception 'paged window returned % of 240 Oct-Nov demo shifts', v_oct_nov;
+  end if;
+
+  select count(*) into v_assigned
+  from (
+    select id from public.shifts
+    where date >= v_window
+    order by date asc, id asc
+    limit 1000 offset 1000
+  ) page
+  join public.assignments a on a.shift_id = page.id
+  where page.id = v_nov20
+    and a.doctor_id = auth.uid()
+    and a.status <> 'canceled';
+  if v_assigned <> 1 then
+    raise exception '20 Nov assigned shift was not on a later page';
+  end if;
+
+  select count(*) into v_open
+    from (
+      select s.id
+      from (
+        (
+          select id from public.shifts
+          where date >= v_window
+          order by date asc, id asc
+          limit 1000 offset 0
+        )
+        union all
+        (
+          select id from public.shifts
+          where date >= v_window
+          order by date asc, id asc
+          limit 1000 offset 1000
+        )
+      ) pages
+    join public.shifts s on s.id = pages.id
+    where s.hospital_id = v_hosp
+      and s.date >= timestamptz '2026-10-01 00:00:00+00'
+      and s.date < timestamptz '2026-12-01 00:00:00+00'
+      and not exists (
+        select 1 from public.shift_coverage c
+        where c.shift_id = s.id and c.is_filled
+      )
+  ) open_shifts;
+  if v_open <> 116 then
+    raise exception 'paged window returned % open Oct-Nov shifts, expected 116', v_open;
+  end if;
+end $$;
+
+reset role;
+
 rollback;

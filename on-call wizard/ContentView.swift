@@ -258,6 +258,7 @@ final class DoctorPreferencesStore: ObservableObject {
     }
 
     private func save() {
+        guard !suppressSave else { return }
         let s = Stored(showOnlyMySpecialties: showOnlyMySpecialties,
                        hiddenHospitalIDs: Array(hiddenHospitalIDs),
                        hiddenSpecialties: Array(hiddenSpecialties),
@@ -266,6 +267,8 @@ final class DoctorPreferencesStore: ObservableObject {
                        notifyApprovals: notifyApprovals)
         if let data = try? JSONEncoder().encode(s) { UserDefaults.standard.set(data, forKey: Self.key) }
     }
+
+    private var suppressSave = false
 
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: Self.key),
@@ -276,6 +279,19 @@ final class DoctorPreferencesStore: ObservableObject {
         notifyNewShifts = s.notifyNewShifts
         notifyTradeRequests = s.notifyTradeRequests
         notifyApprovals = s.notifyApprovals
+    }
+
+    /// Drops this account's filters so the next person on the device starts from defaults.
+    func clearAll() {
+        suppressSave = true
+        showOnlyMySpecialties = true
+        hiddenHospitalIDs = []
+        hiddenSpecialties = []
+        notifyNewShifts = true
+        notifyTradeRequests = true
+        notifyApprovals = true
+        suppressSave = false
+        UserDefaults.standard.removeObject(forKey: Self.key)
     }
 }
 
@@ -2855,6 +2871,8 @@ struct AlterShiftsView: View {
             )
         } else {
             editingShiftID = nil
+            useCustomRate = false
+            flatRate = policyStore.policy.specialtyBaseRates[specialty] ?? 2000
             return
         }
         editingShiftID = shift.id
@@ -2864,6 +2882,7 @@ struct AlterShiftsView: View {
             flatRate = r
         } else {
             useCustomRate = false
+            flatRate = shift.rateFloor
         }
         if useAlgorithm {
             refreshRate(fallback: shift.rateFloor)

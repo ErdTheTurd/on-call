@@ -381,7 +381,13 @@ begin
      md5('mdshift-review-demo|shift|2026-10-11|Orthopedics')::uuid, 'cancel', 425, timestamptz '2026-09-24 15:00:00+00'),
     (md5('mdshift-review-demo|penalty|2')::uuid, f_liu, c_hosp,
      md5('mdshift-review-demo|shift|2026-10-15|Emergency Medicine')::uuid, 'trade', 75, timestamptz '2026-09-26 15:00:00+00')
-  on conflict (id) do nothing;
+  on conflict (id) do update set
+    doctor_id = excluded.doctor_id,
+    hospital_id = excluded.hospital_id,
+    shift_id = excluded.shift_id,
+    type = excluded.type,
+    amount = excluded.amount,
+    created_at = excluded.created_at;
 
   insert into public.hospital_savings_events (event_key, hospital_id, hospital_name, shift_id, specialty, kind, amount,
       occurred_at, source, metadata, created_by)

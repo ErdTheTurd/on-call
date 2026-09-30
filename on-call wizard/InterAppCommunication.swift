@@ -48,6 +48,14 @@ final class InMemoryDoctorService: DoctorService, ObservableObject {
         UserDefaults.standard.set(daysAhead, forKey: daysAheadKey)
     }
 
+    func clearAvailability() {
+        minRate = 120
+        daysAhead = 7
+        acceptedShifts = []
+        UserDefaults.standard.removeObject(forKey: minRateKey)
+        UserDefaults.standard.removeObject(forKey: daysAheadKey)
+    }
+
     func recommendedShifts() async throws -> [Shift] {
         try await openShifts(for: DoctorProfile.load())
     }

@@ -202,8 +202,12 @@ struct AuthView: View {
                 let mail = email.isEmpty ? (pendingVerificationEmail ?? "user") : normalizeEmail(email)
                 await MainActor.run {
                     isLoading = false
+                    guard let userID = SupabaseAuthService.shared.currentUserID else {
+                        errorMessage = "Could not confirm your account. Sign in again."
+                        return
+                    }
                     mfaChallenge = false
-                    finishAuth(userID: SupabaseAuthService.shared.currentUserID ?? UUID(), email: mail, role: role)
+                    finishAuth(userID: userID, email: mail, role: role)
                 }
             } catch {
                 await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }
@@ -222,10 +226,14 @@ struct AuthView: View {
                 try await SupabaseAuthService.shared.verifyTotp(factorId: enroll.factorId, code: code)
                 await MainActor.run {
                     isLoading = false
+                    guard let userID = SupabaseAuthService.shared.currentUserID else {
+                        errorMessage = "Could not confirm your account. Sign in again."
+                        return
+                    }
                     mfaEnroll = nil
                     mfaCode = ""
                     let mail = pendingVerificationEmail ?? normalizeEmail(email)
-                    finishAuth(userID: SupabaseAuthService.shared.currentUserID ?? UUID(), email: mail, role: selectedRole)
+                    finishAuth(userID: userID, email: mail, role: selectedRole)
                 }
             } catch {
                 await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }

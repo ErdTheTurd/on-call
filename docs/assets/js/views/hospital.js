@@ -914,7 +914,7 @@ export function bindHospital(root, state, update) {
     panel.addEventListener("click", (e) => e.stopPropagation());
   });
   root.querySelectorAll("[data-sign-out]").forEach((btn) => {
-    btn.addEventListener("click", () => { signOut(); update({ route: "landing" }); });
+    btn.addEventListener("click", () => { void signOut().then(() => update({ route: "landing" })); });
   });
 
   root.querySelectorAll("[data-cal-nav]").forEach((btn) => {

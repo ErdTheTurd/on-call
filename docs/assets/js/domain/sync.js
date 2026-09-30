@@ -1,4 +1,4 @@
-import { getSupabase, isConfigured } from "../supabase-client.js";
+import { getSupabase, isConfigured, fetchAllPages, shiftWindowStart } from "../supabase-client.js";
 import { normalizeShift } from "../shift-math.js";
 import { defaultPolicy } from "./policy.js";
 
@@ -172,11 +172,17 @@ export async function hydrateLocalProfiles({ userID, role, email }) {
 export async function fetchAllShifts(hospitalID) {
   if (!isConfigured()) return [];
   const supabase = getSupabase();
-  let q = supabase.from("shifts").select("*").gte("date", new Date().toISOString()).order("date").limit(500);
-  if (hospitalID) q = q.eq("hospital_id", hospitalID);
-  const { data, error } = await q;
-  if (error) throw error;
-  return (data || []).map(mapShiftRow);
+  const windowStart = shiftWindowStart();
+  const rows = await fetchAllPages((from, to) => {
+    let q = supabase.from("shifts").select("*")
+      .gte("date", windowStart)
+      .order("date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (hospitalID) q = q.eq("hospital_id", hospitalID);
+    return q;
+  });
+  return rows.map(mapShiftRow);
 }
 
 /** A shift's natural identity: one hospital, one specialty, one calendar day. */
@@ -251,13 +257,18 @@ export async function upsertShift(shift) {
 export async function fetchAssignments(doctorID, hospitalID = null) {
   if (!isConfigured()) return [];
   const supabase = getSupabase();
-  const embed = hospitalID ? "*, shifts!inner(*)" : "*, shifts(*)";
-  let q = supabase.from("assignments").select(embed).order("assigned_at", { ascending: false });
-  if (doctorID) q = q.eq("doctor_id", doctorID);
-  if (hospitalID) q = q.eq("shifts.hospital_id", hospitalID);
-  const { data, error } = await q.limit(200);
-  if (error) throw error;
-  return (data || []).map((row) => mapAssignmentRow(row, row.shifts ? mapShiftRow(row.shifts) : null));
+  const windowStart = shiftWindowStart();
+  const embed = "*, shifts!inner(*)";
+  const rows = await fetchAllPages((from, to) => {
+    let q = supabase.from("assignments").select(embed)
+      .gte("shifts.date", windowStart)
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (doctorID) q = q.eq("doctor_id", doctorID);
+    if (hospitalID) q = q.eq("shifts.hospital_id", hospitalID);
+    return q;
+  });
+  return rows.map((row) => mapAssignmentRow(row, row.shifts ? mapShiftRow(row.shifts) : null));
 }
 
 export async function createAssignment(shiftId, doctorId, meta = {}) {
@@ -295,16 +306,25 @@ export async function fetchTokenRequests(hospitalID, doctorID) {
   if (!isConfigured()) return [];
   const supabase = getSupabase();
   const load = async (table) => {
-    let q = supabase.from(table).select("*").order("requested_at", { ascending: false });
-    if (hospitalID) q = q.eq("hospital_id", hospitalID);
-    if (doctorID) q = q.eq("doctor_id", doctorID);
-    const { data, error } = await q.limit(200);
-    if (error) throw error;
-    return (data || []).map(mapTokenRow);
+    const rows = await fetchAllPages((from, to) => {
+      let q = supabase.from(table).select("*")
+        .order("requested_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to);
+      if (hospitalID) q = q.eq("hospital_id", hospitalID);
+      if (doctorID) q = q.eq("doctor_id", doctorID);
+      return q;
+    });
+    return rows.map(mapTokenRow);
   };
   try {
     return await load("token_request_queue");
-  } catch {
+  } catch (error) {
+    const message = String(error?.message || error || "").toLowerCase();
+    const viewMissing = message.includes("token_request_queue")
+      || message.includes("schema cache")
+      || message.includes("pgrst205");
+    if (!viewMissing) throw error;
     return await load("token_requests");
   }
 }
@@ -363,12 +383,13 @@ export async function updateTokenStatus(id, status) {
 export async function fetchRoster(hospitalId) {
   if (!isConfigured()) return [];
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const data = await fetchAllPages((from, to) => supabase
     .from("hospital_roster")
     .select("doctor_id, auto_approve, first_name, last_name, credential, specialties, verification_status")
-    .eq("hospital_id", hospitalId);
-  if (error) throw error;
-  return (data || []).map((row) => ({
+    .eq("hospital_id", hospitalId)
+    .order("doctor_id", { ascending: true })
+    .range(from, to));
+  return data.map((row) => ({
     id: row.doctor_id,
     name: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
     credential: row.credential,
@@ -427,12 +448,13 @@ export async function upsertPolicy(hospitalId, policy) {
 export async function fetchUnavailable(hospitalId) {
   if (!isConfigured()) return [];
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const data = await fetchAllPages((from, to) => supabase
     .from("unavailable_days")
     .select("date")
-    .eq("hospital_id", hospitalId);
-  if (error) throw error;
-  return (data || []).map((r) => r.date);
+    .eq("hospital_id", hospitalId)
+    .order("date", { ascending: true })
+    .range(from, to));
+  return data.map((r) => r.date);
 }
 
 export async function setUnavailable(hospitalId, date, blocked) {
@@ -479,15 +501,15 @@ export async function requestTrade(shiftId, fromDoctorId, toDoctorId, extras = {
 export async function fetchTrades(doctorId) {
   if (!isConfigured() || !doctorId) return null;
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const data = await fetchAllPages((from, to) => supabase
     .from("trade_requests")
     .select("*")
     .or(`from_doctor_id.eq.${doctorId},to_doctor_id.eq.${doctorId}`)
     .order("created_at", { ascending: false })
-    .limit(200);
-  if (error) throw error;
+    .order("id", { ascending: true })
+    .range(from, to));
 
-  return (data || []).map((row) => ({
+  return data.map((row) => ({
     id: row.id,
     shiftID: row.shift_id,
     fromDoctorID: row.from_doctor_id,
@@ -590,7 +612,17 @@ export async function syncEverything(hooks) {
       // Merge by id so a just-submitted local request is not wiped before
       // the next remote round-trip returns it.
       const byId = new Map(localReqs.map((r) => [r.id, r]));
-      for (const remote of tokens) byId.set(remote.id, remote);
+      for (const remote of tokens) {
+        const prev = byId.get(remote.id);
+        byId.set(remote.id, {
+          ...prev,
+          ...remote,
+          approvedAt: remote.approvedAt || prev?.approvedAt || null,
+          doctorName: remote.doctorName && remote.doctorName !== "Doctor"
+            ? remote.doctorName
+            : (prev?.doctorName || remote.doctorName)
+        });
+      }
       hooks.writeLocal("tokens", { ...tok, requestedDays: [...byId.values()] });
     }
 

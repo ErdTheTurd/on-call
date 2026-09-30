@@ -120,6 +120,54 @@ enum FinanceMockData {
     }
 }
 
+/// Posted shift rates from the server. Explore is the only place that invents figures.
+private enum HospitalEarnings {
+    static var usesGenerated: Bool { InvestorDemo.usesLocalSampleData }
+
+    static func filled(hospitalID: UUID?) -> [AssignedShiftsStore.AssignedShift] {
+        guard let hospitalID else { return [] }
+        return AssignedShiftsStore.shared.assignedShifts.filter {
+            $0.shift.hospitalID == hospitalID
+                && $0.status != .canceled
+                && $0.doctorID != AssignedShiftsStore.coveredBySomeoneElse
+        }
+    }
+
+    static func contains(_ date: Date, _ period: FinancePeriod) -> Bool {
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: date)
+        if period.grain == .year { return year == period.year }
+        return year == period.year && calendar.component(.month, from: date) == period.month
+    }
+
+    /// The rate stored on the shift. Hourly shifts are the floor times the posted hours.
+    static func committed(_ shift: Shift) -> Double {
+        if shift.rateUnit == .perHour {
+            return shift.rateFloor * Double(max(shift.durationHours, 1))
+        }
+        return shift.rateFloor
+    }
+
+    static func hospitalTotal(hospitalID: UUID?, period: FinancePeriod) -> Double {
+        filled(hospitalID: hospitalID)
+            .filter { contains($0.shift.date, period) }
+            .reduce(0) { $0 + committed($1.shift) }
+    }
+
+    static func doctorTotal(hospitalID: UUID?, doctorID: UUID, period: FinancePeriod) -> Double {
+        filled(hospitalID: hospitalID)
+            .filter { $0.doctorID == doctorID && contains($0.shift.date, period) }
+            .reduce(0) { $0 + committed($1.shift) }
+    }
+
+    static func specialtyTotal(hospitalID: UUID?, specialty: String, doctorIDs: [UUID], period: FinancePeriod) -> Double {
+        let ids = Set(doctorIDs)
+        return filled(hospitalID: hospitalID)
+            .filter { ids.contains($0.doctorID) && $0.shift.specialty == specialty && contains($0.shift.date, period) }
+            .reduce(0) { $0 + committed($1.shift) }
+    }
+}
+
 struct FinanceSeriesPoint: Identifiable {
     let id: String
     let period: FinancePeriod
@@ -417,6 +465,8 @@ struct FinancePeriodChrome: View {
 
 struct HospitalBillingView: View {
     let profile: HospitalProfile?
+    @ObservedObject private var assignments = AssignedShiftsStore.shared
+    @ObservedObject private var roster = DoctorRosterStore.shared
     @State private var grain: FinanceGrain = .month
     @State private var primary = FinancePeriod.currentMonth()
     @State private var compareEnabled = false
@@ -434,13 +484,34 @@ struct HospitalBillingView: View {
     }
 
     private var series: [FinanceSeriesPoint] {
+        if InvestorDemo.usesLocalSampleData {
+            if compareEnabled {
+                return activePeriods.map { p in
+                    FinanceSeriesPoint(
+                        id: p.id,
+                        period: p,
+                        seriesKey: p.shortLabel,
+                        value: FinanceMockData.hospitalBilling(period: p, hospitalName: hospitalName)
+                    )
+                }
+            }
+            let timeline = FinanceMockData.timeline(for: grain, endingAt: primary, count: grain == .month ? 12 : 5)
+            return timeline.map { p in
+                FinanceSeriesPoint(
+                    id: p.id,
+                    period: p,
+                    seriesKey: "Committed",
+                    value: FinanceMockData.hospitalBilling(period: p, hospitalName: hospitalName)
+                )
+            }
+        }
         if compareEnabled {
             return activePeriods.map { p in
                 FinanceSeriesPoint(
                     id: p.id,
                     period: p,
                     seriesKey: p.shortLabel,
-                    value: FinanceMockData.hospitalBilling(period: p, hospitalName: hospitalName)
+                    value: HospitalEarnings.hospitalTotal(hospitalID: profile?.id, period: p)
                 )
             }
         }
@@ -450,25 +521,45 @@ struct HospitalBillingView: View {
                 id: p.id,
                 period: p,
                 seriesKey: "Committed",
-                value: FinanceMockData.hospitalBilling(period: p, hospitalName: hospitalName)
+                value: HospitalEarnings.hospitalTotal(hospitalID: profile?.id, period: p)
             )
         }
     }
 
     private var primaryTotal: Double {
-        FinanceMockData.hospitalBilling(period: primary, hospitalName: hospitalName)
+        if InvestorDemo.usesLocalSampleData {
+            return FinanceMockData.hospitalBilling(period: primary, hospitalName: hospitalName)
+        }
+        return HospitalEarnings.hospitalTotal(hospitalID: profile?.id, period: primary)
     }
 
     private var recentLines: [(id: String, title: String, subtitle: String, amount: Double)] {
-        let specialties = ["Cardiology", "Emergency Medicine", "Orthopedics", "Internal Medicine", "General Surgery"]
-        return (0..<8).map { i in
-            let sp = specialties[i % specialties.count]
-            let amt = 900.0 + FinanceMockData.unit("line-\(hospitalName)-\(primary.id)-\(i)") * 2_400
+        if InvestorDemo.usesLocalSampleData {
+            let specialties = ["Cardiology", "Emergency Medicine", "Orthopedics", "Internal Medicine", "General Surgery"]
+            return (0..<8).map { i in
+                let sp = specialties[i % specialties.count]
+                let amt = 900.0 + FinanceMockData.unit("line-\(hospitalName)-\(primary.id)-\(i)") * 2_400
+                return (
+                    id: "\(primary.id)-\(i)",
+                    title: "\(sp) coverage",
+                    subtitle: primary.shortLabel,
+                    amount: amt
+                )
+            }
+        }
+        let filled = assignments.assignedShifts.filter {
+            $0.shift.hospitalID == profile?.id
+                && $0.status != .canceled
+                && $0.doctorID != AssignedShiftsStore.coveredBySomeoneElse
+                && HospitalEarnings.contains($0.shift.date, primary)
+        }.sorted { $0.shift.date > $1.shift.date }
+        return filled.prefix(8).map { item in
+            let name = roster.doctors.first { $0.id == item.doctorID }?.name ?? "Assigned doctor"
             return (
-                id: "\(primary.id)-\(i)",
-                title: "\(sp) coverage",
-                subtitle: primary.shortLabel,
-                amount: amt
+                id: item.id.uuidString,
+                title: "\(item.shift.specialty) coverage",
+                subtitle: name,
+                amount: HospitalEarnings.committed(item.shift)
             )
         }
     }
@@ -571,6 +662,11 @@ struct HospitalBillingView: View {
 
                     VStack(alignment: .leading, spacing: 10) {
                         SectionHeader(title: "Filled coverage", systemImage: "checkmark.seal.fill")
+                        if recentLines.isEmpty {
+                            Text("No filled shifts in this period.")
+                                .font(.subheadline)
+                                .foregroundStyle(Brand.textSecondary)
+                        }
                         ForEach(recentLines, id: \.id) { line in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -635,6 +731,7 @@ struct DoctorStockBoard: View {
                     NavigationLink {
                         SpecialtyDoctorStockList(
                             specialty: specialty,
+                            hospitalID: profile?.id,
                             grain: grain,
                             primary: primary,
                             compareEnabled: compareEnabled,
@@ -656,8 +753,12 @@ struct DoctorStockBoard: View {
                                     .foregroundStyle(Brand.textTertiary)
                             }
                             Spacer()
-                            MiniSparkline(values: sparkValues(for: specialty))
-                                .frame(width: 72, height: 28)
+                            let spark = sparkValues(for: specialty)
+                            let showSpark = InvestorDemo.usesLocalSampleData || spark.contains { $0 > 0 }
+                            if showSpark {
+                                MiniSparkline(values: spark)
+                                    .frame(width: 72, height: 28)
+                            }
                             Image(systemName: "chevron.right")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Brand.textTertiary)
@@ -679,9 +780,15 @@ struct DoctorStockBoard: View {
     }
 
     private func sparkValues(for specialty: String) -> [Double] {
-        let names = doctors(for: specialty).map(\.name)
         let timeline = FinanceMockData.timeline(for: grain, endingAt: primary, count: 8)
-        return timeline.map { FinanceMockData.specialtyIndex(period: $0, specialty: specialty, doctorNames: names) }
+        if InvestorDemo.usesLocalSampleData {
+            let names = doctors(for: specialty).map(\.name)
+            return timeline.map { FinanceMockData.specialtyIndex(period: $0, specialty: specialty, doctorNames: names) }
+        }
+        let ids = doctors(for: specialty).map(\.id)
+        return timeline.map {
+            HospitalEarnings.specialtyTotal(hospitalID: profile?.id, specialty: specialty, doctorIDs: ids, period: $0)
+        }
     }
 
     private func doctors(for specialty: String) -> [DoctorSummary] {
@@ -720,21 +827,25 @@ private func mockDoctors(for specialty: String) -> [DoctorSummary] {
 
 struct SpecialtyDoctorStockList: View {
     let specialty: String
+    let hospitalID: UUID?
     @State private var grain: FinanceGrain
     @State private var primary: FinancePeriod
     @State private var compareEnabled: Bool
     @State private var compared: Set<FinancePeriod>
 
     @ObservedObject private var roster = DoctorRosterStore.shared
+    @ObservedObject private var assignments = AssignedShiftsStore.shared
 
     init(
         specialty: String,
+        hospitalID: UUID?,
         grain: FinanceGrain,
         primary: FinancePeriod,
         compareEnabled: Bool,
         compared: Set<FinancePeriod>
     ) {
         self.specialty = specialty
+        self.hospitalID = hospitalID
         _grain = State(initialValue: grain)
         _primary = State(initialValue: primary)
         _compareEnabled = State(initialValue: compareEnabled)
@@ -759,6 +870,19 @@ struct SpecialtyDoctorStockList: View {
         return [primary]
     }
 
+    private func specialtyValue(_ period: FinancePeriod) -> Double {
+        _ = assignments.assignedShifts
+        if InvestorDemo.usesLocalSampleData {
+            return FinanceMockData.specialtyIndex(period: period, specialty: specialty, doctorNames: doctorNames)
+        }
+        return HospitalEarnings.specialtyTotal(
+            hospitalID: hospitalID,
+            specialty: specialty,
+            doctorIDs: doctors.map(\.id),
+            period: period
+        )
+    }
+
     private var series: [FinanceSeriesPoint] {
         if compareEnabled {
             return activePeriods.map { p in
@@ -766,7 +890,7 @@ struct SpecialtyDoctorStockList: View {
                     id: p.id,
                     period: p,
                     seriesKey: p.shortLabel,
-                    value: FinanceMockData.specialtyIndex(period: p, specialty: specialty, doctorNames: doctorNames)
+                    value: specialtyValue(p)
                 )
             }
         }
@@ -776,21 +900,17 @@ struct SpecialtyDoctorStockList: View {
                 id: p.id,
                 period: p,
                 seriesKey: specialty,
-                value: FinanceMockData.specialtyIndex(period: p, specialty: specialty, doctorNames: doctorNames)
+                value: specialtyValue(p)
             )
         }
     }
 
-    private var last: Double {
-        FinanceMockData.specialtyIndex(period: primary, specialty: specialty, doctorNames: doctorNames)
-    }
+    private var last: Double { specialtyValue(primary) }
 
     private var change: Double {
         let timeline = FinanceMockData.timeline(for: grain, endingAt: primary, count: 2)
         guard timeline.count == 2 else { return 0 }
-        let a = FinanceMockData.specialtyIndex(period: timeline[0], specialty: specialty, doctorNames: doctorNames)
-        let b = FinanceMockData.specialtyIndex(period: timeline[1], specialty: specialty, doctorNames: doctorNames)
-        return b - a
+        return specialtyValue(timeline[1]) - specialtyValue(timeline[0])
     }
 
     var body: some View {
@@ -807,11 +927,14 @@ struct SpecialtyDoctorStockList: View {
 
                     EarningsIndexChartCard(
                         title: specialty,
-                        subtitle: "Specialty average · \(doctors.count) doctors",
+                        subtitle: InvestorDemo.usesLocalSampleData
+                            ? "Specialty average · \(doctors.count) doctors"
+                            : "Committed pay · \(doctors.count) doctors",
                         last: last,
                         change: change,
                         series: series,
-                        compareEnabled: compareEnabled
+                        compareEnabled: compareEnabled,
+                        showsCurrency: !InvestorDemo.usesLocalSampleData
                     )
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -820,6 +943,7 @@ struct SpecialtyDoctorStockList: View {
                             NavigationLink {
                                 DoctorStockChartView(
                                     doctor: doc,
+                                    hospitalID: hospitalID,
                                     grain: grain,
                                     primary: primary,
                                     compareEnabled: compareEnabled,
@@ -839,12 +963,10 @@ struct SpecialtyDoctorStockList: View {
                                             .foregroundStyle(Brand.textSecondary)
                                     }
                                     Spacer()
-                                    let docLast = FinanceMockData.doctorIndex(
-                                        period: primary,
-                                        doctorName: doc.name,
-                                        specialty: specialty
-                                    )
-                                    Text(NumberFormat.grouped(docLast))
+                                    let docLast = InvestorDemo.usesLocalSampleData
+                                        ? FinanceMockData.doctorIndex(period: primary, doctorName: doc.name, specialty: specialty)
+                                        : HospitalEarnings.doctorTotal(hospitalID: hospitalID, doctorID: doc.id, period: primary)
+                                    Text(InvestorDemo.usesLocalSampleData ? NumberFormat.grouped(docLast) : NumberFormat.currency(docLast))
                                         .font(.headline.monospacedDigit())
                                         .foregroundStyle(Brand.success)
                                     Image(systemName: "chevron.right")
@@ -871,10 +993,20 @@ struct SpecialtyDoctorStockList: View {
 
 struct DoctorStockChartView: View {
     let doctor: DoctorSummary
+    let hospitalID: UUID?
+    @ObservedObject private var assignments = AssignedShiftsStore.shared
     @State var grain: FinanceGrain
     @State var primary: FinancePeriod
     @State var compareEnabled: Bool
     @State var compared: Set<FinancePeriod>
+
+    private func doctorValue(_ period: FinancePeriod) -> Double {
+        _ = assignments.assignedShifts
+        if InvestorDemo.usesLocalSampleData {
+            return FinanceMockData.doctorIndex(period: period, doctorName: doctor.name, specialty: doctor.specialty)
+        }
+        return HospitalEarnings.doctorTotal(hospitalID: hospitalID, doctorID: doctor.id, period: period)
+    }
 
     private var activePeriods: [FinancePeriod] {
         if compareEnabled {
@@ -892,7 +1024,7 @@ struct DoctorStockChartView: View {
                     id: p.id,
                     period: p,
                     seriesKey: p.shortLabel,
-                    value: FinanceMockData.doctorIndex(period: p, doctorName: doctor.name, specialty: doctor.specialty)
+                    value: doctorValue(p)
                 )
             }
         }
@@ -902,21 +1034,17 @@ struct DoctorStockChartView: View {
                 id: p.id,
                 period: p,
                 seriesKey: doctor.name,
-                value: FinanceMockData.doctorIndex(period: p, doctorName: doctor.name, specialty: doctor.specialty)
+                value: doctorValue(p)
             )
         }
     }
 
-    private var last: Double {
-        FinanceMockData.doctorIndex(period: primary, doctorName: doctor.name, specialty: doctor.specialty)
-    }
+    private var last: Double { doctorValue(primary) }
 
     private var change: Double {
         let timeline = FinanceMockData.timeline(for: grain, endingAt: primary, count: 2)
         guard timeline.count == 2 else { return 0 }
-        let a = FinanceMockData.doctorIndex(period: timeline[0], doctorName: doctor.name, specialty: doctor.specialty)
-        let b = FinanceMockData.doctorIndex(period: timeline[1], doctorName: doctor.name, specialty: doctor.specialty)
-        return b - a
+        return doctorValue(timeline[1]) - doctorValue(timeline[0])
     }
 
     var body: some View {
@@ -933,11 +1061,14 @@ struct DoctorStockChartView: View {
 
                     EarningsIndexChartCard(
                         title: doctor.name,
-                        subtitle: "\(doctor.specialty) · earnings index",
+                        subtitle: InvestorDemo.usesLocalSampleData
+                            ? "\(doctor.specialty) · earnings index"
+                            : "\(doctor.specialty) · committed pay",
                         last: last,
                         change: change,
                         series: series,
-                        compareEnabled: compareEnabled
+                        compareEnabled: compareEnabled,
+                        showsCurrency: !InvestorDemo.usesLocalSampleData
                     )
                 }
                 .padding()
@@ -956,6 +1087,7 @@ private struct EarningsIndexChartCard: View {
     let change: Double
     let series: [FinanceSeriesPoint]
     let compareEnabled: Bool
+    var showsCurrency: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -965,10 +1097,10 @@ private struct EarningsIndexChartCard: View {
                 .font(.caption)
                 .foregroundStyle(Brand.textSecondary)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(NumberFormat.grouped(last))
+                Text(showsCurrency ? NumberFormat.currency(last) : NumberFormat.grouped(last))
                     .font(.system(size: 36, weight: .bold, design: .rounded))
                     .foregroundStyle(Brand.textPrimary)
-                Text("\(change >= 0 ? "+" : "")\(NumberFormat.grouped(change))")
+                Text("\(change >= 0 ? "+" : "")\(showsCurrency ? NumberFormat.currency(change) : NumberFormat.grouped(change))")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(change >= 0 ? Brand.success : Brand.danger)
             }

@@ -123,3 +123,62 @@ struct SupabaseHTTPClient {
         return data
     }
 }
+
+/// Pages PostgREST lists in chunks the server will actually return.
+/// Live `max_rows` is 1000, and a request for more is silently truncated.
+/// A failed page throws so callers keep the previous local copy.
+enum PostgRESTPages {
+    static let pageSize = 1000
+    private static let maxPages = 40
+
+    /// UTC start of the current month, minus 7 days. Older rows stay on the server.
+    static func windowStartISO(now: Date = Date()) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let parts = calendar.dateComponents([.year, .month], from: now)
+        let monthStart = calendar.date(from: DateComponents(
+            timeZone: calendar.timeZone,
+            year: parts.year,
+            month: parts.month,
+            day: 1
+        )) ?? now
+        let start = calendar.date(byAdding: .day, value: -7, to: monthStart) ?? monthStart
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = calendar.timeZone
+        return formatter.string(from: start)
+    }
+
+    static func fetchDataPages(basePath: String, accessToken: String?) async throws -> [Data] {
+        var pages: [Data] = []
+        for page in 0..<maxPages {
+            let offset = page * pageSize
+            let separator = basePath.contains("?") ? "&" : "?"
+            let path = "\(basePath)\(separator)limit=\(pageSize)&offset=\(offset)"
+            let data = try await SupabaseHTTPClient.shared.request(path: path, accessToken: accessToken)
+            let count = try rowCount(data)
+            pages.append(data)
+            if count < pageSize { return pages }
+        }
+        throw SupabaseError.server("The server returned more rows than this sync can load. Nothing was replaced.")
+    }
+
+    static func fetchObjects(basePath: String, accessToken: String?) async throws -> [[String: Any]] {
+        var all: [[String: Any]] = []
+        let pages = try await fetchDataPages(basePath: basePath, accessToken: accessToken)
+        for data in pages {
+            guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                throw SupabaseError.invalidResponse
+            }
+            all.append(contentsOf: rows)
+        }
+        return all
+    }
+
+    private static func rowCount(_ data: Data) throws -> Int {
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [Any] else {
+            throw SupabaseError.invalidResponse
+        }
+        return rows.count
+    }
+}

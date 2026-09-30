@@ -123,21 +123,27 @@ final class SupabaseShiftRepository: ShiftRepositoryProtocol {
         guard SupabaseConfig.isConfigured else {
             return try await LocalShiftRepository.shared.fetchOpenShifts(hospitalID: hospitalID)
         }
-        var path = "rest/v1/shifts?select=*&order=date.asc&limit=2000"
+        let window = PostgRESTPages.windowStartISO()
+        var path = "rest/v1/shifts?select=*&date=gte.\(window)&order=date.asc,id.asc"
         if let hospitalID { path += "&hospital_id=eq.\(hospitalID.uuidString)" }
-        let data = try await SupabaseHTTPClient.shared.request(path: path, accessToken: SupabaseAuthService.shared.accessToken)
-        let rows = try AnyJSON.decoder.decode([SupabaseShiftRow].self, from: data)
-        return rows.map { $0.toShift() }
+        let token = SupabaseAuthService.shared.accessToken
+        let pages = try await PostgRESTPages.fetchDataPages(basePath: path, accessToken: token)
+        var shifts: [Shift] = []
+        for data in pages {
+            let decoded = try AnyJSON.decoder.decode([SupabaseShiftRow].self, from: data)
+            shifts.append(contentsOf: decoded.map { $0.toShift() })
+        }
+        return shifts
     }
 
     /// Shift ids that already have a non-canceled assignment. No doctor identity.
+    /// Throws if a page fails so the caller does not mark a partial set as filled.
     func fetchFilledShiftIDs() async throws -> Set<UUID> {
         guard SupabaseConfig.isConfigured else { return [] }
-        let data = try await SupabaseHTTPClient.shared.request(
-            path: "rest/v1/shift_coverage?select=shift_id&is_filled=eq.true&limit=2000",
+        let rows = try await PostgRESTPages.fetchObjects(
+            basePath: "rest/v1/shift_coverage?select=shift_id&is_filled=eq.true&order=shift_id.asc",
             accessToken: SupabaseAuthService.shared.accessToken
         )
-        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
         return Set(rows.compactMap { UUID(uuidString: $0["shift_id"] as? String ?? "") })
     }
 
@@ -204,19 +210,19 @@ final class SupabaseAssignmentRepository: AssignmentRepositoryProtocol {
         guard SupabaseConfig.isConfigured else {
             return try await LocalAssignmentRepository.shared.fetchAssignments(doctorID: doctorID)
         }
-        var path = "rest/v1/assignments?select=*,shifts(*)&limit=2000"
+        let window = PostgRESTPages.windowStartISO()
+        var path = "rest/v1/assignments?select=*,shifts!inner(*)&shifts.date=gte.\(window)&order=id.asc"
         if let doctorID { path += "&doctor_id=eq.\(doctorID.uuidString)" }
-        let data = try await SupabaseHTTPClient.shared.request(path: path, accessToken: SupabaseAuthService.shared.accessToken)
-        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        let rows = try await PostgRESTPages.fetchObjects(basePath: path, accessToken: SupabaseAuthService.shared.accessToken)
         return parseAssignmentRows(rows)
     }
 
-    /// Every assignment on this hospital's shifts, including the other doctors' names' ids.
+    /// Every assignment on this hospital's shifts in the sync window.
     func fetchHospitalAssignments(hospitalID: UUID) async throws -> [AssignedShiftsStore.AssignedShift] {
         guard SupabaseConfig.isConfigured else { return [] }
-        let path = "rest/v1/assignments?select=*,shifts!inner(*)&shifts.hospital_id=eq.\(hospitalID.uuidString)&limit=2000"
-        let data = try await SupabaseHTTPClient.shared.request(path: path, accessToken: SupabaseAuthService.shared.accessToken)
-        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        let window = PostgRESTPages.windowStartISO()
+        let path = "rest/v1/assignments?select=*,shifts!inner(*)&shifts.hospital_id=eq.\(hospitalID.uuidString)&shifts.date=gte.\(window)&order=id.asc"
+        let rows = try await PostgRESTPages.fetchObjects(basePath: path, accessToken: SupabaseAuthService.shared.accessToken)
         return parseAssignmentRows(rows)
     }
 
@@ -313,16 +319,20 @@ final class SupabaseTokenRepository: TokenRepositoryProtocol {
         do {
             return try await fetchTokenRows(table: "token_request_queue", hospitalID: hospitalID, doctorID: doctorID)
         } catch {
+            let message = error.localizedDescription.lowercased()
+            let viewMissing = message.contains("token_request_queue")
+                || message.contains("schema cache")
+                || message.contains("pgrst205")
+            guard viewMissing else { throw error }
             return try await fetchTokenRows(table: "token_requests", hospitalID: hospitalID, doctorID: doctorID)
         }
     }
 
     private func fetchTokenRows(table: String, hospitalID: UUID?, doctorID: UUID?) async throws -> [TokenStore.TokenRequest] {
-        var path = "rest/v1/\(table)?select=*&order=requested_at.desc&limit=500"
+        var path = "rest/v1/\(table)?select=*&order=requested_at.desc,id.asc"
         if let hospitalID { path += "&hospital_id=eq.\(hospitalID.uuidString)" }
         if let doctorID { path += "&doctor_id=eq.\(doctorID.uuidString)" }
-        let data = try await SupabaseHTTPClient.shared.request(path: path, accessToken: SupabaseAuthService.shared.accessToken)
-        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        let rows = try await PostgRESTPages.fetchObjects(basePath: path, accessToken: SupabaseAuthService.shared.accessToken)
         return rows.compactMap { row -> TokenStore.TokenRequest? in
             guard
                 let id = UUID(uuidString: row["id"] as? String ?? ""),
@@ -348,8 +358,8 @@ final class SupabaseTokenRepository: TokenRepositoryProtocol {
                 hospitalName: row["hospital_name"] as? String ?? "Hospital",
                 specialty: specialty,
                 requestedAt: requestedAt,
-                approvedAt: nil,
-                shiftRate: row["shift_rate"] as? Double
+                approvedAt: Self.approvedAt(from: row),
+                shiftRate: (row["shift_rate"] as? NSNumber)?.doubleValue
             )
         }
     }
@@ -384,6 +394,11 @@ final class SupabaseTokenRepository: TokenRepositoryProtocol {
             accessToken: SupabaseAuthService.shared.accessToken,
             prefer: "return=minimal"
         )
+    }
+
+    private static func approvedAt(from row: [String: Any]) -> Date? {
+        guard let raw = row["approved_at"] as? String, !raw.isEmpty else { return nil }
+        return parseServerDate(raw)
     }
 }
 
@@ -640,10 +655,10 @@ final class DataSyncCoordinator: ObservableObject {
         do {
             let hospitalScope = role == .hospital ? SessionStore.shared.currentHospitalID : nil
             let shifts = try await SupabaseShiftRepository.shared.fetchOpenShifts(hospitalID: hospitalScope)
-            Services.hospital.replaceAll(shifts)
 
             if role == .hospital, let hospitalID = SessionStore.shared.currentHospitalID {
                 let assignments = try await SupabaseAssignmentRepository.shared.fetchHospitalAssignments(hospitalID: hospitalID)
+                Services.hospital.replaceAll(shifts)
                 AssignedShiftsStore.shared.replaceAll(assignments)
                 if let roster = await SupabaseRosterRepository.fetchForReplace(hospitalID: hospitalID) {
                     DoctorRosterStore.shared.replaceAll(roster)
@@ -663,6 +678,7 @@ final class DataSyncCoordinator: ObservableObject {
             } else if role == .doctor {
                 let doctorID = SessionStore.shared.currentUserID ?? SessionStore.shared.currentDoctorID
                 let mine = try await SupabaseAssignmentRepository.shared.fetchAssignments(doctorID: doctorID)
+                Services.hospital.replaceAll(shifts)
                 AssignedShiftsStore.shared.replaceAll(mine)
                 if let filled = try? await SupabaseShiftRepository.shared.fetchFilledShiftIDs() {
                     AssignedShiftsStore.shared.markFilledByOthers(shiftIDs: filled, knownShifts: shifts)
@@ -682,6 +698,8 @@ final class DataSyncCoordinator: ObservableObject {
                 if let doctor = DoctorProfile.load() {
                     await SupabaseProfileSync.upsertDoctor(doctor)
                 }
+            } else {
+                Services.hospital.replaceAll(shifts)
             }
 
             lastError = nil
@@ -691,11 +709,10 @@ final class DataSyncCoordinator: ObservableObject {
     }
 
     private static func fetchUnavailableDates(hospitalID: UUID) async throws -> [Date] {
-        let data = try await SupabaseHTTPClient.shared.request(
-            path: "rest/v1/unavailable_days?hospital_id=eq.\(hospitalID.uuidString)&select=date",
+        let rows = try await PostgRESTPages.fetchObjects(
+            basePath: "rest/v1/unavailable_days?hospital_id=eq.\(hospitalID.uuidString)&select=date&order=date.asc",
             accessToken: SupabaseAuthService.shared.accessToken
         )
-        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -708,14 +725,13 @@ final class DataSyncCoordinator: ObservableObject {
     }
 
     private static func fetchPenalties(hospitalID: UUID?, doctorID: UUID?) async throws -> [PenaltyLedgerStore.Entry] {
-        var path = "rest/v1/penalty_ledger?select=*&order=created_at.desc&limit=500"
+        var path = "rest/v1/penalty_ledger?select=*&order=created_at.desc,id.asc"
         if let hospitalID { path += "&hospital_id=eq.\(hospitalID.uuidString)" }
         if let doctorID { path += "&doctor_id=eq.\(doctorID.uuidString)" }
-        let data = try await SupabaseHTTPClient.shared.request(
-            path: path,
+        let rows = try await PostgRESTPages.fetchObjects(
+            basePath: path,
             accessToken: SupabaseAuthService.shared.accessToken
         )
-        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
         return rows.compactMap { row in
             guard
                 let id = UUID(uuidString: row["id"] as? String ?? ""),
@@ -778,15 +794,12 @@ enum SupabaseRosterRepository {
 
     private static func fetchRoster(hospitalID: UUID?) async -> [DoctorSummary]? {
         guard SupabaseConfig.isConfigured else { return [] }
-        var path = "rest/v1/hospital_roster?select=doctor_id,auto_approve,first_name,last_name,credential,specialties,verification_status&limit=500"
+        var path = "rest/v1/hospital_roster?select=doctor_id,auto_approve,first_name,last_name,credential,specialties,verification_status&order=doctor_id.asc,hospital_id.asc"
         if let hospitalID { path += "&hospital_id=eq.\(hospitalID.uuidString)" }
-        guard
-            let data = try? await SupabaseHTTPClient.shared.request(
-                path: path,
-                accessToken: SupabaseAuthService.shared.accessToken
-            ),
-            let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return nil }
+        guard let rows = try? await PostgRESTPages.fetchObjects(
+            basePath: path,
+            accessToken: SupabaseAuthService.shared.accessToken
+        ) else { return nil }
 
         return rows.compactMap { row -> DoctorSummary? in
             guard let id = UUID(uuidString: row["doctor_id"] as? String ?? "") else { return nil }
@@ -864,10 +877,10 @@ final class SupabaseTradeRepository {
     func fetch(doctorID: UUID) async -> [ShiftTradeRequest]? {
         guard SupabaseConfig.isConfigured else { return [] }
         let filter = "or=(from_doctor_id.eq.\(doctorID.uuidString),to_doctor_id.eq.\(doctorID.uuidString))"
-        guard let data = try? await SupabaseHTTPClient.shared.request(
-            path: "rest/v1/trade_requests?select=*&\(filter)&order=created_at.desc&limit=200",
+        guard let rows = try? await PostgRESTPages.fetchObjects(
+            basePath: "rest/v1/trade_requests?select=*&\(filter)&order=created_at.desc,id.asc",
             accessToken: SupabaseAuthService.shared.accessToken
-        ), let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
+        ) else { return nil }
 
         return rows.compactMap { row in
             guard

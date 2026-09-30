@@ -43,6 +43,11 @@ psql_db -f supabase/seed/app_review_demo.sql
 echo "Applying App Review seed again"
 psql_db -f supabase/seed/app_review_demo.sql
 
+echo "Proving penalty rows reset when the seed is re-run"
+psql_db -v ON_ERROR_STOP=1 -c "update public.penalty_ledger set amount = 1 where id = md5('mdshift-review-demo|penalty|1')::uuid;"
+psql_db -f supabase/seed/app_review_demo.sql
+psql_db -v ON_ERROR_STOP=1 -c "do \$\$ begin if (select amount from public.penalty_ledger where id = md5('mdshift-review-demo|penalty|1')::uuid) <> 425 then raise exception 'penalty seed did not reset amount'; end if; if (select amount from public.penalty_ledger where id = md5('mdshift-review-demo|penalty|2')::uuid) <> 75 then raise exception 'penalty seed changed the other row'; end if; end \$\$;"
+
 echo "Proving demo access rules"
 psql_db -f supabase/tests/app_review_access_test.sql
 

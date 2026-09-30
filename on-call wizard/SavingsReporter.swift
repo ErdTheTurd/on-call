@@ -172,10 +172,21 @@ public final class SavingsReporter: ObservableObject {
             let occurred_at: String
         }
 
-        guard let data = try? await SupabaseHTTPClient.shared.request(
-            path: "rest/v1/hospital_savings_events?hospital_id=eq.\(hospitalID.uuidString)&select=*&order=occurred_at.desc&limit=2000",
-            accessToken: token
-        ), let rows = try? JSONDecoder().decode([Row].self, from: data) else { return }
+        let pages: [Data]
+        do {
+            pages = try await PostgRESTPages.fetchDataPages(
+                basePath: "rest/v1/hospital_savings_events?hospital_id=eq.\(hospitalID.uuidString)&select=*&order=occurred_at.desc,event_key.asc",
+                accessToken: token
+            )
+        } catch {
+            return
+        }
+        let decoder = JSONDecoder()
+        var rows: [Row] = []
+        for data in pages {
+            guard let page = try? decoder.decode([Row].self, from: data) else { return }
+            rows.append(contentsOf: page)
+        }
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

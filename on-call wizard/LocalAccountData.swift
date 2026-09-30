@@ -44,7 +44,10 @@ enum LocalAccountData {
             "accounts_v1",
             "md_shift_plus_v1",
             "session_current_user_id",
-            "session_current_email"
+            "session_current_email",
+            "doctor_prefs_v1",
+            "doctor_min_rate",
+            "doctor_days_ahead"
         ]
         for key in keys {
             defaults.removeObject(forKey: key)
@@ -65,6 +68,8 @@ enum LocalAccountData {
         ProposedRateStore.shared.clearAll()
         AlgorithmPresetStore.shared.clearAll()
         PlusMembershipStore.shared.clearLocal()
+        DoctorPreferencesStore.shared.clearAll()
+        Services.doctor.clearAvailability()
         InvestorDemo.resetSeedFlag()
     }
 }
