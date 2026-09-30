@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Apply migrations, prove the existing lockdown still holds, then load the
-# App Review seed twice and prove the demo access rules.
+# App Review seed twice and prove the demo access rules. A demo doctor can
+# see only demo hospitals, and a normal doctor cannot see that demo doctor.
 # Uses a throwaway local database. Does not talk to the hosted project.
 set -euo pipefail
 
@@ -48,7 +49,7 @@ psql_db -v ON_ERROR_STOP=1 -c "update public.penalty_ledger set amount = 1 where
 psql_db -f supabase/seed/app_review_demo.sql
 psql_db -v ON_ERROR_STOP=1 -c "do \$\$ begin if (select amount from public.penalty_ledger where id = md5('mdshift-review-demo|penalty|1')::uuid) <> 425 then raise exception 'penalty seed did not reset amount'; end if; if (select amount from public.penalty_ledger where id = md5('mdshift-review-demo|penalty|2')::uuid) <> 75 then raise exception 'penalty seed changed the other row'; end if; end \$\$;"
 
-echo "Proving demo access rules"
+echo "Proving demo access rules, including demo-doctor isolation"
 psql_db -f supabase/tests/app_review_access_test.sql
 
 echo "App Review database checks passed"

@@ -7,16 +7,19 @@
 -- What it does (all in one transaction, safe to re-run: every row has a fixed id
 -- or natural key, and a re-run puts the demo back to this starting state):
 --   * Finishes the doctor demo account jdunn@eporthospine.com
---     (d10290cb-1dd6-4e65-8a9d-7efb4ea83419): name, demo NPI, license, verified.
+--     (d10290cb-1dd6-4e65-8a9d-7efb4ea83419): name, demo NPI, license, verified,
+--     and doctor_profiles.is_demo.
 --   * Onboards the hospital demo account review-hospital@mdshift.net
 --     (the auth user must exist first; see the steps below) and flags it is_demo.
---   * Adds 5 placeholder doctors that cannot sign in, a 6-doctor roster (1 pending),
+--   * Adds 5 placeholder doctors that cannot sign in, flags each is_demo, and
+--     adds a 6-doctor roster (1 pending),
 --     240 shifts for 1 Oct to 30 Nov 2026 (124 filled, 116 open), 13 token requests
 --     (4 pending), 3 pending trades, 2 penalties, and 12 savings events.
 --
 -- -----------------------------------------------------------------------------
 -- ROLLOUT (this order, hosted project only, by the owner):
---   1. Apply supabase/migrations, including 20260930150000_app_review_access.sql.
+--   1. Apply supabase/migrations, including 20260930150000_app_review_access.sql
+--      and 20260930180000_demo_doctor_scope.sql.
 --   2. Create the hospital auth user with the email confirmed. Leave the password
 --      unset here. Dashboard > Authentication > Users > Add user >
 --      email review-hospital@mdshift.net, Auto Confirm User. Or the Admin API
@@ -48,6 +51,8 @@
 --   - profiles_guard_privileges: owner bypass. We do not set is_admin or Plus.
 --   - doctor_profiles_guard_review / hospital_profiles_guard_review: owner bypass,
 --     so verification_status = 'verified' is kept (a user write drops it to pending).
+--   - doctor_profiles_guard_demo_flag: owner bypass, so is_demo = true is kept.
+--     A signed-in client cannot set or clear that flag.
 --   - hospital_profiles_guard_work_email: the personal-domain check runs even for
 --     the owner. mdshift.net passes. The verified-code check is skipped by the bypass.
 --   - hospital_doctors_guard_membership: owner bypass. On INSERT it sets
@@ -57,7 +62,11 @@
 --   - assignments_guard_shift: owner bypass (no token needed).
 --   - trade_requests_guard_parties: NOT bypassed, even for the owner. Each trade's
 --     from_doctor must hold a non-canceled assignment on that shift, and from != to.
---     This file writes assignments before trades so the check passes.
+--     This file writes assignments before trades so the check passes. Both doctors
+--     are demo doctors and the shift is at the demo hospital, so the demo-scope
+--     check passes too.
+--   - token, roster, and assignment demo-scope triggers are not bypassed. Every
+--     demo doctor in this file is attached only to the demo hospital.
 --   RLS does not apply to the table owner here, so no policy is involved.
 --
 -- The demo NPIs (1999999992, 1999999919, 1999999935, 1999999950, 1999999976,
@@ -104,6 +113,12 @@ begin
   ) then
     raise exception 'Apply migration 20260930150000_app_review_access.sql before this seed.';
   end if;
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'doctor_profiles' and column_name = 'is_demo'
+  ) then
+    raise exception 'Apply migration 20260930180000_demo_doctor_scope.sql before this seed.';
+  end if;
   if not exists (select 1 from auth.users where id = c_doctor) then
     raise exception 'Doctor demo auth user % not found.', c_doctor;
   end if;
@@ -142,7 +157,8 @@ begin
     npi_taxonomy = 'Orthopaedic Surgery',
     reviewed_by = v_reviewer,
     reviewed_at = now(),
-    review_note = 'App Review demo account. NPI 1999999992 is a Luhn-valid placeholder, not a real provider.'
+    review_note = 'App Review demo account. NPI 1999999992 is a Luhn-valid placeholder, not a real provider.',
+    is_demo = true
   where profile_id = c_doctor;
   get diagnostics v_count = row_count;
   if v_count <> 1 then raise exception 'doctor_profiles row for the demo doctor is missing'; end if;
@@ -233,9 +249,9 @@ begin
 
   insert into public.doctor_profiles (profile_id, first_name, last_name, credential, npi, specialties,
       verification_status, license_number, license_state, email, verification_flags,
-      reviewed_by, reviewed_at, review_note)
+      reviewed_by, reviewed_at, review_note, is_demo)
   select d.id, d.fn, d.ln, d.cred, d.npi, d.spec, 'verified', d.lic, d.st, d.email, '{}',
-      v_reviewer, now(), 'App Review placeholder doctor. Not a real provider.'
+      v_reviewer, now(), 'App Review placeholder doctor. Not a real provider.', true
   from (values
       (f_patel,   'Maya',   'Patel',   'MD', '1999999919', array['Orthopedics'],        'DEMO-51102', 'CO', 'maya.patel@demo.mdshift.net'),
       (f_brooks,  'Daniel', 'Brooks',  'DO', '1999999935', array['Orthopedics'],        'DEMO-51103', 'CO', 'daniel.brooks@demo.mdshift.net'),
@@ -248,7 +264,8 @@ begin
     npi = excluded.npi, specialties = excluded.specialties, verification_status = 'verified',
     license_number = excluded.license_number, license_state = excluded.license_state,
     email = excluded.email, verification_flags = '{}', reviewed_by = excluded.reviewed_by,
-    reviewed_at = excluded.reviewed_at, review_note = excluded.review_note;
+    reviewed_at = excluded.reviewed_at, review_note = excluded.review_note,
+    is_demo = true;
 
   -- ---------------------------------------------------------------- 4. roster (hospital_doctors)
   insert into public.hospital_doctors (hospital_id, doctor_id, auto_approve, approved_at)
@@ -442,6 +459,6 @@ commit;
 -- -- old values (J Dunn, NPI 1679576722) are not restored on purpose.
 -- commit;
 
--- Demo isolation (is_demo, shift visibility, token requests, roster joins, and
--- the approval-name view) lives in migration 20260930150000_app_review_access.sql.
--- This seed only sets hospital_profiles.is_demo for the review hospital.
+-- Demo hospital isolation lives in migration 20260930150000_app_review_access.sql.
+-- Demo doctor isolation lives in migration 20260930180000_demo_doctor_scope.sql.
+-- This seed sets hospital_profiles.is_demo and doctor_profiles.is_demo.
