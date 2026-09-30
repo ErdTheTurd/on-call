@@ -116,6 +116,45 @@ export const appStore = {
     this.emit();
   },
 
+  /** Drops operational copies so the next account on this browser does not see them. */
+  clearUserData() {
+    for (const key of Object.values(KEYS)) {
+      if (key === KEYS.accounts) continue;
+      localStorage.removeItem(key);
+    }
+    for (const key of [
+      "hospital_savings_events_v1",
+      "algo_factor_prefs_v1",
+      "md_shift_plus",
+      "oncall_demo_mode",
+      "local_data_owner_id",
+      "algorithm_presets_v1",
+      "algorithm_weekday_v1",
+      "algorithm_active_v1",
+      "doctor_day_rates_v1"
+    ]) {
+      localStorage.removeItem(key);
+    }
+    this.emit();
+  },
+
+  /**
+   * Call before a remote session is written. Clears when the browser still holds
+   * another user, a demo session, or a profile that belongs to someone else.
+   */
+  prepareForUser(userID) {
+    if (!userID) return;
+    const owner = localStorage.getItem("local_data_owner_id");
+    const doctor = read(KEYS.doctorProfile, null);
+    const hospital = read(KEYS.hospitalProfile, null);
+    const stored = doctor?.userID || hospital?.userID || null;
+    const demo = localStorage.getItem("oncall_demo_mode") === "1";
+    if (demo || owner !== userID || (stored && stored !== userID)) {
+      this.clearUserData();
+    }
+    localStorage.setItem("local_data_owner_id", userID);
+  },
+
   get savedRole() { return localStorage.getItem(KEYS.savedRole); },
   setSavedRole(role) { localStorage.setItem(KEYS.savedRole, role); this.emit(); },
 
@@ -342,6 +381,7 @@ export async function signInRemote(email, password) {
 
 async function finalizeRemoteSession(user, emailFallback) {
   persistAppleSignInNameFromUser(user);
+  appStore.prepareForUser(user.id);
   const email = user.email || emailFallback;
   const supabase = getSupabase();
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
@@ -356,8 +396,6 @@ async function finalizeRemoteSession(user, emailFallback) {
     const hydrated = await hydrateLocalProfiles({ userID: user.id, role, email });
     if (hydrated?.kind === "hospital") {
       appStore.saveHospitalProfile(hydrated.profile);
-      ensureDemoShifts(hydrated.profile.id, hydrated.profile.name);
-      seedMockDoctors();
     } else if (hydrated?.kind === "doctor") {
       appStore.saveDoctorProfile(hydrated.profile);
       registerDoctorOnRoster(hydrated.profile);
@@ -423,6 +461,7 @@ export async function verifySignupOtp(email, token, role) {
     await upsertProfile(user.id, user.email || email, metaRole);
   } catch { /* ignore */ }
 
+  appStore.prepareForUser(user.id);
   try {
     const hydrated = await hydrateLocalProfiles({
       userID: user.id,
@@ -431,8 +470,6 @@ export async function verifySignupOtp(email, token, role) {
     });
     if (hydrated?.kind === "hospital") {
       appStore.saveHospitalProfile(hydrated.profile);
-      ensureDemoShifts(hydrated.profile.id, hydrated.profile.name);
-      seedMockDoctors();
     } else if (hydrated?.kind === "doctor") {
       appStore.saveDoctorProfile(hydrated.profile);
       registerDoctorOnRoster(hydrated.profile);
@@ -669,6 +706,7 @@ export async function completeOAuthSession() {
     } catch { /* ignore */ }
   }
 
+  appStore.prepareForUser(user.id);
   try {
     const hydrated = await hydrateLocalProfiles({
       userID: user.id,
@@ -677,8 +715,6 @@ export async function completeOAuthSession() {
     });
     if (hydrated?.kind === "hospital") {
       appStore.saveHospitalProfile(hydrated.profile);
-      ensureDemoShifts(hydrated.profile.id, hydrated.profile.name);
-      seedMockDoctors();
     } else if (hydrated?.kind === "doctor") {
       appStore.saveDoctorProfile(hydrated.profile);
       registerDoctorOnRoster(hydrated.profile);
@@ -712,10 +748,13 @@ export function authState() {
   return { kind: "authenticated", role };
 }
 
-export function signOut() {
-  appStore.clearSession();
-  if (isConfigured()) {
-    try { getSupabase().auth.signOut(); } catch { /* ignore */ }
+export async function signOut() {
+  appStore.clearUserData();
+  if (!isConfigured()) return;
+  try {
+    await getSupabase().auth.signOut();
+  } catch {
+    /* Local data is already cleared. */
   }
 }
 

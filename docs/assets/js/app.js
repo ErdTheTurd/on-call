@@ -261,6 +261,7 @@ async function boot() {
           }
         } catch { /* keep savedRole */ }
 
+        appStore.prepareForUser(sessionUser.id);
         beginSession({
           userID: sessionUser.id,
           email: sessionUser.email,
@@ -396,10 +397,11 @@ function render() {
       },
       onSavingsRefresh: loadHospitalSavings,
       onSignOut: () => {
-        signOut();
-        state.route = "auth";
-        state.admin = emptyAdminState();
-        update({ email: "", error: null });
+        void signOut().then(() => {
+          state.route = "auth";
+          state.admin = emptyAdminState();
+          update({ email: "", error: null });
+        });
       }
     });
     if (restoreSearchCaret) {
@@ -418,10 +420,11 @@ function render() {
     bindShowcase(root, {
       onShot: (shot) => update({ showcase: { shot } }),
       onSignOut: () => {
-        signOut();
-        clearDemoFlag();
-        state.route = "auth";
-        update({ email: "", error: null });
+        void signOut().then(() => {
+          clearDemoFlag();
+          state.route = "auth";
+          update({ email: "", error: null });
+        });
       }
     });
     return;
@@ -468,9 +471,10 @@ function syncBanner() {
 
 function bindDemoRibbon(root) {
   root.querySelector("[data-exit-demo]")?.addEventListener("click", () => {
-    signOut();
-    window.scrollTo(0, 0);
-    update({ route: "landing" });
+    void signOut().then(() => {
+      window.scrollTo(0, 0);
+      update({ route: "landing" });
+    });
   });
   root.querySelector("[data-sync-retry]")?.addEventListener("click", () => {
     syncEverything().catch(() => {}).finally(() => update({}));

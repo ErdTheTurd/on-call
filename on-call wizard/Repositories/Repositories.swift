@@ -75,10 +75,26 @@ final class LocalTokenRepository: TokenRepositoryProtocol {
 
 // MARK: - Shared JSON helpers
 
+private func parseServerDate(_ raw: String) -> Date? {
+    let frac = ISO8601DateFormatter()
+    frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = frac.date(from: raw) { return date }
+    let plain = ISO8601DateFormatter()
+    if let date = plain.date(from: raw) { return date }
+    let swapped = raw.replacingOccurrences(of: " ", with: "T")
+    if let date = plain.date(from: swapped) { return date }
+    return nil
+}
+
 private struct AnyJSON {
     static let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
+        d.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let raw = try container.decode(String.self)
+            if let date = parseServerDate(raw) { return date }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: raw)
+        }
         return d
     }()
     static let encoder: JSONEncoder = {
@@ -107,13 +123,28 @@ final class SupabaseShiftRepository: ShiftRepositoryProtocol {
         guard SupabaseConfig.isConfigured else {
             return try await LocalShiftRepository.shared.fetchOpenShifts(hospitalID: hospitalID)
         }
-        var path = "rest/v1/shifts?select=*&order=date.asc"
+        let window = PostgRESTPages.windowStartISO()
+        var path = "rest/v1/shifts?select=*&date=gte.\(window)&order=date.asc,id.asc"
         if let hospitalID { path += "&hospital_id=eq.\(hospitalID.uuidString)" }
-        let data = try await SupabaseHTTPClient.shared.request(path: path, accessToken: SupabaseAuthService.shared.accessToken)
-        let rows = try AnyJSON.decoder.decode([SupabaseShiftRow].self, from: data)
-        let shifts = rows.map { $0.toShift() }
-        for shift in shifts { Services.hospital.upsertShift(shift) }
+        let token = SupabaseAuthService.shared.accessToken
+        let pages = try await PostgRESTPages.fetchDataPages(basePath: path, accessToken: token)
+        var shifts: [Shift] = []
+        for data in pages {
+            let decoded = try AnyJSON.decoder.decode([SupabaseShiftRow].self, from: data)
+            shifts.append(contentsOf: decoded.map { $0.toShift() })
+        }
         return shifts
+    }
+
+    /// Shift ids that already have a non-canceled assignment. No doctor identity.
+    /// Throws if a page fails so the caller does not mark a partial set as filled.
+    func fetchFilledShiftIDs() async throws -> Set<UUID> {
+        guard SupabaseConfig.isConfigured else { return [] }
+        let rows = try await PostgRESTPages.fetchObjects(
+            basePath: "rest/v1/shift_coverage?select=shift_id&is_filled=eq.true&order=shift_id.asc",
+            accessToken: SupabaseAuthService.shared.accessToken
+        )
+        return Set(rows.compactMap { UUID(uuidString: $0["shift_id"] as? String ?? "") })
     }
 
     func upsert(_ shift: Shift) async throws {
@@ -179,11 +210,23 @@ final class SupabaseAssignmentRepository: AssignmentRepositoryProtocol {
         guard SupabaseConfig.isConfigured else {
             return try await LocalAssignmentRepository.shared.fetchAssignments(doctorID: doctorID)
         }
-        var path = "rest/v1/assignments?select=*,shifts(*)"
+        let window = PostgRESTPages.windowStartISO()
+        var path = "rest/v1/assignments?select=*,shifts!inner(*)&shifts.date=gte.\(window)&order=id.asc"
         if let doctorID { path += "&doctor_id=eq.\(doctorID.uuidString)" }
-        let data = try await SupabaseHTTPClient.shared.request(path: path, accessToken: SupabaseAuthService.shared.accessToken)
-        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        let rows = try await PostgRESTPages.fetchObjects(basePath: path, accessToken: SupabaseAuthService.shared.accessToken)
+        return parseAssignmentRows(rows)
+    }
 
+    /// Every assignment on this hospital's shifts in the sync window.
+    func fetchHospitalAssignments(hospitalID: UUID) async throws -> [AssignedShiftsStore.AssignedShift] {
+        guard SupabaseConfig.isConfigured else { return [] }
+        let window = PostgRESTPages.windowStartISO()
+        let path = "rest/v1/assignments?select=*,shifts!inner(*)&shifts.hospital_id=eq.\(hospitalID.uuidString)&shifts.date=gte.\(window)&order=id.asc"
+        let rows = try await PostgRESTPages.fetchObjects(basePath: path, accessToken: SupabaseAuthService.shared.accessToken)
+        return parseAssignmentRows(rows)
+    }
+
+    private func parseAssignmentRows(_ rows: [[String: Any]]) -> [AssignedShiftsStore.AssignedShift] {
         var result: [AssignedShiftsStore.AssignedShift] = []
         for row in rows {
             guard
@@ -206,15 +249,15 @@ final class SupabaseAssignmentRepository: AssignmentRepositoryProtocol {
             if let embedded = row["shifts"] as? [String: Any],
                let hid = UUID(uuidString: embedded["hospital_id"] as? String ?? ""),
                let dateStr = embedded["date"] as? String,
-               let date = ISO8601DateFormatter().date(from: dateStr) ?? ISO8601DateFormatter().date(from: dateStr + "Z") {
+               let date = parseServerDate(dateStr) ?? parseServerDate(dateStr + "Z") {
                 shift = Shift(
                     id: shiftID,
                     hospitalID: hid,
                     hospital: embedded["hospital_name"] as? String ?? "Hospital",
                     specialty: embedded["specialty"] as? String ?? "Internal Medicine",
                     start: date,
-                    durationHours: Int(embedded["duration_hours"] as? Double ?? 24),
-                    rateFloor: embedded["rate_floor"] as? Double ?? 0,
+                    durationHours: Int((embedded["duration_hours"] as? NSNumber)?.doubleValue ?? 24),
+                    rateFloor: (embedded["rate_floor"] as? NSNumber)?.doubleValue ?? 0,
                     rateUnit: (embedded["rate_unit"] as? String) == "per_hour" ? .perHour : .perDay
                 )
             } else {
@@ -264,13 +307,32 @@ final class SupabaseTokenRepository: TokenRepositoryProtocol {
     static let shared = SupabaseTokenRepository()
 
     func fetchRequests(hospitalID: UUID?) async throws -> [TokenStore.TokenRequest] {
+        try await fetchQueue(hospitalID: hospitalID, doctorID: nil)
+    }
+
+    /// Reads `token_request_queue` so the hospital sees the doctor's display name.
+    /// Falls back to `token_requests` when that view is not deployed yet.
+    func fetchQueue(hospitalID: UUID?, doctorID: UUID?) async throws -> [TokenStore.TokenRequest] {
         guard SupabaseConfig.isConfigured else {
             return try await LocalTokenRepository.shared.fetchRequests(hospitalID: hospitalID)
         }
-        var path = "rest/v1/token_requests?select=*&order=requested_at.desc"
+        do {
+            return try await fetchTokenRows(table: "token_request_queue", hospitalID: hospitalID, doctorID: doctorID)
+        } catch {
+            let message = error.localizedDescription.lowercased()
+            let viewMissing = message.contains("token_request_queue")
+                || message.contains("schema cache")
+                || message.contains("pgrst205")
+            guard viewMissing else { throw error }
+            return try await fetchTokenRows(table: "token_requests", hospitalID: hospitalID, doctorID: doctorID)
+        }
+    }
+
+    private func fetchTokenRows(table: String, hospitalID: UUID?, doctorID: UUID?) async throws -> [TokenStore.TokenRequest] {
+        var path = "rest/v1/\(table)?select=*&order=requested_at.desc,id.asc"
         if let hospitalID { path += "&hospital_id=eq.\(hospitalID.uuidString)" }
-        let data = try await SupabaseHTTPClient.shared.request(path: path, accessToken: SupabaseAuthService.shared.accessToken)
-        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        if let doctorID { path += "&doctor_id=eq.\(doctorID.uuidString)" }
+        let rows = try await PostgRESTPages.fetchObjects(basePath: path, accessToken: SupabaseAuthService.shared.accessToken)
         return rows.compactMap { row -> TokenStore.TokenRequest? in
             guard
                 let id = UUID(uuidString: row["id"] as? String ?? ""),
@@ -296,8 +358,8 @@ final class SupabaseTokenRepository: TokenRepositoryProtocol {
                 hospitalName: row["hospital_name"] as? String ?? "Hospital",
                 specialty: specialty,
                 requestedAt: requestedAt,
-                approvedAt: nil,
-                shiftRate: row["shift_rate"] as? Double
+                approvedAt: Self.approvedAt(from: row),
+                shiftRate: (row["shift_rate"] as? NSNumber)?.doubleValue
             )
         }
     }
@@ -333,6 +395,11 @@ final class SupabaseTokenRepository: TokenRepositoryProtocol {
             prefer: "return=minimal"
         )
     }
+
+    private static func approvedAt(from row: [String: Any]) -> Date? {
+        guard let raw = row["approved_at"] as? String, !raw.isEmpty else { return nil }
+        return parseServerDate(raw)
+    }
 }
 
 private extension DateFormatter {
@@ -350,9 +417,142 @@ private extension DateFormatter {
 
 @MainActor
 enum SupabaseProfileSync {
+    /// Loads the signed-in user's server profile and stores it on this device.
+    /// Returns nil when the row is missing or onboarding is unfinished.
+    /// Throws on a network or server error so a same-user local profile can be kept.
+    static func hydrate(preferredRole: UserRole, email: String) async throws -> UserRole? {
+        guard SupabaseConfig.isConfigured,
+              let token = SupabaseAuthService.shared.accessToken,
+              let userID = SupabaseAuthService.shared.currentUserID else { return nil }
+
+        let role = try await fetchServerRole(userID: userID, token: token) ?? preferredRole
+        switch role {
+        case .doctor:
+            guard let profile = try await fetchDoctor(userID: userID, email: email, token: token) else { return nil }
+            profile.save()
+            UserDefaults.standard.removeObject(forKey: HospitalProfile.storageKey)
+            guard profile.isOnboardingComplete else { return nil }
+            markPushed(kind: "doctor", id: userID, payload: doctorRow(profile, userID: userID))
+            return .doctor
+        case .hospital:
+            guard let profile = try await fetchHospital(userID: userID, email: email, token: token) else { return nil }
+            profile.save()
+            SchedulingPolicyStore.shared.setPolicy(profile.schedulingPolicy, for: profile.id)
+            UserDefaults.standard.removeObject(forKey: DoctorProfile.storageKey)
+            guard profile.isOnboardingComplete else { return nil }
+            markPushed(kind: "hospital", id: profile.id, payload: hospitalFingerprint(profile, userID: userID))
+            return .hospital
+        }
+    }
+
     static func upsertDoctor(_ profile: DoctorProfile) async {
-        guard SupabaseConfig.isConfigured, let userID = profile.userID ?? SessionStore.shared.currentUserID else { return }
-        let row: [String: Any] = [
+        guard SupabaseConfig.isConfigured, profile.isOnboardingComplete,
+              let userID = profile.userID ?? SessionStore.shared.currentUserID else { return }
+        let row = doctorRow(profile, userID: userID)
+        guard needsPush(kind: "doctor", id: userID, payload: row) else { return }
+        do {
+            _ = try await SupabaseHTTPClient.shared.request(
+                path: "rest/v1/doctor_profiles?on_conflict=profile_id",
+                method: "POST",
+                body: try JSONSerialization.data(withJSONObject: row),
+                accessToken: SupabaseAuthService.shared.accessToken,
+                prefer: "resolution=merge-duplicates,return=minimal"
+            )
+            markPushed(kind: "doctor", id: userID, payload: row)
+        } catch {
+            return
+        }
+    }
+
+    static func upsertHospital(_ profile: HospitalProfile) async throws {
+        guard SupabaseConfig.isConfigured, profile.isOnboardingComplete,
+              let userID = profile.userID ?? SessionStore.shared.currentUserID else { return }
+        let fingerprint = hospitalFingerprint(profile, userID: userID)
+        guard needsPush(kind: "hospital", id: profile.id, payload: fingerprint) else { return }
+        let row = hospitalRow(profile, userID: userID)
+        _ = try await SupabaseHTTPClient.shared.request(
+            path: "rest/v1/hospital_profiles?on_conflict=id",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: row),
+            accessToken: SupabaseAuthService.shared.accessToken,
+            prefer: "resolution=merge-duplicates,return=minimal"
+        )
+        let policyObject = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(profile.schedulingPolicy))) ?? [:]
+        let policyRow: [String: Any] = [
+            "hospital_id": profile.id.uuidString,
+            "policy": policyObject
+        ]
+        _ = try await SupabaseHTTPClient.shared.request(
+            path: "rest/v1/scheduling_policies?on_conflict=hospital_id",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: policyRow),
+            accessToken: SupabaseAuthService.shared.accessToken,
+            prefer: "resolution=merge-duplicates,return=minimal"
+        )
+        markPushed(kind: "hospital", id: profile.id, payload: fingerprint)
+    }
+
+    private static func fetchServerRole(userID: UUID, token: String) async throws -> UserRole? {
+        let profileRows = try await Self.rows(path: "rest/v1/profiles?id=eq.\(userID.uuidString)&select=role", token: token)
+        guard let raw = profileRows.first?["role"] as? String else { return nil }
+        switch raw.lowercased() {
+        case "hospital": return .hospital
+        case "doctor": return .doctor
+        default: return nil
+        }
+    }
+
+    private static func fetchDoctor(userID: UUID, email: String, token: String) async throws -> DoctorProfile? {
+        let profileRows = try await Self.rows(path: "rest/v1/doctor_profiles?profile_id=eq.\(userID.uuidString)&select=*", token: token)
+        guard let row = profileRows.first else { return nil }
+        let credential = DoctorProfile.CredentialType(rawValue: row["credential"] as? String ?? "") ?? .md
+        let status = VerificationStatus(rawValue: row["verification_status"] as? String ?? "") ?? .pending
+        return DoctorProfile(
+            id: userID,
+            userID: userID,
+            firstName: row["first_name"] as? String ?? "",
+            lastName: row["last_name"] as? String ?? "",
+            credential: credential,
+            npi: row["npi"] as? String ?? "",
+            deaNumber: row["dea_number"] as? String ?? "",
+            licenseNumber: row["license_number"] as? String ?? "",
+            licenseState: row["license_state"] as? String ?? "",
+            specialties: row["specialties"] as? [String] ?? [],
+            email: (row["email"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? email,
+            verificationStatus: status,
+            verificationFlags: row["verification_flags"] as? [String] ?? [],
+            npiRegistryName: row["npi_registry_name"] as? String,
+            npiTaxonomy: row["npi_taxonomy"] as? String
+        )
+    }
+
+    private static func fetchHospital(userID: UUID, email: String, token: String) async throws -> HospitalProfile? {
+        let profileRows = try await Self.rows(path: "rest/v1/hospital_profiles?profile_id=eq.\(userID.uuidString)&select=*", token: token)
+        guard let row = profileRows.first, let id = UUID(uuidString: row["id"] as? String ?? "") else { return nil }
+        let status = VerificationStatus(rawValue: row["verification_status"] as? String ?? "") ?? .pending
+        var policy = SchedulingPolicy()
+        let policyRows = try await Self.rows(
+            path: "rest/v1/scheduling_policies?hospital_id=eq.\(id.uuidString)&select=policy",
+            token: token
+        )
+        if let raw = policyRows.first?["policy"] {
+            policy = decodePolicy(raw)
+        }
+        return HospitalProfile(
+            id: id,
+            userID: userID,
+            name: row["name"] as? String ?? "",
+            npi: row["npi"] as? String ?? "",
+            email: (row["email"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? email,
+            verificationStatus: status,
+            verificationFlags: row["verification_flags"] as? [String] ?? [],
+            npiRegistryName: row["npi_registry_name"] as? String,
+            schedulingPolicy: policy
+        )
+    }
+
+    private static func doctorRow(_ profile: DoctorProfile, userID: UUID) -> [String: Any] {
+        [
             "profile_id": userID.uuidString,
             "first_name": profile.firstName,
             "last_name": profile.lastName,
@@ -366,18 +566,10 @@ enum SupabaseProfileSync {
             "email": profile.email,
             "verification_flags": profile.verificationFlags
         ]
-        _ = try? await SupabaseHTTPClient.shared.request(
-            path: "rest/v1/doctor_profiles?on_conflict=profile_id",
-            method: "POST",
-            body: try JSONSerialization.data(withJSONObject: row),
-            accessToken: SupabaseAuthService.shared.accessToken,
-            prefer: "resolution=merge-duplicates,return=minimal"
-        )
     }
 
-    static func upsertHospital(_ profile: HospitalProfile) async throws {
-        guard SupabaseConfig.isConfigured, let userID = profile.userID ?? SessionStore.shared.currentUserID else { return }
-        let row: [String: Any] = [
+    private static func hospitalRow(_ profile: HospitalProfile, userID: UUID) -> [String: Any] {
+        [
             "id": profile.id.uuidString,
             "profile_id": userID.uuidString,
             "name": profile.name,
@@ -386,24 +578,49 @@ enum SupabaseProfileSync {
             "email": profile.email,
             "verification_flags": profile.verificationFlags
         ]
-        _ = try await SupabaseHTTPClient.shared.request(
-            path: "rest/v1/hospital_profiles?on_conflict=id",
-            method: "POST",
-            body: try JSONSerialization.data(withJSONObject: row),
-            accessToken: SupabaseAuthService.shared.accessToken,
-            prefer: "resolution=merge-duplicates,return=minimal"
-        )
-        let policyRow: [String: Any] = [
-            "hospital_id": profile.id.uuidString,
-            "policy": (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(profile.schedulingPolicy))) ?? [:]
-        ]
-        _ = try? await SupabaseHTTPClient.shared.request(
-            path: "rest/v1/scheduling_policies?on_conflict=hospital_id",
-            method: "POST",
-            body: try JSONSerialization.data(withJSONObject: policyRow),
-            accessToken: SupabaseAuthService.shared.accessToken,
-            prefer: "resolution=merge-duplicates,return=minimal"
-        )
+    }
+
+    private static func hospitalFingerprint(_ profile: HospitalProfile, userID: UUID) -> [String: Any] {
+        var payload = hospitalRow(profile, userID: userID)
+        payload["policy"] = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(profile.schedulingPolicy))) ?? [:]
+        return payload
+    }
+
+    private static func decodePolicy(_ value: Any) -> SchedulingPolicy {
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value),
+              let policy = try? JSONDecoder().decode(SchedulingPolicy.self, from: data) else {
+            return SchedulingPolicy()
+        }
+        return policy
+    }
+
+    private static func rows(path: String, token: String) async throws -> [[String: Any]] {
+        let data = try await SupabaseHTTPClient.shared.request(path: path, accessToken: token)
+        return (try JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
+    }
+
+    private static func fingerprintKey(kind: String, id: UUID) -> String {
+        "profile_push_fp_\(kind)_\(id.uuidString)"
+    }
+
+    private static func canonical(_ payload: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return "" }
+        return text
+    }
+
+    private static func needsPush(kind: String, id: UUID, payload: [String: Any]) -> Bool {
+        let next = canonical(payload)
+        guard !next.isEmpty else { return true }
+        return UserDefaults.standard.string(forKey: fingerprintKey(kind: kind, id: id)) != next
+    }
+
+    private static func markPushed(kind: String, id: UUID, payload: [String: Any]) {
+        let next = canonical(payload)
+        guard !next.isEmpty else { return }
+        UserDefaults.standard.set(next, forKey: fingerprintKey(kind: kind, id: id))
     }
 }
 
@@ -429,42 +646,114 @@ final class DataSyncCoordinator: ObservableObject {
 
     func syncAll() async {
         guard SupabaseConfig.isConfigured else { return }
+        // Explore and signed-out sessions keep their local sample data.
+        guard SupabaseAuthService.shared.accessToken != nil else { return }
         isSyncing = true
         defer { isSyncing = false; lastSyncDate = Date() }
 
+        let role = SessionStore.shared.currentRole
         do {
-            _ = try await SupabaseShiftRepository.shared.fetchOpenShifts(hospitalID: SessionStore.shared.currentHospitalID)
+            let hospitalScope = role == .hospital ? SessionStore.shared.currentHospitalID : nil
+            let shifts = try await SupabaseShiftRepository.shared.fetchOpenShifts(hospitalID: hospitalScope)
 
-            if let doctorID = SessionStore.shared.currentUserID ?? DoctorProfile.load()?.id {
-                let remote = try await SupabaseAssignmentRepository.shared.fetchAssignments(doctorID: doctorID)
-                if !remote.isEmpty {
-                    // Merge remote into local store by replacing matching IDs
-                    for item in remote {
-                        if !AssignedShiftsStore.shared.assignedShifts.contains(where: { $0.id == item.id }) {
-                            await AssignedShiftsStore.shared.assign(item.shift, doctorID: item.doctorID)
-                        }
-                    }
+            if role == .hospital, let hospitalID = SessionStore.shared.currentHospitalID {
+                let assignments = try await SupabaseAssignmentRepository.shared.fetchHospitalAssignments(hospitalID: hospitalID)
+                Services.hospital.replaceAll(shifts)
+                AssignedShiftsStore.shared.replaceAll(assignments)
+                if let roster = await SupabaseRosterRepository.fetchForReplace(hospitalID: hospitalID) {
+                    DoctorRosterStore.shared.replaceAll(roster)
                 }
-            }
-
-            if let hospitalID = SessionStore.shared.currentHospitalID {
-                let tokens = try await SupabaseTokenRepository.shared.fetchRequests(hospitalID: hospitalID)
-                TokenStore.shared.mergeRemote(tokens)
+                let tokens = try await SupabaseTokenRepository.shared.fetchQueue(hospitalID: hospitalID, doctorID: nil)
+                TokenStore.shared.replaceRemote(tokens)
+                if let dates = try? await Self.fetchUnavailableDates(hospitalID: hospitalID) {
+                    UnavailableDaysStore.shared.replace(hospitalID: hospitalID, dates: dates)
+                }
+                if let penalties = try? await Self.fetchPenalties(hospitalID: hospitalID, doctorID: nil) {
+                    PenaltyLedgerStore.shared.replaceAll(penalties)
+                }
+                await SavingsReporter.shared.refresh(hospitalID: hospitalID)
+                if let hospital = HospitalProfile.load() {
+                    try await SupabaseProfileSync.upsertHospital(hospital)
+                }
+            } else if role == .doctor {
+                let doctorID = SessionStore.shared.currentUserID ?? SessionStore.shared.currentDoctorID
+                let mine = try await SupabaseAssignmentRepository.shared.fetchAssignments(doctorID: doctorID)
+                Services.hospital.replaceAll(shifts)
+                AssignedShiftsStore.shared.replaceAll(mine)
+                if let filled = try? await SupabaseShiftRepository.shared.fetchFilledShiftIDs() {
+                    AssignedShiftsStore.shared.markFilledByOthers(shiftIDs: filled, knownShifts: shifts)
+                }
+                if let roster = await SupabaseRosterRepository.fetchVisible() {
+                    DoctorRosterStore.shared.replaceAll(roster)
+                }
+                if let trades = await SupabaseTradeRepository.shared.fetch(doctorID: doctorID) {
+                    ShiftTradeService.shared.replaceTrades(trades)
+                    AssignedShiftsStore.shared.refreshTrades()
+                }
+                let tokens = try await SupabaseTokenRepository.shared.fetchQueue(hospitalID: nil, doctorID: doctorID)
+                TokenStore.shared.replaceRemote(tokens)
+                if let penalties = try? await Self.fetchPenalties(hospitalID: nil, doctorID: doctorID) {
+                    PenaltyLedgerStore.shared.replaceAll(penalties)
+                }
+                if let doctor = DoctorProfile.load() {
+                    await SupabaseProfileSync.upsertDoctor(doctor)
+                }
             } else {
-                let tokens = try await SupabaseTokenRepository.shared.fetchRequests(hospitalID: nil)
-                TokenStore.shared.mergeRemote(tokens)
-            }
-
-            if let doctor = DoctorProfile.load() {
-                await SupabaseProfileSync.upsertDoctor(doctor)
-            }
-            if let hospital = HospitalProfile.load() {
-                try await SupabaseProfileSync.upsertHospital(hospital)
+                Services.hospital.replaceAll(shifts)
             }
 
             lastError = nil
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    private static func fetchUnavailableDates(hospitalID: UUID) async throws -> [Date] {
+        let rows = try await PostgRESTPages.fetchObjects(
+            basePath: "rest/v1/unavailable_days?hospital_id=eq.\(hospitalID.uuidString)&select=date&order=date.asc",
+            accessToken: SupabaseAuthService.shared.accessToken
+        )
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = Calendar.current.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return rows.compactMap { row in
+            guard let raw = row["date"] as? String else { return nil }
+            return formatter.date(from: String(raw.prefix(10)))
+        }
+    }
+
+    private static func fetchPenalties(hospitalID: UUID?, doctorID: UUID?) async throws -> [PenaltyLedgerStore.Entry] {
+        var path = "rest/v1/penalty_ledger?select=*&order=created_at.desc,id.asc"
+        if let hospitalID { path += "&hospital_id=eq.\(hospitalID.uuidString)" }
+        if let doctorID { path += "&doctor_id=eq.\(doctorID.uuidString)" }
+        let rows = try await PostgRESTPages.fetchObjects(
+            basePath: path,
+            accessToken: SupabaseAuthService.shared.accessToken
+        )
+        return rows.compactMap { row in
+            guard
+                let id = UUID(uuidString: row["id"] as? String ?? ""),
+                let doctor = UUID(uuidString: row["doctor_id"] as? String ?? ""),
+                let hospital = UUID(uuidString: row["hospital_id"] as? String ?? ""),
+                let shift = UUID(uuidString: row["shift_id"] as? String ?? ""),
+                let type = PenaltyLedgerStore.EntryType(rawValue: row["type"] as? String ?? "")
+            else { return nil }
+            let amount = (row["amount"] as? NSNumber)?.decimalValue
+                ?? Decimal(string: row["amount"] as? String ?? "")
+                ?? 0
+            let createdRaw = row["created_at"] as? String ?? ""
+            let created = parseServerDate(createdRaw) ?? Date()
+            return PenaltyLedgerStore.Entry(
+                id: id,
+                doctorID: doctor,
+                hospitalID: hospital,
+                shiftID: shift,
+                type: type,
+                amount: amount,
+                createdAt: created
+            )
         }
     }
 }
@@ -490,15 +779,27 @@ enum SupabaseRosterRepository {
     }
 
     static func fetch(hospitalID: UUID) async -> [DoctorSummary] {
+        await fetchRoster(hospitalID: hospitalID) ?? []
+    }
+
+    /// Approved peers visible to the signed-in doctor. The view already hides other hospitals.
+    /// Nil means the request failed; an empty list means the server has nobody.
+    static func fetchVisible() async -> [DoctorSummary]? {
+        await fetchRoster(hospitalID: nil)
+    }
+
+    static func fetchForReplace(hospitalID: UUID) async -> [DoctorSummary]? {
+        await fetchRoster(hospitalID: hospitalID)
+    }
+
+    private static func fetchRoster(hospitalID: UUID?) async -> [DoctorSummary]? {
         guard SupabaseConfig.isConfigured else { return [] }
-        let path = "rest/v1/hospital_roster?select=doctor_id,auto_approve,first_name,last_name,credential,specialties,verification_status&hospital_id=eq.\(hospitalID.uuidString)"
-        guard
-            let data = try? await SupabaseHTTPClient.shared.request(
-                path: path,
-                accessToken: SupabaseAuthService.shared.accessToken
-            ),
-            let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return [] }
+        var path = "rest/v1/hospital_roster?select=doctor_id,auto_approve,first_name,last_name,credential,specialties,verification_status&order=doctor_id.asc,hospital_id.asc"
+        if let hospitalID { path += "&hospital_id=eq.\(hospitalID.uuidString)" }
+        guard let rows = try? await PostgRESTPages.fetchObjects(
+            basePath: path,
+            accessToken: SupabaseAuthService.shared.accessToken
+        ) else { return nil }
 
         return rows.compactMap { row -> DoctorSummary? in
             guard let id = UUID(uuidString: row["doctor_id"] as? String ?? "") else { return nil }
@@ -573,13 +874,13 @@ final class SupabaseTradeRepository {
         )
     }
 
-    func fetch(doctorID: UUID) async -> [ShiftTradeRequest] {
+    func fetch(doctorID: UUID) async -> [ShiftTradeRequest]? {
         guard SupabaseConfig.isConfigured else { return [] }
         let filter = "or=(from_doctor_id.eq.\(doctorID.uuidString),to_doctor_id.eq.\(doctorID.uuidString))"
-        guard let data = try? await SupabaseHTTPClient.shared.request(
-            path: "rest/v1/trade_requests?select=*&\(filter)&order=created_at.desc&limit=200",
+        guard let rows = try? await PostgRESTPages.fetchObjects(
+            basePath: "rest/v1/trade_requests?select=*&\(filter)&order=created_at.desc,id.asc",
             accessToken: SupabaseAuthService.shared.accessToken
-        ), let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        ) else { return nil }
 
         return rows.compactMap { row in
             guard
@@ -601,7 +902,9 @@ final class SupabaseTradeRepository {
                 toDoctorID: to,
                 shiftID: shiftID,
                 requestedShiftID: UUID(uuidString: row["requested_shift_id"] as? String ?? ""),
-                compensationAmount: (row["compensation_amount"] as? NSNumber)?.doubleValue ?? 0,
+                compensationAmount: (row["compensation_amount"] as? NSNumber)?.doubleValue
+                    ?? Double(row["compensation_amount"] as? String ?? "")
+                    ?? 0,
                 counterOfTradeID: UUID(uuidString: row["counter_of_trade_id"] as? String ?? ""),
                 createdAt: date("created_at") ?? Date(),
                 state: state,

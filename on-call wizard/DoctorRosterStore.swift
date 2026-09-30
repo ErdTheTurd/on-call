@@ -87,9 +87,21 @@ public final class DoctorRosterStore: ObservableObject {
 
     // MARK: - Demo seed
 
+    /// Replaces the roster. A signed-in session uses this so Explore names do not linger.
+    public func replaceAll(_ remote: [DoctorSummary]) {
+        doctors = remote
+        save()
+    }
+
+    public func clearAll() {
+        doctors = []
+        save()
+    }
+
     /// Injects a set of verified mock doctors (one per specialty used in demo shifts).
     /// Also ensures at least two partners exist for the current doctor's specialties.
     public func seedMockDoctorsIfNeeded() {
+        guard InvestorDemo.usesLocalSampleData else { return }
         let mockIDs: [UUID] = [
             UUID(uuidString: "E1000001-0000-0000-0000-000000000000")!,
             UUID(uuidString: "E2000001-0000-0000-0000-000000000000")!,

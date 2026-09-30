@@ -10,7 +10,7 @@
  *                                    left open climbs to a ceiling multiplier, so
  *                                    filling at today's rate is a real avoided cost
  */
-import { getSupabase, isConfigured } from "../supabase-client.js";
+import { getSupabase, isConfigured, fetchAllPages } from "../supabase-client.js";
 import { currentRate, hoursUntilStart } from "../shift-math.js";
 
 const TABLE = "hospital_savings_events";
@@ -143,19 +143,20 @@ export async function refreshSavingsCache(hospitalID) {
 }
 
 /** Savings rows this account is allowed to see (own hospital, or everything for admins). */
-export async function fetchSavingsEvents({ hospitalID = null, limit = 2000 } = {}) {
+export async function fetchSavingsEvents({ hospitalID = null } = {}) {
   if (!isConfigured()) return readLocal();
   try {
     const supabase = getSupabase();
-    let query = supabase
-      .from(TABLE)
-      .select("*")
-      .order("occurred_at", { ascending: false })
-      .limit(limit);
-    if (hospitalID) query = query.eq("hospital_id", hospitalID);
-    const { data, error } = await query;
-    if (error) throw error;
-    return data || [];
+    return await fetchAllPages((from, to) => {
+      let query = supabase
+        .from(TABLE)
+        .select("*")
+        .order("occurred_at", { ascending: false })
+        .order("event_key", { ascending: true })
+        .range(from, to);
+      if (hospitalID) query = query.eq("hospital_id", hospitalID);
+      return query;
+    });
   } catch {
     return readLocal();
   }

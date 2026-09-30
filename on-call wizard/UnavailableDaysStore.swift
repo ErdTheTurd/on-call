@@ -33,6 +33,16 @@ public final class UnavailableDaysStore: ObservableObject {
         blockedByHospital[hospitalID] ?? []
     }
 
+    public func replace(hospitalID: UUID, dates: [Date]) {
+        blockedByHospital[hospitalID] = Set(dates.map { $0.onlyDate() })
+        save()
+    }
+
+    public func clearAll() {
+        blockedByHospital = [:]
+        save()
+    }
+
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
               let stored = try? JSONDecoder().decode([UUID: [Date]].self, from: data) else { return }

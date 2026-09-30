@@ -25,6 +25,13 @@ final class PlusMembershipStore: ObservableObject {
 
     var showsAds: Bool { Self.isMonetizationLive && !isActive }
 
+    func clearLocal() {
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        until = nil
+        lastError = nil
+        isActive = Self.isMonetizationLive ? false : true
+    }
+
     func refresh() async {
         guard Self.isMonetizationLive else {
             isActive = true

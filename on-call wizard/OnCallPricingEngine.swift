@@ -108,7 +108,7 @@ public enum CaseVolumeInsights {
             a.shift.date < today
         }.count
 
-        if InvestorDemo.isEnabled {
+        if InvestorDemo.usesLocalSampleData {
             // Stable demo volume so investors always see a meaningful scale.
             let hash = abs(specialty.hashValue ^ hospitalID.hashValue)
             let demo = 40 + (hash % 220)

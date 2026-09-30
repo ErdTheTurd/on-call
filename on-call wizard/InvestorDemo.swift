@@ -22,12 +22,19 @@ enum InvestorDemo {
         #endif
     }
 
+    /// Explore (no Supabase session) keeps the local sample board.
+    /// A real sign-in, including TestFlight and App Review, uses the server.
+    @MainActor
+    static var usesLocalSampleData: Bool {
+        isEnabled && SupabaseAuthService.shared.accessToken == nil
+    }
+
     private static let seededKey = "investor_demo_seeded_v2"
 
     @MainActor
     static func bootstrapIfNeeded(hospitalID: UUID, hospitalName: String) {
         renameBayviewIfNeeded()
-        guard isEnabled else { return }
+        guard usesLocalSampleData else { return }
 
         DoctorRosterStore.shared.seedMockDoctorsIfNeeded()
         seedPayRatesIfNeeded()

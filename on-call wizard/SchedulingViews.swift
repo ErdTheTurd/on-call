@@ -252,12 +252,25 @@ struct SpecialtyPayEditor: View {
 
     // MARK: Derived
 
-    private var useMockData: Bool { roster.doctors.isEmpty }
+    private var useMockData: Bool { InvestorDemo.usesLocalSampleData && roster.doctors.isEmpty }
 
     private var specialties: [String] {
-        useMockData
-            ? Array(Self.mockSpecialtyRates.keys).sorted()
-            : Array(Set(roster.doctors.map { $0.specialty })).sorted()
+        if useMockData {
+            return Array(Self.mockSpecialtyRates.keys).sorted()
+        }
+        var names = Set(policy.specialtyBaseRates.keys)
+        names.formUnion(roster.doctors.map(\.specialty))
+        if let hospitalID = SessionStore.shared.currentHospitalID {
+            names.formUnion(
+                Services.hospital.shifts
+                    .filter { $0.hospitalID == hospitalID }
+                    .map(\.specialty)
+            )
+        }
+        if names.isEmpty {
+            names.formUnion(DemoData.specialties)
+        }
+        return names.sorted()
     }
 
     private var allSelected: Bool {
@@ -271,9 +284,9 @@ struct SpecialtyPayEditor: View {
     }
 
     private func rate(for specialty: String) -> Double {
-        policy.specialtyBaseRates[specialty]
-            ?? Self.mockSpecialtyRates[specialty]
-            ?? Self.defaultRate
+        if let saved = policy.specialtyBaseRates[specialty] { return saved }
+        if useMockData, let mock = Self.mockSpecialtyRates[specialty] { return mock }
+        return Self.defaultRate
     }
 
     private func applyBasePay(_ newRate: Double, to targets: [String]) {
@@ -362,11 +375,9 @@ struct SpecialtyPayEditor: View {
                         }
                     ),
                     doctorRate: { doc in
-                        policy.doctorBaseRates[doc.id.uuidString]
-                            ?? Self.mockDoctorRates[doc.id.uuidString]
-                            ?? policy.specialtyBaseRates[specialty]
-                            ?? Self.mockSpecialtyRates[specialty]
-                            ?? Self.defaultRate
+                        if let saved = policy.doctorBaseRates[doc.id.uuidString] { return saved }
+                        if useMockData, let mock = Self.mockDoctorRates[doc.id.uuidString] { return mock }
+                        return policy.specialtyBaseRates[doc.specialty] ?? rate(for: doc.specialty)
                     },
                     setDoctorRate: { doc, rate in
                         policy.doctorBaseRates[doc.id.uuidString] = rate

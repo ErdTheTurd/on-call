@@ -29,6 +29,13 @@ final class ProposedRateStore: ObservableObject {
 
     private init() { load() }
 
+    func clearAll() {
+        entries = []
+        doctorDayEntries = []
+        save()
+        saveDoctorDays()
+    }
+
     func algorithmRate(specialty: String, date: Date, hospitalID: UUID) -> Double {
         pricingResult(specialty: specialty, date: date, hospitalID: hospitalID).floor
     }

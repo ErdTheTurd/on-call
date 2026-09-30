@@ -48,6 +48,14 @@ final class InMemoryDoctorService: DoctorService, ObservableObject {
         UserDefaults.standard.set(daysAhead, forKey: daysAheadKey)
     }
 
+    func clearAvailability() {
+        minRate = 120
+        daysAhead = 7
+        acceptedShifts = []
+        UserDefaults.standard.removeObject(forKey: minRateKey)
+        UserDefaults.standard.removeObject(forKey: daysAheadKey)
+    }
+
     func recommendedShifts() async throws -> [Shift] {
         try await openShifts(for: DoctorProfile.load())
     }
@@ -136,6 +144,16 @@ final class InMemoryHospitalService: HospitalService, ObservableObject {
     /// Legacy helper — returns Internal Medicine shift for the day.
     func shift(on date: Date, hospitalID: UUID, hospitalName: String, policy: SchedulingPolicy? = nil) -> Shift {
         shift(on: date, specialty: "Internal Medicine", hospitalID: hospitalID, hospitalName: hospitalName, policy: policy)
+    }
+
+    func replaceAll(_ next: [Shift]) {
+        shifts = next
+        persist()
+    }
+
+    func clearAll() {
+        shifts = []
+        persist()
     }
 
     func upsertShift(_ shift: Shift) {

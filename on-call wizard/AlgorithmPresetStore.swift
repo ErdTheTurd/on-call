@@ -58,6 +58,19 @@ final class AlgorithmPresetStore: ObservableObject {
         syncWorkingFromActive()
     }
 
+    func clearAll() {
+        presets = []
+        activePresetID = AlgorithmPreset.smartID
+        weekdayAssignments = [:]
+        workingOverrides = [:]
+        workingDisabled = []
+        UserDefaults.standard.removeObject(forKey: storageKey)
+        UserDefaults.standard.removeObject(forKey: activeKey)
+        UserDefaults.standard.removeObject(forKey: weekdayKey)
+        ensureSmartAlgo()
+        syncWorkingFromActive()
+    }
+
     func selectPreset(_ id: UUID) {
         guard presets.contains(where: { $0.id == id }) else { return }
         // Persist edits into current non-smart preset before switching

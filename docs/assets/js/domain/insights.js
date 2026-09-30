@@ -5,6 +5,7 @@ import {
   appStore, getProposedRate, getPolicy, isDayUnavailable, isShiftFilled, tokenRequestsForHospital
 } from "../store.js";
 import { currentRate } from "../shift-math.js";
+import { isDemoSession } from "./demo.js";
 
 export function trackedSpecialties(hospitalID) {
   const fromShifts = appStore.shifts.filter((s) => s.hospitalID === hospitalID).map((s) => s.specialty);
@@ -146,7 +147,7 @@ export function hospitalAnalytics(hospitalID) {
     (!hospitalID || p.hospitalID === hospitalID) &&
     new Date(p.createdAt).getFullYear() === year
   );
-  const noRealData = !assignments.length && !ledger.length;
+  const noRealData = isDemoSession() && !assignments.length && !ledger.length;
 
   const traded = assignments.filter((a) => a.status === "traded_pending" || a.status === "traded_complete");
   const canceled = assignments.filter((a) => a.status === "canceled");

@@ -202,8 +202,12 @@ struct AuthView: View {
                 let mail = email.isEmpty ? (pendingVerificationEmail ?? "user") : normalizeEmail(email)
                 await MainActor.run {
                     isLoading = false
+                    guard let userID = SupabaseAuthService.shared.currentUserID else {
+                        errorMessage = "Could not confirm your account. Sign in again."
+                        return
+                    }
                     mfaChallenge = false
-                    finishAuth(userID: SupabaseAuthService.shared.currentUserID ?? UUID(), email: mail, role: role)
+                    finishAuth(userID: userID, email: mail, role: role)
                 }
             } catch {
                 await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }
@@ -222,10 +226,14 @@ struct AuthView: View {
                 try await SupabaseAuthService.shared.verifyTotp(factorId: enroll.factorId, code: code)
                 await MainActor.run {
                     isLoading = false
+                    guard let userID = SupabaseAuthService.shared.currentUserID else {
+                        errorMessage = "Could not confirm your account. Sign in again."
+                        return
+                    }
                     mfaEnroll = nil
                     mfaCode = ""
                     let mail = pendingVerificationEmail ?? normalizeEmail(email)
-                    finishAuth(userID: SupabaseAuthService.shared.currentUserID ?? UUID(), email: mail, role: selectedRole)
+                    finishAuth(userID: userID, email: mail, role: selectedRole)
                 }
             } catch {
                 await MainActor.run { isLoading = false; errorMessage = error.localizedDescription }
@@ -531,9 +539,45 @@ struct AuthView: View {
     }
 
     private func finishAuth(userID: UUID, email: String, role: UserRole) {
+        // Drop the previous account before the session id is rewritten onto its records.
+        LocalAccountData.prepareForSignIn(userID: userID)
         SessionStore.shared.beginSession(userID: userID, email: email, role: role)
-        let hasProfile = role == .doctor ? DoctorProfile.load() != nil : HospitalProfile.load() != nil
-        if hasProfile { auth.completeOnboarding(role: role) } else { auth.selectRole(role) }
+
+        guard SupabaseAuthService.shared.accessToken != nil else {
+            routeFromLocalProfile(role: role)
+            return
+        }
+
+        isLoading = true
+        Task {
+            do {
+                if let serverRole = try await SupabaseProfileSync.hydrate(preferredRole: role, email: email) {
+                    SessionStore.shared.beginSession(userID: userID, email: email, role: serverRole)
+                    await DataSyncCoordinator.shared.syncAll()
+                    auth.completeOnboarding(role: serverRole)
+                } else {
+                    auth.beginOnboarding(role)
+                }
+            } catch {
+                routeFromLocalProfile(role: role)
+            }
+            isLoading = false
+        }
+    }
+
+    private func routeFromLocalProfile(role: UserRole) {
+        let complete: Bool
+        switch role {
+        case .doctor:
+            complete = DoctorProfile.load()?.isOnboardingComplete == true
+        case .hospital:
+            complete = HospitalProfile.load()?.isOnboardingComplete == true
+        }
+        if complete {
+            auth.completeOnboarding(role: role)
+        } else {
+            auth.selectRole(role)
+        }
     }
 
     private func startGoogleSignIn() {

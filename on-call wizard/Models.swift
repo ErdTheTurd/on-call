@@ -303,6 +303,14 @@ public struct DoctorProfile: Codable {
     }
 
     public var displayName: String { "\(firstName) \(lastName), \(credential.rawValue)" }
+
+    /// Onboarding is finished when the server (or this device) has a name and a 10-digit NPI.
+    public var isOnboardingComplete: Bool {
+        let npiDigits = npi.filter(\.isNumber)
+        return !firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && npiDigits.count == 10
+    }
     public static let storageKey = "doctor_profile_v2"
 
     public static func load() -> DoctorProfile? {
@@ -343,6 +351,15 @@ public struct HospitalProfile: Codable {
         self.id = id; self.userID = userID; self.name = name; self.npi = npi; self.email = email
         self.verificationStatus = verificationStatus; self.verificationFlags = verificationFlags
         self.npiRegistryName = npiRegistryName; self.schedulingPolicy = schedulingPolicy
+    }
+
+    /// Onboarding is finished when the facility has a name, a 10-digit NPI, and a work email.
+    public var isOnboardingComplete: Bool {
+        let npiDigits = npi.filter(\.isNumber)
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && npiDigits.count == 10
+            && address.contains("@")
     }
 
     public static let storageKey = "hospital_profile_v2"

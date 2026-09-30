@@ -61,16 +61,44 @@ export async function upsertProfile(userId, email, role) {
   if (error) throw error;
 }
 
+/** PostgREST silently caps a response at max_rows (1000 on the live project). */
+export const POSTGREST_PAGE = 1000;
+
+/** UTC start of the current month, minus 7 days. */
+export function shiftWindowStart(now = new Date()) {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  start.setUTCDate(start.getUTCDate() - 7);
+  return start.toISOString();
+}
+
+/**
+ * Reads every page. A failed page throws so the caller does not keep a short list.
+ * `makeQuery(from, to)` must build a fresh query; range is inclusive.
+ */
+export async function fetchAllPages(makeQuery) {
+  const rows = [];
+  for (let page = 0; page < 40; page++) {
+    const from = page * POSTGREST_PAGE;
+    const to = from + POSTGREST_PAGE - 1;
+    const { data, error } = await makeQuery(from, to);
+    if (error) throw error;
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < POSTGREST_PAGE) return rows;
+  }
+  throw new Error("The server returned more rows than this sync can load. Nothing was replaced.");
+}
+
 export async function fetchOpenShifts() {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const windowStart = shiftWindowStart();
+  return fetchAllPages((from, to) => supabase
     .from("shifts")
     .select("*")
-    .gte("date", new Date().toISOString())
+    .gte("date", windowStart)
     .order("date", { ascending: true })
-    .limit(50);
-  if (error) throw error;
-  return data ?? [];
+    .order("id", { ascending: true })
+    .range(from, to));
 }
 
 export function appDeepLink(path = "") {

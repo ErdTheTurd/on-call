@@ -283,9 +283,24 @@ public final class TokenStore: ObservableObject {
         var changed = false
         for req in remote {
             if let idx = requestedDays.firstIndex(where: { $0.id == req.id }) {
-                if requestedDays[idx].status != req.status {
-                    requestedDays[idx].status = req.status
-                    requestedDays[idx].approvedAt = req.approvedAt
+                let current = requestedDays[idx]
+                let incomingName = req.doctorName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let nameChanged = !incomingName.isEmpty && incomingName != "Doctor" && incomingName != current.doctorName
+                if current.status != req.status || nameChanged || current.credential != req.credential {
+                    requestedDays[idx] = TokenRequest(
+                        id: current.id,
+                        doctorID: current.doctorID,
+                        doctorName: nameChanged ? incomingName : current.doctorName,
+                        credential: req.credential.isEmpty ? current.credential : req.credential,
+                        hospitalID: current.hospitalID,
+                        date: current.date,
+                        status: req.status,
+                        hospitalName: req.hospitalName.isEmpty ? current.hospitalName : req.hospitalName,
+                        specialty: current.specialty,
+                        requestedAt: current.requestedAt,
+                        approvedAt: req.approvedAt ?? current.approvedAt,
+                        shiftRate: req.shiftRate ?? current.shiftRate
+                    )
                     changed = true
                 }
             } else {
@@ -294,6 +309,42 @@ public final class TokenStore: ObservableObject {
             }
         }
         if changed { save() }
+    }
+
+    /// Server rows win. A pending request that never uploaded stays until it does.
+    /// `approvedAt` stays when the server omits it.
+    public func replaceRemote(_ remote: [TokenRequest]) {
+        let localByID = Dictionary(requestedDays.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let remoteIDs = Set(remote.map(\.id))
+        var merged = remote.map { incoming -> TokenRequest in
+            guard let local = localByID[incoming.id] else { return incoming }
+            let incomingName = incoming.doctorName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = (!incomingName.isEmpty && incomingName != "Doctor") ? incomingName : local.doctorName
+            return TokenRequest(
+                id: incoming.id,
+                doctorID: incoming.doctorID,
+                doctorName: name,
+                credential: incoming.credential.isEmpty ? local.credential : incoming.credential,
+                hospitalID: incoming.hospitalID,
+                date: incoming.date,
+                status: incoming.status,
+                hospitalName: incoming.hospitalName.isEmpty ? local.hospitalName : incoming.hospitalName,
+                specialty: incoming.specialty.isEmpty ? local.specialty : incoming.specialty,
+                requestedAt: incoming.requestedAt,
+                approvedAt: incoming.approvedAt ?? local.approvedAt,
+                shiftRate: incoming.shiftRate ?? local.shiftRate
+            )
+        }
+        for local in requestedDays where !remoteIDs.contains(local.id) && local.status == .pending {
+            merged.append(local)
+        }
+        requestedDays = merged
+        save()
+    }
+
+    public func clearAll() {
+        requestedDays = []
+        save()
     }
 
     private func load() {
