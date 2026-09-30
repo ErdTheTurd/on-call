@@ -19,6 +19,23 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: "Not found" }), { status: 404 })
   }
 
+  const { data: doctor, error: doctorFlagError } = await supabase
+    .from("doctor_profiles")
+    .select("is_demo")
+    .eq("profile_id", doctor_id)
+    .maybeSingle()
+  if (!doctorFlagError && doctor?.is_demo) {
+    const hospitalId = assignment.shifts?.hospital_id
+    const { data: hospital } = hospitalId
+      ? await supabase.from("hospital_profiles").select("is_demo").eq("id", hospitalId).maybeSingle()
+      : { data: null }
+    if (!hospital?.is_demo) {
+      return new Response(JSON.stringify({
+        error: "Demo accounts can only work with the demo hospital.",
+      }), { status: 403 })
+    }
+  }
+
   const policy = assignment.shifts?.scheduling_policies?.policy ?? {}
   const penalty = computeCancelPenalty(assignment, policy)
 

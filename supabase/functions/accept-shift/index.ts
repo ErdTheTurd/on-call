@@ -11,6 +11,28 @@ serve(async (req) => {
   )
   const { shift_id, doctor_id, hospital_id, shift_date } = await req.json()
 
+  const { data: doctor, error: doctorFlagError } = await supabase
+    .from("doctor_profiles")
+    .select("is_demo")
+    .eq("profile_id", doctor_id)
+    .maybeSingle()
+  if (!doctorFlagError && doctor?.is_demo) {
+    const { data: shiftRow } = await supabase
+      .from("shifts")
+      .select("hospital_id")
+      .eq("id", shift_id)
+      .maybeSingle()
+    const targetHospital = shiftRow?.hospital_id || hospital_id
+    const { data: hospital } = targetHospital
+      ? await supabase.from("hospital_profiles").select("is_demo").eq("id", targetHospital).maybeSingle()
+      : { data: null }
+    if (!hospital?.is_demo) {
+      return new Response(JSON.stringify({
+        error: "Demo accounts can only work with the demo hospital.",
+      }), { status: 403 })
+    }
+  }
+
   const { data: token } = await supabase
     .from("token_requests")
     .select("*")

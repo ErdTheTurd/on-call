@@ -32,6 +32,23 @@ begin
   if (select first_name || ' ' || last_name from public.doctor_profiles where profile_id = v_doctor) is distinct from 'Jordan Dunn' then
     raise exception 'demo doctor name was not finished';
   end if;
+  if (select is_demo from public.doctor_profiles where profile_id = v_doctor) is distinct from true then
+    raise exception 'demo doctor is not flagged is_demo';
+  end if;
+  if (
+    select count(*)
+    from public.doctor_profiles
+    where is_demo
+      and profile_id in (
+        'de000000-0000-4000-9000-000000000011',
+        'de000000-0000-4000-9000-000000000012',
+        'de000000-0000-4000-9000-000000000013',
+        'de000000-0000-4000-9000-000000000014',
+        'de000000-0000-4000-9000-000000000015'
+      )
+  ) <> 5 then
+    raise exception 'placeholder doctors are not flagged is_demo';
+  end if;
   if not exists (
     select 1 from public.hospital_profiles
     where id = v_hosp and is_demo and email = 'review-hospital@mdshift.net' and verification_status = 'verified'
@@ -181,6 +198,10 @@ begin
   ) then
     raise exception 'unrelated doctor can read another doctor profile';
   end if;
+  update public.doctor_profiles set is_demo = true where profile_id = auth.uid();
+  if (select is_demo from public.doctor_profiles where profile_id = auth.uid()) is distinct from false then
+    raise exception 'doctor client set is_demo';
+  end if;
 end $$;
 
 reset role;
@@ -199,8 +220,16 @@ begin
   if (select count(*) from public.shifts where hospital_id = 'de000000-0000-4000-8000-000000000001') <> 240 then
     raise exception 'demo doctor cannot see the demo board';
   end if;
-  if (select count(*) from public.shifts where hospital_id = 'aa000000-0000-4000-8000-0000000000cc') <> 1 then
-    raise exception 'demo doctor lost visibility of a real hospital';
+  if (select count(*) from public.shifts where hospital_id = 'aa000000-0000-4000-8000-0000000000cc') <> 0 then
+    raise exception 'demo doctor can see a non-demo hospital shift';
+  end if;
+  if (select count(*) from public.shift_coverage where hospital_id = 'aa000000-0000-4000-8000-0000000000cc') <> 0 then
+    raise exception 'demo doctor can see non-demo coverage';
+  end if;
+  if (select count(*) from public.assignments a
+      join public.shifts s on s.id = a.shift_id
+      where s.hospital_id = 'aa000000-0000-4000-8000-0000000000cc') <> 0 then
+    raise exception 'demo doctor can see a non-demo assignment';
   end if;
   if (select count(*) from public.assignments where doctor_id = auth.uid()) <> 6 then
     raise exception 'demo doctor cannot see their six assignments';
@@ -224,6 +253,56 @@ begin
   ) then
     raise exception 'demo doctor can read another doctor''s credential row';
   end if;
+  if (select count(*) from public.doctor_directory
+      where profile_id = 'de000000-0000-4000-9000-000000000011') <> 1 then
+    raise exception 'demo doctor cannot see a demo-hospital peer';
+  end if;
+  if exists (
+    select 1 from public.doctor_directory
+    where profile_id = 'aa000000-0000-4000-8000-0000000000aa'
+  ) then
+    raise exception 'demo doctor can see a non-demo doctor in the directory';
+  end if;
+  update public.doctor_profiles set is_demo = false where profile_id = auth.uid();
+  if (select is_demo from public.doctor_profiles where profile_id = auth.uid()) is distinct from true then
+    raise exception 'demo doctor cleared is_demo';
+  end if;
+  begin
+    insert into public.token_requests (doctor_id, hospital_id, shift_date, specialty)
+    values (auth.uid(), 'aa000000-0000-4000-8000-0000000000cc', date '2026-10-08', 'Cardiology');
+    raise exception 'demo doctor requested a non-demo shift';
+  exception when others then
+    if sqlerrm like '%demo doctor requested a non-demo shift%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+  begin
+    insert into public.hospital_doctors (hospital_id, doctor_id, auto_approve, approved_at)
+    values ('aa000000-0000-4000-8000-0000000000cc', auth.uid(), false, null);
+    raise exception 'demo doctor joined a non-demo roster';
+  exception when others then
+    if sqlerrm like '%demo doctor joined a non-demo roster%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+  begin
+    insert into public.assignments (shift_id, doctor_id, status)
+    values ('aa000000-0000-4000-8000-0000000000dd', auth.uid(), 'scheduled');
+    raise exception 'demo doctor accepted a non-demo shift';
+  exception when others then
+    if sqlerrm like '%demo doctor accepted a non-demo shift%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+  begin
+    insert into public.trade_requests (shift_id, from_doctor_id, to_doctor_id, state)
+    select a.shift_id, auth.uid(), 'aa000000-0000-4000-8000-0000000000aa', 'pending'
+    from public.assignments a
+    where a.doctor_id = auth.uid()
+      and a.status <> 'canceled'
+    limit 1;
+    raise exception 'demo doctor traded with a non-demo doctor';
+  exception when others then
+    if sqlerrm like '%demo doctor traded with a non-demo doctor%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
 end $$;
 
 reset role;
@@ -319,6 +398,265 @@ begin
 end $$;
 
 reset role;
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claim.role', '', true);
+select set_config('request.jwt.claims', '{}', true);
+
+-- ---------------------------------------------------------------------------
+-- A normal doctor who can see the demo board still cannot see the demo doctor.
+-- Link them only after the unlinked checks above. Also flag a doctor who
+-- already has a real-hospital roster row, which is the row a non-demo
+-- hospital would otherwise show.
+-- ---------------------------------------------------------------------------
+
+insert into auth.users (
+  instance_id, id, aud, role, email, encrypted_password, confirmed_at,
+  raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+  confirmation_token, recovery_token, email_change_token, email_change
+) values (
+  '00000000-0000-0000-0000-000000000000',
+  'ee000000-0000-4000-8000-0000000000ee',
+  'authenticated', 'authenticated', 'soon.demo@example.com', '', now(),
+  '{}', '{}', now(), now(), '', '', '', ''
+) on conflict (id) do nothing;
+
+insert into public.profiles (id, email, role) values
+  ('ee000000-0000-4000-8000-0000000000ee', 'soon.demo@example.com', 'doctor')
+on conflict (id) do nothing;
+
+insert into public.doctor_profiles (
+  profile_id, first_name, last_name, credential, npi, specialties, verification_status, email, is_demo
+) values (
+  'ee000000-0000-4000-8000-0000000000ee', 'Erin', 'Edge', 'MD', '1234567893',
+  '{Cardiology}', 'verified', 'soon.demo@example.com', false
+) on conflict (profile_id) do update set is_demo = false;
+
+insert into public.shifts (id, hospital_id, hospital_name, specialty, date, rate_floor)
+values (
+  'ee000000-0000-4000-8000-0000000000e1',
+  'aa000000-0000-4000-8000-0000000000cc',
+  'Real Community Hospital', 'Cardiology', timestamptz '2026-10-09 12:00:00+00', 1200
+);
+
+insert into public.assignments (shift_id, doctor_id, status) values
+  ('aa000000-0000-4000-8000-0000000000dd', 'aa000000-0000-4000-8000-0000000000aa', 'scheduled'),
+  ('ee000000-0000-4000-8000-0000000000e1', 'ee000000-0000-4000-8000-0000000000ee', 'scheduled');
+
+insert into public.hospital_doctors (hospital_id, doctor_id, auto_approve, approved_at) values
+  ('aa000000-0000-4000-8000-0000000000cc', 'aa000000-0000-4000-8000-0000000000aa', false, now()),
+  ('aa000000-0000-4000-8000-0000000000cc', 'ee000000-0000-4000-8000-0000000000ee', false, now()),
+  ('de000000-0000-4000-8000-000000000001', 'aa000000-0000-4000-8000-0000000000aa', false, now());
+
+update public.doctor_profiles
+  set is_demo = true
+  where profile_id = 'ee000000-0000-4000-8000-0000000000ee';
+
+select set_config('request.jwt.claim.sub', 'aa000000-0000-4000-8000-0000000000aa', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"aa000000-0000-4000-8000-0000000000aa","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+begin
+  if (select count(*) from public.shifts where hospital_id = 'de000000-0000-4000-8000-000000000001') <> 240 then
+    raise exception 'linked normal doctor lost the demo board';
+  end if;
+  if (select count(*) from public.shifts where hospital_id = 'aa000000-0000-4000-8000-0000000000cc') <> 2 then
+    raise exception 'linked normal doctor lost the real hospital board';
+  end if;
+  if exists (
+    select 1 from public.doctor_directory
+    where profile_id in (
+      'd10290cb-1dd6-4e65-8a9d-7efb4ea83419',
+      'ee000000-0000-4000-8000-0000000000ee',
+      'de000000-0000-4000-9000-000000000011'
+    )
+  ) then
+    raise exception 'normal doctor can see a demo doctor in the directory';
+  end if;
+  if exists (
+    select 1 from public.hospital_roster
+    where doctor_id in (
+      'd10290cb-1dd6-4e65-8a9d-7efb4ea83419',
+      'ee000000-0000-4000-8000-0000000000ee',
+      'de000000-0000-4000-9000-000000000011'
+    )
+  ) then
+    raise exception 'normal doctor can see a demo doctor on a roster';
+  end if;
+  if (select count(*) from public.doctor_directory
+      where profile_id = 'aa000000-0000-4000-8000-0000000000aa') <> 1 then
+    raise exception 'normal doctor cannot see their own directory card';
+  end if;
+  begin
+    insert into public.trade_requests (shift_id, from_doctor_id, to_doctor_id, state)
+    values (
+      'aa000000-0000-4000-8000-0000000000dd',
+      auth.uid(),
+      'd10290cb-1dd6-4e65-8a9d-7efb4ea83419',
+      'pending'
+    );
+    raise exception 'normal doctor traded with the demo doctor';
+  exception when others then
+    if sqlerrm like '%normal doctor traded with the demo doctor%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+  begin
+    insert into public.trade_requests (shift_id, from_doctor_id, to_doctor_id, state)
+    values (
+      'aa000000-0000-4000-8000-0000000000dd',
+      auth.uid(),
+      'ee000000-0000-4000-8000-0000000000ee',
+      'pending'
+    );
+    raise exception 'normal doctor traded with a demo doctor';
+  exception when others then
+    if sqlerrm like '%normal doctor traded with a demo doctor%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+end $$;
+
+reset role;
+select set_config('request.jwt.claim.sub', 'aa000000-0000-4000-8000-0000000000bb', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"aa000000-0000-4000-8000-0000000000bb","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+begin
+  if exists (
+    select 1 from public.doctor_directory
+    where profile_id = 'ee000000-0000-4000-8000-0000000000ee'
+  ) then
+    raise exception 'non-demo hospital can see a demo doctor in the directory';
+  end if;
+  if exists (
+    select 1 from public.hospital_roster
+    where doctor_id = 'ee000000-0000-4000-8000-0000000000ee'
+  ) then
+    raise exception 'non-demo hospital can see a demo doctor on the roster';
+  end if;
+  if (select count(*) from public.doctor_directory
+      where profile_id = 'aa000000-0000-4000-8000-0000000000aa') <> 1 then
+    raise exception 'non-demo hospital lost a normal roster doctor';
+  end if;
+  if (select count(*) from public.hospital_roster
+      where doctor_id = 'aa000000-0000-4000-8000-0000000000aa') <> 1 then
+    raise exception 'non-demo hospital lost a normal roster row';
+  end if;
+  if exists (
+    select 1 from public.assignments
+    where doctor_id = 'ee000000-0000-4000-8000-0000000000ee'
+  ) then
+    raise exception 'non-demo hospital can see a demo doctor assignment';
+  end if;
+  begin
+    insert into public.hospital_doctors (hospital_id, doctor_id, auto_approve, approved_at)
+    values (
+      'aa000000-0000-4000-8000-0000000000cc',
+      'd10290cb-1dd6-4e65-8a9d-7efb4ea83419',
+      false,
+      now()
+    );
+    raise exception 'non-demo hospital added the demo doctor';
+  exception when others then
+    if sqlerrm like '%non-demo hospital added the demo doctor%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+end $$;
+
+reset role;
+select set_config('request.jwt.claim.sub', 'd10290cb-1dd6-4e65-8a9d-7efb4ea83419', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"d10290cb-1dd6-4e65-8a9d-7efb4ea83419","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+begin
+  if exists (
+    select 1 from public.doctor_directory
+    where profile_id = 'aa000000-0000-4000-8000-0000000000aa'
+  ) then
+    raise exception 'demo doctor can see a non-demo peer after they join';
+  end if;
+  if exists (
+    select 1 from public.hospital_roster
+    where doctor_id = 'aa000000-0000-4000-8000-0000000000aa'
+  ) then
+    raise exception 'demo doctor can see a non-demo roster peer';
+  end if;
+  if (select count(*) from public.hospital_roster
+      where hospital_id = 'de000000-0000-4000-8000-000000000001'
+        and doctor_id = 'de000000-0000-4000-9000-000000000011') <> 1 then
+    raise exception 'demo doctor lost a demo peer on the roster';
+  end if;
+end $$;
+
+reset role;
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claim.role', 'service_role', true);
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+set local role service_role;
+
+do $$
+begin
+  begin
+    insert into public.token_requests (doctor_id, hospital_id, shift_date, specialty)
+    values (
+      'd10290cb-1dd6-4e65-8a9d-7efb4ea83419',
+      'aa000000-0000-4000-8000-0000000000cc',
+      date '2026-10-08',
+      'Cardiology'
+    );
+    raise exception 'service role requested a non-demo shift for the demo doctor';
+  exception when others then
+    if sqlerrm like '%service role requested a non-demo shift%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+  begin
+    insert into public.hospital_doctors (hospital_id, doctor_id, auto_approve, approved_at)
+    values (
+      'aa000000-0000-4000-8000-0000000000cc',
+      'd10290cb-1dd6-4e65-8a9d-7efb4ea83419',
+      false,
+      now()
+    );
+    raise exception 'service role joined the demo doctor to a non-demo roster';
+  exception when others then
+    if sqlerrm like '%service role joined the demo doctor%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+  begin
+    update public.assignments
+      set doctor_id = 'd10290cb-1dd6-4e65-8a9d-7efb4ea83419'
+      where shift_id = 'aa000000-0000-4000-8000-0000000000dd';
+    raise exception 'service role moved the demo doctor onto a non-demo shift';
+  exception when others then
+    if sqlerrm like '%service role moved the demo doctor%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+  begin
+    insert into public.trade_requests (shift_id, from_doctor_id, to_doctor_id, state)
+    select a.shift_id, 'd10290cb-1dd6-4e65-8a9d-7efb4ea83419', 'aa000000-0000-4000-8000-0000000000aa', 'pending'
+    from public.assignments a
+    where a.doctor_id = 'd10290cb-1dd6-4e65-8a9d-7efb4ea83419'
+      and a.status <> 'canceled'
+    limit 1;
+    raise exception 'service role traded the demo doctor with a non-demo doctor';
+  exception when others then
+    if sqlerrm like '%service role traded the demo doctor%' then raise; end if;
+    if sqlerrm not like '%demo doctors%' then raise; end if;
+  end;
+  if (select doctor_id from public.assignments where shift_id = 'aa000000-0000-4000-8000-0000000000dd')
+     is distinct from 'aa000000-0000-4000-8000-0000000000aa' then
+    raise exception 'service role changed the real assignment';
+  end if;
+end $$;
+
+reset role;
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claim.role', '', true);
+select set_config('request.jwt.claims', '{}', true);
 
 -- ---------------------------------------------------------------------------
 -- More than 1000 older shifts must not hide the Oct–Nov board.
@@ -340,6 +678,18 @@ insert into public.shifts (id, hospital_id, hospital_name, specialty, date, rate
 select gen_random_uuid(),
        'aa000000-0000-4000-8000-0000000000cc',
        'Real Community Hospital',
+       'History ' || (g.i % 50),
+       ((date '2026-08-25' + (g.i / 50)) + time '12:00') at time zone 'UTC',
+       100
+from generate_series(0, 999) as g(i);
+
+-- The demo doctor cannot see the real hospital's history rows. The same
+-- 1000-row crowd has to sit on the demo hospital so the first window page
+-- is still full and 20 Nov still lands on the next page.
+insert into public.shifts (id, hospital_id, hospital_name, specialty, date, rate_floor)
+select gen_random_uuid(),
+       'de000000-0000-4000-8000-000000000001',
+       'MD Shift Demo Medical Center',
        'History ' || (g.i % 50),
        ((date '2026-08-25' + (g.i / 50)) + time '12:00') at time zone 'UTC',
        100
@@ -367,6 +717,9 @@ begin
     and date = timestamptz '2026-11-20 12:00:00+00';
   if v_nov20 is null then
     raise exception '20 Nov Orthopedics shift is missing';
+  end if;
+  if (select count(*) from public.shifts where hospital_id = 'aa000000-0000-4000-8000-0000000000cc') <> 0 then
+    raise exception 'demo doctor can see non-demo hospital shifts';
   end if;
 
   if exists (

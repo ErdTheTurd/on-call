@@ -30,6 +30,44 @@ function bearerJwt(req: Request): string {
   return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : ""
 }
 
+const DEMO_SCOPE_ERROR = "Demo accounts can only work with the demo hospital."
+
+/** Null when the trade stays inside non-demo users, or inside demo doctors and demo hospitals. */
+async function demoTradeScopeError(
+  admin: { from: (table: string) => any },
+  fromId: string,
+  toId: string,
+  shiftIds: string[],
+): Promise<string | null> {
+  const doctorIds = [fromId, toId].filter((id) => id)
+  const { data: doctors, error } = await admin
+    .from("doctor_profiles")
+    .select("profile_id, is_demo")
+    .in("profile_id", doctorIds)
+  if (error || !doctors) return null
+  const demoDoctors = new Set(
+    doctors.filter((doctor: { is_demo?: boolean }) => doctor.is_demo).map((doctor: { profile_id: string }) => doctor.profile_id),
+  )
+  if (demoDoctors.size === 0) return null
+  if (doctorIds.some((id) => !demoDoctors.has(id))) return DEMO_SCOPE_ERROR
+  const ids = [...new Set(shiftIds.filter((id) => id))]
+  if (ids.length === 0) return DEMO_SCOPE_ERROR
+  const { data: shifts, error: shiftError } = await admin
+    .from("shifts")
+    .select("id, hospital_id")
+    .in("id", ids)
+  if (shiftError || !shifts || shifts.length !== ids.length) return DEMO_SCOPE_ERROR
+  const hospitalIds = [...new Set(shifts.map((shift: { hospital_id: string }) => shift.hospital_id))]
+  const { data: hospitals, error: hospitalError } = await admin
+    .from("hospital_profiles")
+    .select("id, is_demo")
+    .in("id", hospitalIds)
+  if (hospitalError || !hospitals || hospitals.some((hospital: { is_demo?: boolean }) => !hospital.is_demo)) {
+    return DEMO_SCOPE_ERROR
+  }
+  return null
+}
+
 serve(async (req) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "POST only." }), { status: 405 })
@@ -113,6 +151,14 @@ serve(async (req) => {
   }
   if (offered.iso) row.offered_date = offered.iso
   if (requested.iso) row.requested_date = requested.iso
+
+  const scopeError = await demoTradeScopeError(
+    admin,
+    actorId,
+    toDoctorId,
+    [shiftId, row.requested_shift_id ? String(row.requested_shift_id) : ""],
+  )
+  if (scopeError) return new Response(JSON.stringify({ error: scopeError }), { status: 403 })
 
   const { data, error } = await admin.from("trade_requests").insert(row).select().single()
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 400 })
