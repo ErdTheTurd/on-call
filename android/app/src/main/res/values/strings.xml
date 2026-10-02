@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MD Shift</string>
+    <string name="tagline">Smarter shift scheduling</string>
+    <string name="privacy_policy">Privacy Policy</string>
+    <string name="support">Support</string>
+</resources>
