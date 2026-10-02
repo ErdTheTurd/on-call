@@ -60,10 +60,14 @@ class RootViewModel(
     init {
         auth.restore()
         viewModelScope.launch {
+            auth.resume()
             while (true) {
                 delay(20_000)
                 val gate = auth.snapshot.value.gate
-                if (gate is AuthGate.Ready && !gate.explore) board.sync()
+                if (gate is AuthGate.Ready && !gate.explore) {
+                    board.sync()
+                    if (book.current.session == null) auth.restore()
+                }
             }
         }
     }
@@ -122,7 +126,7 @@ class RootViewModel(
     }
     fun priority(enabled: Boolean) = book.update { it.copy(priorityPosting = enabled) }
     fun autoPay(enabled: Boolean) = book.update { it.copy(autoPayInvoices = enabled) }
-    fun tokenLimit(doctorId: String, limit: Int) = launch {
+    fun tokenLimit(doctorId: String, limit: Int) = act {
         val policy = book.current.board.policy
         board.savePolicy(policy.copy(doctorTokenLimits = policy.doctorTokenLimits + (doctorId to limit.coerceIn(0, 20))))
     }

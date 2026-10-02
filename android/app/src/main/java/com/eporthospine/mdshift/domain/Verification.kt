@@ -17,7 +17,31 @@ data class DoctorVerification(
     val emailDomainValid: Boolean,
     val status: VerificationStatus,
     val flags: List<String>,
-)
+    val checkedFirst: String = "",
+    val checkedLast: String = "",
+    val checkedCredential: String = "",
+    val checkedNpi: String = "",
+    val checkedLicense: String = "",
+    val checkedState: String = "",
+    val checkedEmail: String = "",
+) {
+    fun matches(
+        first: String,
+        last: String,
+        credential: String,
+        npi: String,
+        license: String,
+        state: String,
+        email: String,
+    ): Boolean =
+        checkedFirst.trim().equals(first.trim(), ignoreCase = true) &&
+            checkedLast.trim().equals(last.trim(), ignoreCase = true) &&
+            checkedCredential.trim().equals(credential.trim(), ignoreCase = true) &&
+            checkedNpi.filter(Char::isDigit) == npi.filter(Char::isDigit) &&
+            checkedLicense.trim().equals(license.trim(), ignoreCase = true) &&
+            checkedState.trim().equals(state.trim(), ignoreCase = true) &&
+            checkedEmail.trim().equals(email.trim(), ignoreCase = true)
+}
 
 data class HospitalVerification(
     val record: NpiRecord?,
@@ -25,7 +49,15 @@ data class HospitalVerification(
     val emailDomainValid: Boolean,
     val status: VerificationStatus,
     val flags: List<String>,
-)
+    val checkedName: String = "",
+    val checkedNpi: String = "",
+    val checkedEmail: String = "",
+) {
+    fun matches(name: String, npi: String, email: String): Boolean =
+        checkedName.trim().equals(name.trim(), ignoreCase = true) &&
+            checkedNpi.filter(Char::isDigit) == npi.filter(Char::isDigit) &&
+            checkedEmail.trim().equals(email.trim(), ignoreCase = true)
+}
 
 object EmailDomainChecker {
     private val blocked = setOf(
@@ -98,7 +130,19 @@ fun verifyDoctor(
         record != null -> VerificationStatus.Flagged
         else -> VerificationStatus.Flagged
     }
-    return DoctorVerification(record, nameMatches, credentialMatches, emailOk, status, flags)
+    return DoctorVerification(
+        record = record,
+        nameMatches = nameMatches,
+        credentialMatches = credentialMatches,
+        emailDomainValid = emailOk,
+        status = status,
+        flags = flags,
+        checkedFirst = firstName,
+        checkedLast = lastName,
+        checkedCredential = credential,
+        checkedNpi = "",
+        checkedEmail = email,
+    )
 }
 
 fun verifyHospital(
@@ -133,6 +177,8 @@ fun verifyHospital(
         emailDomainValid = emailOk,
         status = if (passed) VerificationStatus.Pending else VerificationStatus.Flagged,
         flags = flags,
+        checkedName = hospitalName,
+        checkedEmail = email,
     )
 }
 

@@ -221,7 +221,9 @@ private fun AlterShifts(account: AccountState, onPost: (String, Long, Double, Bo
         onPost(specialty, epoch, amount, algorithm)
     }
     Text("Specialty base rates")
-    var draft by rememberSaveable { mutableStateOf(account.board.policy.specialtyBaseRates[specialty]?.toString() ?: rate) }
+    var draft by rememberSaveable(specialty) {
+        mutableStateOf(account.board.policy.rateFor(specialty).toString())
+    }
     OutlinedTextField(draft, { draft = it }, label = { Text("$specialty base") }, modifier = Modifier.fillMaxWidth())
     OutlinedButton(onClick = {
         val amount = draft.toDoubleOrNull() ?: return@OutlinedButton

@@ -9,6 +9,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Base64
 
 class AuthAndBoardTest {
     @Test
@@ -152,6 +153,8 @@ class AuthAndBoardTest {
         assertEquals("approved", book.current.board.tokens.first { it.id == token.id }.status)
         assertEquals("Maya Ellison", book.current.board.tokens.first { it.id == token.id }.doctorName)
         assertTrue(api.writes.any { it.contains("token_requests") && it.contains("approved") })
+        assertTrue(api.writes.any { it.contains("hospital_doctors") && it.contains("ignore-duplicates") })
+        assertFalse(api.writes.any { it.contains("hospital_doctors") && it.contains("merge-duplicates") })
     }
 
     @Test
@@ -202,6 +205,151 @@ class AuthAndBoardTest {
     }
 
     @Test
+    fun unconfirmedSignupStaysOnTheCodeScreenAfterRestore() = runTest {
+        val book = AccountBook()
+        val api = FakeApi()
+        api.signupConfirmed = false
+        val auth = coordinator(api, book, mutableListOf())
+        auth.signUp("new@hospital.org", "secret1", "secret1", UserRole.Doctor)
+        assertTrue(auth.snapshot.value.gate is AuthGate.EmailCode)
+        assertEquals(false, book.current.session?.emailConfirmed)
+        val restored = coordinator(api, book, mutableListOf())
+        restored.restore()
+        assertTrue(restored.snapshot.value.gate is AuthGate.EmailCode)
+    }
+
+    @Test
+    fun syncDropsResultsWhenTheAccountChangesMidFlight() = runTest {
+        val book = AccountBook()
+        val kept = sampleShift("keep")
+        book.update {
+            it.copy(
+                session = com.eporthospine.mdshift.domain.StoredSession("doctor-1", "a@b.org", "token", role = "doctor"),
+                board = it.board.copy(shifts = listOf(kept)),
+            )
+        }
+        val api = FakeApi()
+        api.onGet = { path ->
+            if (path.contains("rest/v1/shifts?")) {
+                api.onGet = null
+                book.prepareForSignIn("other")
+                book.update {
+                    it.copy(
+                        session = com.eporthospine.mdshift.domain.StoredSession("other", "b@b.org", "tok", role = "doctor"),
+                        board = it.board.copy(shifts = listOf(sampleShift("other"))),
+                    )
+                }
+            }
+        }
+        ShiftBoard(api, book) { java.time.Instant.parse("2026-10-02T00:00:00Z").toEpochMilli() }.sync()
+        assertEquals(listOf("other"), book.current.board.shifts.map { it.id })
+        assertEquals("other", book.current.session?.userId)
+        assertNull(book.current.board.syncError)
+    }
+
+    @Test
+    fun filledCoverageIsLimitedToWindowedShiftIds() = runTest {
+        val book = AccountBook()
+        book.update {
+            it.copy(session = com.eporthospine.mdshift.domain.StoredSession("doctor-1", "a@b.org", "token", role = "doctor"))
+        }
+        val api = FakeApi()
+        api.shiftJson = """[{"id":"shift-1","hospital_id":"h","hospital_name":"Average","specialty":"Internal Medicine","date":"2026-10-03T00:00:00Z","rate_floor":1000}]"""
+        ShiftBoard(api, book) { java.time.Instant.parse("2026-10-02T00:00:00Z").toEpochMilli() }.sync()
+        assertTrue(api.gets.any { it.contains("shift_coverage") && it.contains("shift_id=in.(shift-1)") && it.contains("order=shift_id.asc") })
+        assertFalse(api.gets.any { it.contains("shift_coverage") && !it.contains("shift_id=in.") })
+    }
+
+    @Test
+    fun expiredAccessTokenIsRefreshedBeforeSync() = runTest {
+        val book = AccountBook()
+        val expired = jwt(System.currentTimeMillis() / 1000 - 120)
+        book.update {
+            it.copy(
+                session = com.eporthospine.mdshift.domain.StoredSession(
+                    "doctor-1", "a@b.org", expired, "refresh-1", "doctor",
+                ),
+            )
+        }
+        val api = FakeApi()
+        ShiftBoard(api, book) { java.time.Instant.parse("2026-10-02T00:00:00Z").toEpochMilli() }.sync()
+        assertEquals(1, api.refreshCalls)
+        assertEquals("token", book.current.session?.accessToken)
+    }
+
+    @Test
+    fun cancelTargetsTheServerAssignmentAndSkipsPenaltyWhenNothingUpdates() = runTest {
+        val now = 1_700_000_000_000L
+        val book = AccountBook()
+        val shift = sampleShift("shift-1").copy(startEpochMillis = now + 10 * 86_400_000L)
+        book.update {
+            it.copy(
+                session = com.eporthospine.mdshift.domain.StoredSession("doctor-1", "a@b.org", "token", role = "doctor"),
+                board = it.board.copy(
+                    shifts = listOf(shift),
+                    assignments = listOf(
+                        com.eporthospine.mdshift.domain.Assignment("local-only", shift.id, "doctor-1", "scheduled", "A"),
+                    ),
+                    policy = com.eporthospine.mdshift.domain.SchedulingPolicy(basePenaltyAmount = 100.0),
+                ),
+            )
+        }
+        val api = FakeApi()
+        var threw = false
+        try {
+            ShiftBoard(api, book) { now }.cancelShift(shift)
+        } catch (error: ApiException) {
+            threw = true
+            assertTrue(error.message!!.contains("could not be canceled"))
+        }
+        assertTrue(threw)
+        assertTrue(api.writes.any { it.contains("shift_id=eq.${shift.id}") && it.contains("doctor_id=eq.doctor-1") })
+        assertFalse(api.writes.any { it.contains("id=eq.local-only") })
+        assertFalse(api.writes.any { it.contains("penalty_ledger") })
+        assertEquals("scheduled", book.current.board.assignments.single().status)
+
+        api.assignmentPatch = """[{"id":"server-1","shift_id":"${shift.id}","doctor_id":"doctor-1","status":"canceled"}]"""
+        ShiftBoard(api, book) { now }.cancelShift(shift)
+        assertEquals("canceled", book.current.board.assignments.single().status)
+        assertTrue(api.writes.any { it.contains("penalty_ledger") })
+    }
+
+    @Test
+    fun acceptShiftDoesNotInsertWhenTheFunctionRejects() = runTest {
+        val book = AccountBook()
+        val shift = sampleShift("shift-1").copy(startEpochMillis = 1_700_000_000_000L)
+        book.update {
+            it.copy(
+                session = com.eporthospine.mdshift.domain.StoredSession("doctor-1", "a@b.org", "token", role = "doctor"),
+                doctor = com.eporthospine.mdshift.domain.DoctorProfile(
+                    "doctor-1", "doctor-1", "A", "B", "MD", "1234567890",
+                    specialties = listOf("Internal Medicine"),
+                    verificationStatus = VerificationStatus.Verified.wire,
+                ),
+                board = it.board.copy(
+                    shifts = listOf(shift),
+                    tokens = listOf(
+                        com.eporthospine.mdshift.domain.TokenRequest(
+                            "t", "doctor-1", shift.hospitalId, "2023-11-14", "approved", "Internal Medicine",
+                        ),
+                    ),
+                ),
+            )
+        }
+        val api = FakeApi()
+        api.failAccept = true
+        api.acceptStatus = 403
+        var threw = false
+        try {
+            ShiftBoard(api, book) { 1_700_000_000_000L }.acceptShift(shift)
+        } catch (error: ApiException) {
+            threw = error.status == 403
+        }
+        assertTrue(threw)
+        assertFalse(api.writes.any { it.contains("rest/v1/assignments") })
+    }
+
+    @Test
     fun directAssignmentInsertIsTheAcceptFallback() = runTest {
         val book = AccountBook()
         val shift = sampleShift("shift-1").copy(startEpochMillis = 1_700_000_000_000L)
@@ -231,6 +379,17 @@ class AuthAndBoardTest {
     }
 
     @Test
+    fun editedNpiDoesNotKeepThePreviousVerification() {
+        val result = com.eporthospine.mdshift.domain.verifyDoctor(
+            "Jordan", "Dunn", "MD", "jdunn@eporthospine.com", false,
+            com.eporthospine.mdshift.domain.NpiRecord("1234567893", "Jordan", "Dunn", "MD", "Internal Medicine", "NPI-1", null),
+            null,
+        ).copy(checkedNpi = "1234567893", checkedLicense = "A1", checkedState = "TX")
+        assertTrue(result.matches("Jordan", "Dunn", "MD", "1234567893", "A1", "TX", "jdunn@eporthospine.com"))
+        assertFalse(result.matches("Jordan", "Dunn", "MD", "1234567890", "A1", "TX", "jdunn@eporthospine.com"))
+    }
+
+    @Test
     fun institutionalEmailRejectsGmail() {
         val result = com.eporthospine.mdshift.domain.verifyHospital(
             "Average Hospital",
@@ -246,21 +405,41 @@ class AuthAndBoardTest {
         AuthCoordinator(api, book, demoEnabled = true, allowNpiBypass = false) { syncs += 1 }
 
     private fun sampleShift(id: String) = Shift(id, "h", "Average Hospital", "Internal Medicine", 0L, rateFloor = 1100.0)
+
+    private fun jwt(exp: Long): String {
+        fun enc(json: String) = Base64.getUrlEncoder().withoutPadding().encodeToString(json.toByteArray())
+        return "${enc("{\"alg\":\"none\"}")}.${enc("{\"exp\":$exp,\"aal\":\"aal1\"}")}.sig"
+    }
 }
 
 internal class FakeApi : SupabaseApi {
     var signupNeedsCode = false
+    var signupConfirmed = true
     var doctorComplete = false
     var totpFactor: String? = null
     var overflow = false
     var failAccept = false
+    var acceptStatus = 404
     var logoutCalls = 0
+    var refreshCalls = 0
+    var shiftJson: String? = null
+    var assignmentPatch: String = "[]"
+    var onGet: ((String) -> Unit)? = null
     val gets = mutableListOf<String>()
     val writes = mutableListOf<String>()
     val invokes = mutableListOf<Pair<String, String>>()
 
     override suspend fun signUp(email: String, password: String, role: UserRole): AuthPayload =
-        AuthPayload(if (signupNeedsCode) null else "token", "refresh", "user-1", email, !signupNeedsCode, role.wire, emptyList(), "aal1")
+        AuthPayload(
+            if (signupNeedsCode) null else "token",
+            "refresh",
+            "user-1",
+            email,
+            !signupNeedsCode && signupConfirmed,
+            role.wire,
+            emptyList(),
+            "aal1",
+        )
 
     override suspend fun verifyOtp(email: String, token: String, type: String, accessToken: String?): AuthPayload =
         AuthPayload("token", "refresh", "user-1", email, true, null, emptyList(), "aal1")
@@ -268,7 +447,10 @@ internal class FakeApi : SupabaseApi {
     override suspend fun passwordGrant(email: String, password: String): AuthPayload =
         AuthPayload("token", "refresh", "doctor-1", email, true, "doctor", listOfNotNull(totpFactor), "aal1")
 
-    override suspend fun refresh(refreshToken: String) = passwordGrant("a@b.org", "")
+    override suspend fun refresh(refreshToken: String): AuthPayload {
+        refreshCalls += 1
+        return passwordGrant("a@b.org", "")
+    }
     override suspend fun resendSignup(email: String) = Unit
     override suspend fun updateUserEmail(accessToken: String, email: String) = Unit
     override suspend fun enrollTotp(accessToken: String) = TotpEnrollment("enroll-1", "SECRET")
@@ -283,7 +465,9 @@ internal class FakeApi : SupabaseApi {
     }
 
     override suspend fun restGet(path: String, accessToken: String): String {
+        onGet?.invoke(path)
         gets += path
+        if (shiftJson != null && path.contains("rest/v1/shifts?")) return shiftJson!!
         if (overflow && path.contains("shifts")) return List(1000) { """{"id":"$it"}""" }.joinToString(prefix = "[", postfix = "]")
         if (path.contains("profiles?id=")) return """[{"role":"doctor"}]"""
         if (path.contains("doctor_profiles")) {
@@ -297,13 +481,14 @@ internal class FakeApi : SupabaseApi {
     }
 
     override suspend fun restSend(path: String, method: String, body: String?, accessToken: String, prefer: String?): String {
-        writes += "$method $path ${body.orEmpty()}"
+        writes += "$method $path ${prefer.orEmpty()} ${body.orEmpty()}"
+        if (method == "PATCH" && path.contains("assignments")) return assignmentPatch
         return "[]"
     }
 
     override suspend fun invoke(name: String, body: String, accessToken: String): String {
         invokes += name to body
-        if (name == "accept-shift" && failAccept) throw ApiException("missing", 404)
+        if (name == "accept-shift" && failAccept) throw ApiException("missing", acceptStatus)
         return "{}"
     }
 

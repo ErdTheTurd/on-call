@@ -23,6 +23,7 @@ import kotlinx.serialization.json.put
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 object SyncQueries {
     fun shifts(windowIso: String, hospitalId: String?): String {
@@ -37,8 +38,20 @@ object SyncQueries {
             "&shifts.date=gte.$windowIso$doctor$hospital&order=id.asc"
     }
 
-    fun filled(windowIso: String): String =
-        "rest/v1/shift_coverage?select=shift_id,is_filled&is_filled=eq.true&order=shift_id.asc"
+    /**
+     * Filled ids for shifts already loaded inside [windowIso].
+     * `shift_coverage` exposes shift_id, hospital_id, and is_filled only, so the date
+     * window is applied by listing those shift ids instead of reading every filled row.
+     */
+    fun filled(windowIso: String, shiftIds: List<String>): List<String> {
+        require(windowIso.isNotBlank()) { "filled coverage is limited to the sync window" }
+        if (shiftIds.isEmpty()) return emptyList()
+        return shiftIds.distinct().chunked(80).map { chunk ->
+            val list = chunk.joinToString(",")
+            "rest/v1/shift_coverage?select=shift_id,is_filled&is_filled=eq.true" +
+                "&shift_id=in.($list)&order=shift_id.asc"
+        }
+    }
 
     fun tokens(hospitalId: String?, doctorId: String?): String {
         val filters = listOfNotNull(
@@ -267,60 +280,75 @@ class ShiftBoard(
     private val book: AccountBook,
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
-    suspend fun sync() {
+    suspend fun sync() = syncOnce(retryAuth = true)
+
+    private suspend fun syncOnce(retryAuth: Boolean) {
         val session = book.current.session ?: return
-        if (book.current.board.explore || session.accessToken.isBlank()) return
-        val previous = book.current.board
+        if (book.current.board.explore || session.accessToken.isBlank() || !session.emailConfirmed) return
+        val generation = book.generation
+        val userId = session.userId
+        val token = when (SessionRefresher.ensure(api, book, force = false)) {
+            RefreshOutcome.Invalid -> {
+                if (book.generation == generation && book.current.session?.userId == userId) book.clearOnSignOut()
+                return
+            }
+            RefreshOutcome.Ready, RefreshOutcome.FailedOpen -> book.current.session?.accessToken
+        }
+        if (token.isNullOrBlank() || book.generation != generation || book.current.session?.userId != userId) return
         try {
-            val role = UserRole.fromWire(session.role) ?: return
+            val role = UserRole.fromWire(book.current.session?.role) ?: return
             val window = PostgRestPages.windowStartIso(Instant.ofEpochMilli(now()))
             val hospitalId = book.current.hospital?.id
-            val doctorId = if (role == UserRole.Doctor) session.userId else null
-            val shifts = paged(SyncQueries.shifts(window, if (role == UserRole.Hospital) hospitalId else null), session.accessToken, ::parseShifts)
+            val doctorId = if (role == UserRole.Doctor) userId else null
+            val shifts = paged(SyncQueries.shifts(window, if (role == UserRole.Hospital) hospitalId else null), token, ::parseShifts)
             val assignments = paged(
                 SyncQueries.assignments(window, doctorId, if (role == UserRole.Hospital) hospitalId else null),
-                session.accessToken,
+                token,
                 ::parseAssignments,
             )
             val filled = if (role == UserRole.Doctor) {
-                paged(SyncQueries.filled(window), session.accessToken, ::parseFilledIds)
+                SyncQueries.filled(window, shifts.map { it.id }).flatMap { path ->
+                    paged(path, token, ::parseFilledIds)
+                }
             } else {
                 emptyList()
             }
-            val tokens = pagedTokens(session.accessToken, if (role == UserRole.Hospital) hospitalId else null, doctorId)
+            if (book.generation != generation || book.current.session?.userId != userId) return
+            val kept = book.current.board
+            val tokens = pagedTokens(token, if (role == UserRole.Hospital) hospitalId else null, doctorId)
             val trades = if (role == UserRole.Doctor) {
-                paged(SyncQueries.trades(session.userId), session.accessToken, ::parseTrades)
+                paged(SyncQueries.trades(userId), token, ::parseTrades)
             } else {
-                previous.trades
+                kept.trades
             }
             val roster = paged(
                 SyncQueries.roster(if (role == UserRole.Hospital) hospitalId else null),
-                session.accessToken,
+                token,
                 ::parseRoster,
             )
             val penalties = paged(
                 SyncQueries.penalties(if (role == UserRole.Hospital) hospitalId else null, doctorId),
-                session.accessToken,
+                token,
                 ::parsePenalties,
             )
             val unavailable = if (role == UserRole.Hospital && hospitalId != null) {
-                paged(SyncQueries.unavailable(hospitalId), session.accessToken, ::parseUnavailable)
+                paged(SyncQueries.unavailable(hospitalId), token, ::parseUnavailable)
             } else {
-                previous.unavailableDays
+                kept.unavailableDays
             }
             val savings = if (role == UserRole.Hospital && hospitalId != null) {
-                paged(SyncQueries.savings(hospitalId), session.accessToken, ::parseSavings)
+                paged(SyncQueries.savings(hospitalId), token, ::parseSavings)
             } else {
-                previous.savings
+                kept.savings
             }
             val policy = if (role == UserRole.Hospital && hospitalId != null) {
                 runCatching {
-                    parsePolicy(api.restGet("rest/v1/scheduling_policies?hospital_id=eq.$hospitalId&select=policy", session.accessToken))
-                }.getOrDefault(book.current.hospital?.policy ?: previous.policy)
+                    parsePolicy(api.restGet("rest/v1/scheduling_policies?hospital_id=eq.$hospitalId&select=policy", token))
+                }.getOrDefault(book.current.hospital?.policy ?: kept.policy)
             } else {
-                previous.policy
+                kept.policy
             }
-            book.update {
+            book.updateIfOwned(generation, userId) {
                 it.copy(
                     board = BoardSnapshot(
                         shifts = shifts,
@@ -338,8 +366,30 @@ class ShiftBoard(
                     ),
                 )
             }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: ApiException) {
+            if (retryAuth && error.status == 401) {
+                when (SessionRefresher.ensure(api, book, force = true)) {
+                    RefreshOutcome.Invalid -> {
+                        if (book.generation == generation && book.current.session?.userId == userId) book.clearOnSignOut()
+                    }
+                    RefreshOutcome.Ready -> if (book.generation == generation && book.current.session?.userId == userId) {
+                        syncOnce(retryAuth = false)
+                    }
+                    RefreshOutcome.FailedOpen -> noteSyncFailure(generation, userId, error.message)
+                }
+                return
+            }
+            noteSyncFailure(generation, userId, error.message)
         } catch (error: Exception) {
-            book.update { it.copy(board = previous.copy(syncError = error.message ?: "We can't reach the server right now.", explore = false)) }
+            noteSyncFailure(generation, userId, error.message)
+        }
+    }
+
+    private fun noteSyncFailure(generation: Long, userId: String, message: String?) {
+        book.updateIfOwned(generation, userId) {
+            it.copy(board = it.board.copy(syncError = message ?: "We can't reach the server right now."))
         }
     }
 
@@ -418,8 +468,12 @@ class ShiftBoard(
                 put("hospital_id", shift.hospitalId)
                 put("shift_date", date)
             }.toString()
-            val inserted = runCatching { api.invoke("accept-shift", payload, session.accessToken) }
-            if (inserted.isFailure) {
+            try {
+                api.invoke("accept-shift", payload, session.accessToken)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: ApiException) {
+                if (error.status != 404) throw error
                 api.restSend(
                     "rest/v1/assignments",
                     "POST",
@@ -472,16 +526,15 @@ class ShiftBoard(
         val preview = PenaltyCalculator.preview(SchedulingAction.Cancel, book.current.board.policy, shift.startEpochMillis, now(), shift.rateFloor)
         if (!preview.allowed) throw ApiException("This shift is inside the ${preview.windowHours}-hour cancellation window.")
         if (!book.current.board.explore) {
-            val row = book.current.board.assignments.firstOrNull { it.shiftId == shift.id && it.doctorId == session.userId }
-            if (row != null) {
-                api.restSend(
-                    "rest/v1/assignments?id=eq.${row.id}",
-                    "PATCH",
-                    buildJsonObject { put("status", "canceled") }.toString(),
-                    session.accessToken,
-                    "return=minimal",
-                )
-            }
+            val updated = api.restSend(
+                "rest/v1/assignments?shift_id=eq.${shift.id}&doctor_id=eq.${session.userId}&status=neq.canceled",
+                "PATCH",
+                buildJsonObject { put("status", "canceled") }.toString(),
+                session.accessToken,
+                "return=representation",
+            )
+            val rows = runCatching { parseArray(updated) }.getOrDefault(emptyList())
+            if (rows.isEmpty()) throw ApiException("This shift could not be canceled.")
             if (preview.penaltyAmount > 0) recordPenalty(session.accessToken, session.userId, shift, "cancel", preview.penaltyAmount)
         }
         book.update {
@@ -657,7 +710,7 @@ class ShiftBoard(
                         put("auto_approve", false)
                     }.toString(),
                     session.accessToken,
-                    "resolution=merge-duplicates,return=minimal",
+                    "resolution=ignore-duplicates,return=minimal",
                 )
             }
         }

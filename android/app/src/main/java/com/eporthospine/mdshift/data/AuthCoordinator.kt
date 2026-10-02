@@ -19,6 +19,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 sealed interface AuthGate {
     data object LoggedOut : AuthGate
@@ -64,6 +65,10 @@ class AuthCoordinator(
             return
         }
         val role = UserRole.fromWire(session.role) ?: UserRole.Doctor
+        if (!session.emailConfirmed) {
+            _snapshot.value = AuthSnapshot(AuthGate.EmailCode(session.email, role, signup = true))
+            return
+        }
         val factor = state.pendingFactorId
         if (!factor.isNullOrBlank()) {
             _snapshot.value = AuthSnapshot(AuthGate.MfaChallenge(factor, session.email, role))
@@ -78,6 +83,53 @@ class AuthCoordinator(
         )
     }
 
+    /**
+     * Cold start: refresh the session, re-read the server profile, and sync before the interval loop.
+     * An unconfirmed signup stays on the code screen. Explore is left on the local sample board.
+     */
+    suspend fun resume() {
+        if (book.current.board.explore || book.current.session == null) return
+        val session = book.current.session ?: return
+        if (!session.emailConfirmed) return
+        if (_snapshot.value.gate is AuthGate.MfaChallenge) return
+        val generation = book.generation
+        val userId = session.userId
+        val role = UserRole.fromWire(session.role) ?: UserRole.Doctor
+        when (SessionRefresher.ensure(api, book, force = false)) {
+            RefreshOutcome.Invalid -> {
+                if (still(generation, userId)) signOut()
+                return
+            }
+            RefreshOutcome.Ready, RefreshOutcome.FailedOpen -> Unit
+        }
+        if (!still(generation, userId)) return
+        val current = book.current.session ?: return
+        when (val hydrated = runCatching { hydrate(role, current.email, generation) }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            if (still(generation, userId)) routeFromLocal(role, error.message)
+            return
+        }) {
+            Hydration.Stale -> return
+            is Hydration.NeedsOnboarding -> {
+                if (still(generation, userId)) _snapshot.value = AuthSnapshot(AuthGate.NeedsOnboarding(hydrated.role))
+                return
+            }
+            is Hydration.Complete -> {
+                if (!still(generation, userId)) return
+                book.updateIfOwned(generation, userId) { it.copy(session = it.session?.copy(role = hydrated.role.wire)) }
+                runCatching { sync() }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                    book.updateIfOwned(generation, userId) { state ->
+                        state.copy(board = state.board.copy(syncError = error.message))
+                    }
+                }
+                if (still(generation, userId)) {
+                    _snapshot.value = AuthSnapshot(AuthGate.Ready(hydrated.role, explore = false))
+                }
+            }
+        }
+    }
+
     suspend fun signUp(email: String, password: String, confirm: String, role: UserRole) {
         val address = email.trim().lowercase()
         if (password.length < 6) return fail("Password must be at least 6 characters.")
@@ -86,8 +138,10 @@ class AuthCoordinator(
             val payload = api.signUp(address, password, role)
             val needsCode = payload.accessToken == null || !payload.emailConfirmed
             if (payload.accessToken != null && payload.userId != null) {
-                persist(payload, address, role)
-                upsertProfileRow(payload.userId, address, role, payload.accessToken)
+                persist(payload, address, role, emailConfirmed = payload.emailConfirmed)
+                if (payload.emailConfirmed) {
+                    upsertProfileRow(payload.userId, address, role, payload.accessToken)
+                }
             }
             if (needsCode) {
                 _snapshot.value = AuthSnapshot(AuthGate.EmailCode(address, role, signup = true))
@@ -219,6 +273,7 @@ class AuthCoordinator(
             fail("Explore is available in debug and internal testing builds.")
             return
         }
+        book.invalidate()
         val appearance = book.current.appearance
         val seeded = if (role == UserRole.Doctor) DemoBoards.doctor() else DemoBoards.hospital()
         book.update {
@@ -259,35 +314,44 @@ class AuthCoordinator(
         email: String,
         emailFromProvider: Boolean,
     ): DoctorVerification {
-        if (allowNpiBypass && debugDoctorBypass(npi, licenseNumber, licenseState, email)) {
-            return verifyDoctor(
+        val digits = npi.filter(Char::isDigit)
+        val result = if (allowNpiBypass && debugDoctorBypass(npi, licenseNumber, licenseState, email)) {
+            verifyDoctor(
                 firstName, lastName, credential, email, true,
                 NpiRecord(npi, firstName, lastName, credential, "Internal Medicine", "NPI-1", null),
                 null,
             )
+        } else {
+            val record = runCatching { fetchNpi(digits) }.getOrElse { error ->
+                return bindDoctor(
+                    verifyDoctor(firstName, lastName, credential, email, emailFromProvider, null, error.message),
+                    digits, licenseNumber, licenseState,
+                )
+            }
+            if (record.enumerationType != "NPI-1") {
+                return bindDoctor(
+                    verifyDoctor(
+                        firstName, lastName, credential, email, emailFromProvider, null,
+                        "That NPI belongs to an organization, not an individual provider.",
+                    ),
+                    digits, licenseNumber, licenseState,
+                )
+            }
+            verifyDoctor(firstName, lastName, credential, email, emailFromProvider, record, null)
         }
-        val digits = npi.filter(Char::isDigit)
-        val record = runCatching { fetchNpi(digits) }.getOrElse { error ->
-            return verifyDoctor(firstName, lastName, credential, email, emailFromProvider, null, error.message)
-        }
-        if (record.enumerationType != "NPI-1") {
-            return verifyDoctor(
-                firstName, lastName, credential, email, emailFromProvider, null,
-                "That NPI belongs to an organization, not an individual provider.",
-            )
-        }
-        return verifyDoctor(firstName, lastName, credential, email, emailFromProvider, record, null)
+        return bindDoctor(result, digits, licenseNumber, licenseState)
     }
 
     suspend fun lookupHospital(name: String, npi: String, email: String): HospitalVerification {
         val digits = npi.filter(Char::isDigit)
         val record = runCatching { fetchNpi(digits) }.getOrElse { error ->
-            return verifyHospital(name, email, null, error.message)
+            return verifyHospital(name, email, null, error.message).copy(checkedNpi = digits)
         }
         if (record.enumerationType != "NPI-2") {
             return verifyHospital(name, email, null, "That NPI belongs to an individual provider, not a facility.")
+                .copy(checkedNpi = digits)
         }
-        return verifyHospital(name, email, record, null)
+        return verifyHospital(name, email, record, null).copy(checkedNpi = digits)
     }
 
     suspend fun finishDoctor(profile: DoctorProfile) {
@@ -295,6 +359,7 @@ class AuthCoordinator(
             val userId = book.current.session?.userId ?: profile.userId
             val linked = profile.copy(id = userId, userId = userId)
             book.prepareForSignIn(userId)
+            val generation = book.generation
             book.update { it.copy(doctor = linked, hospital = null) }
             val token = book.current.session?.accessToken
             if (!token.isNullOrBlank() && linked.isOnboardingComplete) {
@@ -311,7 +376,9 @@ class AuthCoordinator(
                 it.copy(session = it.session?.copy(role = UserRole.Doctor.wire))
             }
             sync()
-            _snapshot.value = AuthSnapshot(AuthGate.Ready(UserRole.Doctor, explore = false))
+            if (still(generation, userId)) {
+                _snapshot.value = AuthSnapshot(AuthGate.Ready(UserRole.Doctor, explore = false))
+            }
         }
     }
 
@@ -362,6 +429,7 @@ class AuthCoordinator(
             val userId = book.current.session?.userId ?: profile.userId
             val linked = profile.copy(userId = userId)
             book.prepareForSignIn(userId)
+            val generation = book.generation
             book.update { it.copy(hospital = linked, doctor = null, board = book.current.board.copy(policy = linked.policy)) }
             val token = book.current.session?.accessToken
             if (!token.isNullOrBlank() && linked.isOnboardingComplete) {
@@ -407,7 +475,9 @@ class AuthCoordinator(
             }
             book.update { it.copy(session = it.session?.copy(role = UserRole.Hospital.wire)) }
             sync()
-            _snapshot.value = AuthSnapshot(AuthGate.Ready(UserRole.Hospital, explore = false))
+            if (still(generation, userId)) {
+                _snapshot.value = AuthSnapshot(AuthGate.Ready(UserRole.Hospital, explore = false))
+            }
         }
     }
 
@@ -461,7 +531,12 @@ class AuthCoordinator(
         val token = payload.accessToken ?: book.current.session?.accessToken
             ?: throw ApiException("Unexpected response from the server.")
         val email = payload.email?.takeIf { it.isNotBlank() } ?: emailFallback
-        persist(payload.copy(accessToken = token, userId = userId, email = email), email, preferredRole)
+        persist(
+            payload.copy(accessToken = token, userId = userId, email = email),
+            email,
+            preferredRole,
+            emailConfirmed = payload.emailConfirmed,
+        )
         if (!alreadyChallenged && payload.verifiedTotpIds.isNotEmpty() && (payload.aal == null || payload.aal == "aal1")) {
             val factor = payload.verifiedTotpIds.first()
             book.update { it.copy(pendingFactorId = factor) }
@@ -484,45 +559,69 @@ class AuthCoordinator(
     private suspend fun finishAuth(preferredRole: UserRole, email: String) {
         val session = book.current.session ?: throw ApiException("Could not confirm your account. Sign in again.")
         book.prepareForSignIn(session.userId)
-        val hydrated = runCatching { hydrate(preferredRole, email, session) }.getOrElse { error ->
-            routeFromLocal(preferredRole, error.message)
+        val generation = book.generation
+        val userId = session.userId
+        if (!still(generation, userId)) return
+        when (val hydrated = runCatching { hydrate(preferredRole, email, generation) }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            if (still(generation, userId)) routeFromLocal(preferredRole, error.message)
             return
+        }) {
+            Hydration.Stale -> return
+            is Hydration.NeedsOnboarding -> {
+                if (still(generation, userId)) {
+                    _snapshot.value = AuthSnapshot(AuthGate.NeedsOnboarding(hydrated.role))
+                }
+            }
+            is Hydration.Complete -> {
+                if (!still(generation, userId)) return
+                book.updateIfOwned(generation, userId) { it.copy(session = it.session?.copy(role = hydrated.role.wire)) }
+                runCatching { sync() }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                    book.updateIfOwned(generation, userId) { state ->
+                        state.copy(board = state.board.copy(syncError = error.message))
+                    }
+                }
+                if (still(generation, userId)) {
+                    _snapshot.value = AuthSnapshot(AuthGate.Ready(hydrated.role, explore = false))
+                }
+            }
         }
-        if (hydrated == null) {
-            _snapshot.value = AuthSnapshot(AuthGate.NeedsOnboarding(preferredRoleFromSession(preferredRole)))
-            return
-        }
-        book.update { it.copy(session = it.session?.copy(role = hydrated.wire)) }
-        runCatching { sync() }.onFailure { error ->
-            book.update { state -> state.copy(board = state.board.copy(syncError = error.message, explore = false)) }
-        }
-        _snapshot.value = AuthSnapshot(AuthGate.Ready(hydrated, explore = false))
     }
 
-    private suspend fun hydrate(preferred: UserRole, email: String, session: com.eporthospine.mdshift.domain.StoredSession): UserRole? {
-        val token = session.accessToken
+    private suspend fun hydrate(preferred: UserRole, email: String, generation: Long): Hydration {
+        val session = book.current.session ?: return Hydration.Stale
         val userId = session.userId
+        if (!still(generation, userId)) return Hydration.Stale
+        val token = session.accessToken
         val serverRole = runCatching {
             parseRole(api.restGet("rest/v1/profiles?id=eq.$userId&select=role", token))
         }.getOrNull() ?: preferred
-        when (serverRole) {
+        if (!still(generation, userId)) return Hydration.Stale
+        return when (serverRole) {
             UserRole.Doctor -> {
                 val profile = parseDoctorProfile(
                     api.restGet("rest/v1/doctor_profiles?profile_id=eq.$userId&select=*", token),
                     email,
-                ) ?: return null
-                book.update { it.copy(doctor = profile, hospital = null, session = it.session?.copy(role = UserRole.Doctor.wire)) }
-                if (!profile.isOnboardingComplete) return null
-                return UserRole.Doctor
+                ) ?: return if (still(generation, userId)) Hydration.NeedsOnboarding(UserRole.Doctor) else Hydration.Stale
+                if (!still(generation, userId)) return Hydration.Stale
+                val wrote = book.updateIfOwned(generation, userId) {
+                    it.copy(doctor = profile, hospital = null, session = it.session?.copy(role = UserRole.Doctor.wire))
+                }
+                if (!wrote) return Hydration.Stale
+                if (profile.isOnboardingComplete) Hydration.Complete(UserRole.Doctor) else Hydration.NeedsOnboarding(UserRole.Doctor)
             }
             UserRole.Hospital -> {
                 val rows = api.restGet("rest/v1/hospital_profiles?profile_id=eq.$userId&select=*", token)
-                val id = parseArray(rows).firstOrNull()?.text("id") ?: return null
+                if (!still(generation, userId)) return Hydration.Stale
+                val id = parseArray(rows).firstOrNull()?.text("id")
+                    ?: return if (still(generation, userId)) Hydration.NeedsOnboarding(UserRole.Hospital) else Hydration.Stale
                 val policy = runCatching {
                     parsePolicy(api.restGet("rest/v1/scheduling_policies?hospital_id=eq.$id&select=policy", token))
                 }.getOrDefault(SchedulingPolicy())
-                val profile = parseHospitalProfile(rows, policy, email) ?: return null
-                book.update {
+                val profile = parseHospitalProfile(rows, policy, email)
+                    ?: return if (still(generation, userId)) Hydration.NeedsOnboarding(UserRole.Hospital) else Hydration.Stale
+                val wrote = book.updateIfOwned(generation, userId) {
                     it.copy(
                         hospital = profile,
                         doctor = null,
@@ -530,8 +629,8 @@ class AuthCoordinator(
                         session = it.session?.copy(role = UserRole.Hospital.wire),
                     )
                 }
-                if (!profile.isOnboardingComplete) return null
-                return UserRole.Hospital
+                if (!wrote) return Hydration.Stale
+                if (profile.isOnboardingComplete) Hydration.Complete(UserRole.Hospital) else Hydration.NeedsOnboarding(UserRole.Hospital)
             }
         }
     }
@@ -548,10 +647,7 @@ class AuthCoordinator(
         )
     }
 
-    private fun preferredRoleFromSession(fallback: UserRole): UserRole =
-        UserRole.fromWire(book.current.session?.role) ?: fallback
-
-    private fun persist(payload: AuthPayload, email: String, role: UserRole) {
+    private fun persist(payload: AuthPayload, email: String, role: UserRole, emailConfirmed: Boolean = true) {
         val userId = payload.userId ?: return
         val token = payload.accessToken ?: return
         book.prepareForSignIn(userId)
@@ -563,11 +659,15 @@ class AuthCoordinator(
                     accessToken = token,
                     refreshToken = payload.refreshToken ?: it.session?.refreshToken,
                     role = role.wire,
+                    emailConfirmed = emailConfirmed,
                 ),
                 board = if (it.board.explore) com.eporthospine.mdshift.domain.BoardSnapshot() else it.board.copy(explore = false),
             )
         }
     }
+
+    private fun still(generation: Long, userId: String): Boolean =
+        book.generation == generation && book.current.session?.userId == userId && !book.current.board.explore
 
     private suspend fun upsertProfileRow(userId: String, email: String, role: UserRole, token: String) {
         runCatching {
@@ -593,10 +693,23 @@ class AuthCoordinator(
         try {
             block()
             if (_snapshot.value.busy) _snapshot.value = _snapshot.value.copy(busy = false)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             _snapshot.value = _snapshot.value.copy(busy = false, error = error.message ?: "Something went wrong.")
         }
     }
+
+    private fun bindDoctor(
+        result: DoctorVerification,
+        npi: String,
+        licenseNumber: String,
+        licenseState: String,
+    ): DoctorVerification = result.copy(
+        checkedNpi = npi,
+        checkedLicense = licenseNumber,
+        checkedState = licenseState,
+    )
 
     private fun fail(message: String) {
         _snapshot.value = _snapshot.value.copy(busy = false, error = message)
@@ -608,6 +721,12 @@ class AuthCoordinator(
         if (message.isNullOrBlank()) return
         _snapshot.value = _snapshot.value.copy(busy = false, error = message)
     }
+}
+
+private sealed interface Hydration {
+    data object Stale : Hydration
+    data class NeedsOnboarding(val role: UserRole) : Hydration
+    data class Complete(val role: UserRole) : Hydration
 }
 
 /** Debug builds and the internal-testing flag. Release store builds stay false. */

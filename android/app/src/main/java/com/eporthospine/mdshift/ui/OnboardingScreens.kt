@@ -74,12 +74,13 @@ fun DoctorOnboardingScreen(
                 PrimaryButton("Verify NPI", enabled = !snapshot.busy) {
                     onLookup(first, last, credential, npi, license, stateName, mail)
                 }
-                verification?.let { result ->
+                val bound = verification?.matches(first, last, credential, npi, license, stateName, mail) == true
+                verification?.takeIf { bound }?.let { result ->
                     Text(result.flags.joinToString("\n").ifBlank { "NPI registry matched. Status: ${result.status.wire}." })
                     result.record?.let { Text("Registry specialty: ${it.taxonomy}") }
                 }
                 snapshot.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                PrimaryButton("Continue", enabled = verification?.record != null) { step = if (email.isBlank()) 2 else 3 }
+                PrimaryButton("Continue", enabled = bound && verification?.record != null) { step = if (email.isBlank()) 2 else 3 }
             }
             2 -> {
                 var emailCode by rememberSaveable { mutableStateOf("") }
@@ -114,10 +115,12 @@ fun DoctorOnboardingScreen(
                         }
                     }
                 }
-                verification?.record?.taxonomy?.takeIf { it.isNotBlank() }?.let { Text("NPI taxonomy: $it") }
+                val bound = verification?.matches(first, last, credential, npi, license, stateName, mail) == true
+                verification?.record?.taxonomy?.takeIf { bound && it.isNotBlank() }?.let { Text("NPI taxonomy: $it") }
+                if (!bound) Text("Those details changed after the NPI check. Verify again before finishing.")
                 snapshot.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                PrimaryButton("Finish", enabled = !snapshot.busy && specialties.isNotBlank()) {
-                    val result = verification
+                PrimaryButton("Finish", enabled = !snapshot.busy && specialties.isNotBlank() && bound && verification?.record != null) {
+                    val result = verification?.takeIf { it.matches(first, last, credential, npi, license, stateName, mail) }
                     onFinish(
                         DoctorProfile(
                             id = userId,
@@ -137,6 +140,9 @@ fun DoctorOnboardingScreen(
                             npiTaxonomy = result?.record?.taxonomy,
                         ),
                     )
+                }
+                if (!bound) {
+                    PrimaryButton("Verify again") { step = 1 }
                 }
             }
         }
@@ -168,11 +174,15 @@ fun HospitalOnboardingScreen(
             OutlinedTextField(npi, { npi = it.filter(Char::isDigit).take(10) }, label = { Text("Organization NPI") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(mail, { mail = it }, label = { Text("Work email") }, modifier = Modifier.fillMaxWidth())
             PrimaryButton("Verify facility", enabled = !snapshot.busy) { onLookup(name, npi, mail) }
-            verification?.let { result ->
+            val bound = verification?.matches(name, npi, mail) == true
+            verification?.takeIf { bound }?.let { result ->
                 Text(result.flags.joinToString("\n").ifBlank { "Facility checks passed. Status: ${result.status.wire}." })
             }
             snapshot.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            PrimaryButton("Continue", enabled = verification?.record != null && verification.emailDomainValid) {
+            PrimaryButton(
+                "Continue",
+                enabled = bound && verification?.record != null && verification?.emailDomainValid == true,
+            ) {
                 onSendCode(mail, name)
                 step = 1
             }
@@ -182,8 +192,10 @@ fun HospitalOnboardingScreen(
             snapshot.info?.let { Text(it) }
             snapshot.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             PrimaryButton("Verify code", enabled = !snapshot.busy) { onVerifyCode(mail, code) }
-            PrimaryButton("Finish", enabled = codeVerified && !snapshot.busy) {
-                val result = verification
+            val bound = verification?.matches(name, npi, mail) == true
+            if (!bound) Text("The facility details changed after verification. Go back and verify again.")
+            PrimaryButton("Finish", enabled = codeVerified && !snapshot.busy && bound && verification?.record != null) {
+                val result = verification?.takeIf { it.matches(name, npi, mail) }
                 onFinish(
                     HospitalProfile(
                         id = hospitalId,

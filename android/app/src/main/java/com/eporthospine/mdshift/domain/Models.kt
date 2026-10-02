@@ -248,6 +248,8 @@ data class StoredSession(
     val accessToken: String,
     val refreshToken: String? = null,
     val role: String? = null,
+    /** False while signup is waiting on the 6-digit code. Missing values from older installs stay signed in. */
+    val emailConfirmed: Boolean = true,
 )
 
 /** True only for debug builds and the Play internal-testing flag. Release stays off. */

@@ -151,8 +151,10 @@ private fun DoctorHome(
                 val token = board.tokens.firstOrNull { it.doctorId == profile?.userId && it.hospitalId == shift.hospitalId && it.shiftDate == day }
                 Text("${shift.hospitalName} · ${shift.specialty}")
                 Text("${money(rate)} · ${EscalationCurve.urgencyLabel(hoursUntil(shift.startEpochMillis, now), shift.perDay)}")
+                val mine = board.assignments.any { it.shiftId == shift.id && it.doctorId == profile?.userId && it.status != "canceled" }
                 when {
-                    filled && board.assignments.none { it.shiftId == shift.id && it.doctorId == profile?.userId } -> Text("Filled")
+                    mine -> Text("Yours")
+                    filled -> Text("Filled")
                     token?.status == "approved" || token?.status == "auto_approved" -> OutlinedButton(onClick = { onAccept(shift) }) { Text("Accept shift") }
                     token?.status == "pending" -> Text("Request pending")
                     token?.status == "denied" -> Text("Request denied")

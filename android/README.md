@@ -71,12 +71,13 @@ Nothing in git is a keystore. Provide these when you are ready to upload:
 | `MDSHIFT_KEY_ALIAS` | Key alias |
 | `MDSHIFT_KEY_PASSWORD` | Key password |
 
+Pass the two passwords as environment variables. Do not put them in Gradle `-P` arguments; those are visible in the process list.
+
 ```bash
-./gradlew bundleRelease \
-  -PMDSHIFT_KEYSTORE_PATH=$PWD/upload.jks \
-  -PMDSHIFT_KEYSTORE_PASSWORD=… \
-  -PMDSHIFT_KEY_ALIAS=upload \
-  -PMDSHIFT_KEY_PASSWORD=…
+MDSHIFT_KEYSTORE_PASSWORD='…' MDSHIFT_KEY_PASSWORD='…' \
+  ./gradlew bundleRelease \
+  -PMDSHIFT_KEYSTORE_PATH="$PWD/upload.jks" \
+  -PMDSHIFT_KEY_ALIAS=upload
 ```
 
 The Play Console account, app listing, and upload key are still for the owner to create. Package name: `com.eporthospine.mdshift`.

@@ -33,28 +33,60 @@ data class AccountState(
  * Per-account cache. Signing in as someone else, or signing out, drops the previous user's board.
  */
 class AccountBook(initial: AccountState = AccountState()) {
+    private val lock = Any()
     private val _state = MutableStateFlow(initial)
     val state: StateFlow<AccountState> = _state.asStateFlow()
 
     val current: AccountState get() = _state.value
 
+    /** Bumped on sign-in, sign-out, account switch, and Explore so in-flight sync cannot commit. */
+    @Volatile
+    var generation: Long = 0
+        private set
+
     fun update(block: (AccountState) -> AccountState) {
-        _state.value = block(_state.value)
+        synchronized(lock) {
+            _state.value = block(_state.value)
+        }
+    }
+
+    fun invalidate() {
+        synchronized(lock) {
+            generation++
+        }
+    }
+
+    /**
+     * Writes only when this generation still belongs to [userId].
+     * A sign-out or account switch during a network call returns false and leaves the new state alone.
+     */
+    fun updateIfOwned(generation: Long, userId: String, block: (AccountState) -> AccountState): Boolean {
+        synchronized(lock) {
+            val current = _state.value
+            if (this.generation != generation || current.session?.userId != userId) return false
+            _state.value = block(current)
+            return true
+        }
     }
 
     fun prepareForSignIn(userId: String) {
-        val owner = current.ownerId
-        if (owner != null && owner != userId) {
-            val appearance = current.appearance
-            _state.value = AccountState(ownerId = userId, appearance = appearance)
-        } else {
-            update { it.copy(ownerId = userId) }
+        synchronized(lock) {
+            generation++
+            val current = _state.value
+            _state.value = if (current.ownerId != null && current.ownerId != userId) {
+                AccountState(ownerId = userId, appearance = current.appearance)
+            } else {
+                current.copy(ownerId = userId)
+            }
         }
     }
 
     fun clearOnSignOut() {
-        val appearance = current.appearance
-        _state.value = AccountState(appearance = appearance)
+        synchronized(lock) {
+            generation++
+            val appearance = _state.value.appearance
+            _state.value = AccountState(appearance = appearance)
+        }
     }
 }
 
