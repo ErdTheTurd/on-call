@@ -2,7 +2,8 @@
 
 Password signups use a **6-digit email code** (no “click this link”).
 Auth mail is sent through **Resend SMTP** (not Supabase’s built-in mailer).
-Google and Apple OAuth are available on web and iOS once providers are enabled.
+Google and Apple OAuth are available on web, iOS, and Android once providers are enabled.
+Android setup (Play Console, the Android OAuth client, and `mdshift://auth-callback`) is in `android/README.md`. Do not put a service-role key in the Android app.
 
 ## 0. Resend SMTP (required for reliable OTP delivery)
 
@@ -138,6 +139,7 @@ https://supabase.com/dashboard/project/yrnndfpvovuvjlzgivgu/auth/url-configurati
   - `https://mdshift.net/**`
   - `https://mdshift.net/docs/callback.html` (legacy; redirects to `/callback.html`)
   - `oncallwizard://auth-callback`
+  - `mdshift://auth-callback` (Android Sign in with Apple)
   - `http://127.0.0.1:5500/**` (optional local)
   - `http://localhost:5500/**` (optional local)
 

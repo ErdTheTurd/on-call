@@ -1,0 +1,57 @@
+package com.eporthospine.mdshift.ui
+
+import com.eporthospine.mdshift.data.AccountBook
+import com.eporthospine.mdshift.data.AuthCoordinator
+import com.eporthospine.mdshift.data.AuthGate
+import com.eporthospine.mdshift.data.FakeApi
+import com.eporthospine.mdshift.data.ShiftBoard
+import com.eporthospine.mdshift.domain.UserRole
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
+import org.junit.After
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+class RootViewModelTest {
+    private val dispatcher = StandardTestDispatcher()
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(dispatcher)
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
+    @Test
+    fun exploreFromTheViewModelDoesNotAttachASession() {
+        val book = AccountBook()
+        val api = FakeApi()
+        val auth = AuthCoordinator(api, book, demoEnabled = true, allowNpiBypass = false) {}
+        val board = ShiftBoard(api, book)
+        val viewModel = RootViewModel(auth, board, book, demoEnabled = true)
+        viewModel.explore(UserRole.Hospital)
+        val gate = viewModel.authState.value.gate as AuthGate.Ready
+        assertTrue(gate.explore)
+        assertTrue(book.current.session == null)
+        assertTrue(book.current.board.tokens.any { it.doctorName == "Maya Ellison" })
+        assertFalse(book.current.board.shifts.isEmpty())
+    }
+
+    @Test
+    fun releaseViewModelRefusesExplore() {
+        val book = AccountBook()
+        val api = FakeApi()
+        val auth = AuthCoordinator(api, book, demoEnabled = false, allowNpiBypass = false) {}
+        val viewModel = RootViewModel(auth, ShiftBoard(api, book), book, demoEnabled = false)
+        viewModel.explore(UserRole.Doctor)
+        assertTrue(viewModel.authState.value.gate is AuthGate.LoggedOut)
+        assertTrue(book.current.board.shifts.isEmpty())
+    }
+}
