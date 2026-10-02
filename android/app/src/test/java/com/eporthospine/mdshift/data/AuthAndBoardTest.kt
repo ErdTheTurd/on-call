@@ -205,6 +205,33 @@ class AuthAndBoardTest {
     }
 
     @Test
+    fun resumeChallengesAal1BeforeReadingTheBoard() = runTest {
+        val book = AccountBook()
+        val api = FakeApi()
+        api.totpFactor = "factor-9"
+        api.doctorComplete = true
+        val access = jwt(System.currentTimeMillis() / 1000 + 3600, aal = "aal1")
+        book.update {
+            it.copy(
+                session = com.eporthospine.mdshift.domain.StoredSession(
+                    "doctor-1", "jdunn@eporthospine.com", access, "refresh", "doctor",
+                ),
+                doctor = com.eporthospine.mdshift.domain.DoctorProfile(
+                    "doctor-1", "doctor-1", "Jordan", "Dunn", "MD", "1234567890",
+                ),
+            )
+        }
+        val auth = coordinator(api, book, mutableListOf())
+        auth.restore()
+        assertFalse(auth.snapshot.value.gate is AuthGate.Ready)
+        auth.resume()
+        val gate = auth.snapshot.value.gate as AuthGate.MfaChallenge
+        assertEquals("factor-9", gate.factorId)
+        assertEquals("factor-9", book.current.pendingFactorId)
+        assertFalse(api.gets.any { it.contains("rest/v1/") })
+    }
+
+    @Test
     fun unconfirmedSignupStaysOnTheCodeScreenAfterRestore() = runTest {
         val book = AccountBook()
         val api = FakeApi()
@@ -406,9 +433,9 @@ class AuthAndBoardTest {
 
     private fun sampleShift(id: String) = Shift(id, "h", "Average Hospital", "Internal Medicine", 0L, rateFloor = 1100.0)
 
-    private fun jwt(exp: Long): String {
+    private fun jwt(exp: Long, aal: String = "aal1"): String {
         fun enc(json: String) = Base64.getUrlEncoder().withoutPadding().encodeToString(json.toByteArray())
-        return "${enc("{\"alg\":\"none\"}")}.${enc("{\"exp\":$exp,\"aal\":\"aal1\"}")}.sig"
+        return "${enc("{\"alg\":\"none\"}")}.${enc("{\"exp\":$exp,\"aal\":\"$aal\"}")}.sig"
     }
 }
 
@@ -453,6 +480,12 @@ internal class FakeApi : SupabaseApi {
     }
     override suspend fun resendSignup(email: String) = Unit
     override suspend fun updateUserEmail(accessToken: String, email: String) = Unit
+    override suspend fun currentUser(accessToken: String): String {
+        val factor = totpFactor
+        val factors = if (factor == null) "[]" else """[{"id":"$factor","factor_type":"totp","status":"verified"}]"""
+        return """{"id":"doctor-1","factors":$factors}"""
+    }
+
     override suspend fun enrollTotp(accessToken: String) = TotpEnrollment("enroll-1", "SECRET")
     override suspend fun challengeTotp(accessToken: String, factorId: String) = "challenge"
     override suspend fun verifyTotp(accessToken: String, factorId: String, challengeId: String, code: String) =

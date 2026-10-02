@@ -24,6 +24,7 @@ interface SupabaseApi {
     suspend fun refresh(refreshToken: String): AuthPayload
     suspend fun resendSignup(email: String)
     suspend fun updateUserEmail(accessToken: String, email: String)
+    suspend fun currentUser(accessToken: String): String
     suspend fun enrollTotp(accessToken: String): TotpEnrollment
     suspend fun challengeTotp(accessToken: String, factorId: String): String
     suspend fun verifyTotp(accessToken: String, factorId: String, challengeId: String, code: String): AuthPayload
@@ -108,6 +109,9 @@ class KtorSupabaseApi(
     override suspend fun updateUserEmail(accessToken: String, email: String) {
         send("auth/v1/user", HttpMethod.Put, buildJsonObject { put("email", email) }.toString(), accessToken, null)
     }
+
+    override suspend fun currentUser(accessToken: String): String =
+        send("auth/v1/user", HttpMethod.Get, null, accessToken, null)
 
     override suspend fun enrollTotp(accessToken: String): TotpEnrollment {
         val body = send(

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
@@ -74,6 +75,10 @@ class AuthCoordinator(
             _snapshot.value = AuthSnapshot(AuthGate.MfaChallenge(factor, session.email, role))
             return
         }
+        if (jwtClaim(session.accessToken, "aal") == "aal1") {
+            _snapshot.value = AuthSnapshot(busy = true)
+            return
+        }
         val complete = when (role) {
             UserRole.Doctor -> state.doctor?.isOnboardingComplete == true
             UserRole.Hospital -> state.hospital?.isOnboardingComplete == true
@@ -91,7 +96,6 @@ class AuthCoordinator(
         if (book.current.board.explore || book.current.session == null) return
         val session = book.current.session ?: return
         if (!session.emailConfirmed) return
-        if (_snapshot.value.gate is AuthGate.MfaChallenge) return
         val generation = book.generation
         val userId = session.userId
         val role = UserRole.fromWire(session.role) ?: UserRole.Doctor
@@ -104,6 +108,7 @@ class AuthCoordinator(
         }
         if (!still(generation, userId)) return
         val current = book.current.session ?: return
+        if (requireMfaChallenge(generation, userId, role, current.email)) return
         when (val hydrated = runCatching { hydrate(role, current.email, generation) }.getOrElse { error ->
             if (error is CancellationException) throw error
             if (still(generation, userId)) routeFromLocal(role, error.message)
@@ -531,19 +536,25 @@ class AuthCoordinator(
         val token = payload.accessToken ?: book.current.session?.accessToken
             ?: throw ApiException("Unexpected response from the server.")
         val email = payload.email?.takeIf { it.isNotBlank() } ?: emailFallback
+        val challengeFactor = if (
+            !alreadyChallenged && payload.verifiedTotpIds.isNotEmpty() &&
+            (payload.aal == null || payload.aal == "aal1")
+        ) {
+            payload.verifiedTotpIds.first()
+        } else {
+            null
+        }
         persist(
             payload.copy(accessToken = token, userId = userId, email = email),
             email,
             preferredRole,
             emailConfirmed = payload.emailConfirmed,
+            pendingFactorId = challengeFactor,
         )
-        if (!alreadyChallenged && payload.verifiedTotpIds.isNotEmpty() && (payload.aal == null || payload.aal == "aal1")) {
-            val factor = payload.verifiedTotpIds.first()
-            book.update { it.copy(pendingFactorId = factor) }
-            _snapshot.value = AuthSnapshot(AuthGate.MfaChallenge(factor, email, preferredRole))
+        if (challengeFactor != null) {
+            _snapshot.value = AuthSnapshot(AuthGate.MfaChallenge(challengeFactor, email, preferredRole))
             return
         }
-        book.update { it.copy(pendingFactorId = null) }
         if (suggestEnroll && payload.verifiedTotpIds.isEmpty()) {
             val enrollment = runCatching { api.enrollTotp(token) }.getOrNull()
             if (enrollment != null) {
@@ -647,7 +658,13 @@ class AuthCoordinator(
         )
     }
 
-    private fun persist(payload: AuthPayload, email: String, role: UserRole, emailConfirmed: Boolean = true) {
+    private fun persist(
+        payload: AuthPayload,
+        email: String,
+        role: UserRole,
+        emailConfirmed: Boolean = true,
+        pendingFactorId: String? = null,
+    ) {
         val userId = payload.userId ?: return
         val token = payload.accessToken ?: return
         book.prepareForSignIn(userId)
@@ -661,9 +678,59 @@ class AuthCoordinator(
                     role = role.wire,
                     emailConfirmed = emailConfirmed,
                 ),
+                pendingFactorId = pendingFactorId,
                 board = if (it.board.explore) com.eporthospine.mdshift.domain.BoardSnapshot() else it.board.copy(explore = false),
             )
         }
+    }
+
+    /**
+     * Same rule as iOS `needsMfaChallenge`: verified TOTP and an aal1 (or missing) access token
+     * must challenge before any profile or board read. Returns true when the caller must stop.
+     */
+    private suspend fun requireMfaChallenge(
+        generation: Long,
+        userId: String,
+        role: UserRole,
+        email: String,
+    ): Boolean {
+        val token = book.current.session?.accessToken ?: return true
+        if (jwtClaim(token, "aal") == "aal2") {
+            book.updateIfOwned(generation, userId) { it.copy(pendingFactorId = null) }
+            return false
+        }
+        val factors = try {
+            verifiedTotpIds(AppJson.parseToJsonElement(api.currentUser(token)).jsonObject)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (still(generation, userId)) {
+                val pending = book.current.pendingFactorId
+                _snapshot.value = if (!pending.isNullOrBlank()) {
+                    AuthSnapshot(
+                        AuthGate.MfaChallenge(pending, email, role),
+                        error = error.message ?: "Couldn't confirm your authenticator. Check your connection.",
+                    )
+                } else {
+                    AuthSnapshot(
+                        busy = false,
+                        error = error.message ?: "Couldn't confirm your authenticator. Check your connection.",
+                    )
+                }
+            }
+            return true
+        }
+        if (!still(generation, userId)) return true
+        if (factors.isEmpty()) {
+            book.updateIfOwned(generation, userId) { it.copy(pendingFactorId = null) }
+            return false
+        }
+        val factor = factors.first()
+        book.updateIfOwned(generation, userId) { it.copy(pendingFactorId = factor) }
+        if (still(generation, userId)) {
+            _snapshot.value = AuthSnapshot(AuthGate.MfaChallenge(factor, email, role))
+        }
+        return true
     }
 
     private fun still(generation: Long, userId: String): Boolean =
