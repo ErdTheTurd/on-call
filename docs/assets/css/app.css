@@ -3514,6 +3514,9 @@ body:has(.app-shell) {
 
 .app-shell {
   --tab-bar-height: 64px;
+  --content-max: 1120px;
+  --cal-cell: min(46px, calc((100vw - 64px) / 7));
+  --side-col: 340px;
   flex: 1 1 auto;
   height: auto;
   max-height: none;
@@ -3687,7 +3690,10 @@ body:has(.app-shell) {
 
 .app-shell .cal-weekdays {
   gap: 0;
-  margin: 0;
+  margin: 0 auto;
+  width: max-content;
+  max-width: 100%;
+  grid-template-columns: repeat(7, var(--cal-cell));
 }
 
 .app-shell .cal-weekdays span {
@@ -3704,18 +3710,26 @@ body:has(.app-shell) {
 
 .app-shell .cal-grid {
   gap: 0;
+  width: max-content;
+  max-width: 100%;
+  margin-inline: auto;
+  grid-template-columns: repeat(7, var(--cal-cell));
   border-top: 1px solid var(--line);
   border-left: 1px solid var(--line);
   background: var(--surface);
 }
 
 .app-shell .cal-day {
-  aspect-ratio: auto;
-  min-height: 72px;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 2px;
-  padding: 6px 6px 5px;
+  width: var(--cal-cell);
+  height: var(--cal-cell);
+  min-width: 0;
+  min-height: 0;
+  max-height: var(--cal-cell);
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 3px 2px;
   border: 0;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -3759,7 +3773,8 @@ body:has(.app-shell) {
 .app-shell .cal-num {
   font-family: var(--font);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3770,20 +3785,22 @@ body:has(.app-shell) {
 
 .app-shell .cal-rate {
   font-family: var(--font);
-  font-size: 10px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
+  color: var(--text);
   opacity: 1;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 .app-shell .cal-mark {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: transparent;
-  margin-top: auto;
+  margin-top: 1px;
 }
 
 .app-shell .tone-open .cal-mark,
@@ -3802,13 +3819,19 @@ body:has(.app-shell) {
 .app-shell .legend-swatch.tone-blocked { background: var(--text-tertiary); }
 
 .app-shell .cal-grid.compact {
-  gap: 8px;
+  gap: 6px;
+  width: calc(var(--cal-cell) * 7);
+  max-width: 100%;
+  grid-template-columns: repeat(auto-fill, var(--cal-cell));
+  justify-content: start;
   border: 0;
   background: transparent;
 }
 
 .app-shell .cal-grid.compact .cal-day {
-  min-height: 64px;
+  width: var(--cal-cell);
+  height: var(--cal-cell);
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
@@ -4365,14 +4388,14 @@ body:has(.app-shell) .demo-ribbon button { color: var(--accent); }
 @media (min-width: 720px) {
   .app-shell .cal-weekdays abbr { display: none; }
   .app-shell .cal-weekdays .wd-long { display: inline; }
-  .app-shell .cal-day { min-height: 68px; padding: 8px; }
-  .app-shell .cal-rate { font-size: 11px; }
+  .app-shell .cal-num { font-size: 15px; }
+  .app-shell .cal-rate { font-size: 12px; }
 }
 
 @media (max-width: 640px) {
-  .app-shell .cal-day { min-height: 48px; padding: 4px; }
-  .app-shell .cal-rate { display: none; }
-  .app-shell .cal-num { font-size: 12px; }
+  .app-shell .calendar-card { padding: 12px 8px; }
+  .app-shell .cal-num { font-size: 13px; }
+  .app-shell .cal-rate { font-size: 10px; }
   .app-shell .schedule-card {
     grid-template-columns: 48px minmax(0, 1fr);
   }
@@ -4390,5 +4413,117 @@ body:has(.app-shell) .demo-ribbon button { color: var(--accent); }
   .app-shell .cal-day,
   .app-shell .btn-primary,
   .app-shell .stat-badge { transition: none; }
+}
+
+/* Desktop column: fixed calendar + fixed side panels, centered in the page.
+   Cells stay a set size; the grid does not grow with the viewport. */
+@media (min-width: 900px) {
+  .app-shell {
+    --cal-cell: 60px;
+    --side-col: 320px;
+    --tab-bar-height: 0px;
+    padding-bottom: 0;
+  }
+
+  .app-shell .nav-bar {
+    order: 1;
+    position: relative;
+    width: min(var(--content-max), calc(100% - 48px));
+    margin: 0 auto;
+    padding-left: 0;
+    padding-right: 0;
+    background: transparent;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .app-shell .tab-bar {
+    order: 2;
+    position: relative;
+    inset: auto;
+    width: max-content;
+    max-width: min(var(--content-max), calc(100% - 48px));
+    height: 40px;
+    margin-top: 0;
+    margin-bottom: 0;
+    margin-left: calc((100% - min(var(--content-max), 100% - 48px)) / 2);
+    margin-right: auto;
+    padding: 0;
+    display: flex;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 2px;
+    background: transparent;
+    border-top: 0;
+    border-bottom: 1px solid var(--line);
+    box-shadow: none;
+  }
+
+  .app-shell .tab-bar button {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 6px;
+    min-height: 0;
+    height: 40px;
+    padding: 0 12px;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .app-shell .tab-bar button .tab-icon,
+  .app-shell .tab-bar button .tab-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-shell .tab-bar button .tab-label { font-size: 13px; }
+
+  .app-shell .tab-bar button.active {
+    box-shadow: inset 0 -2px 0 var(--accent-fill);
+  }
+
+  .app-shell .tab-badge {
+    position: static;
+    margin-left: 4px;
+  }
+
+  .app-shell .main-scroll {
+    order: 3;
+    width: min(var(--content-max), calc(100% - 48px));
+    max-width: var(--content-max);
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .app-shell .content-grid.two-col {
+    grid-template-columns: calc(var(--cal-cell) * 7 + 34px) var(--side-col);
+    justify-content: center;
+    align-items: start;
+    gap: 24px;
+  }
+
+  .app-shell .content-grid.two-col > .stack {
+    align-self: start;
+    align-content: start;
+    height: auto;
+    min-width: 0;
+  }
+
+  .app-shell .content-grid.two-col .stat-badge { padding: 8px 6px; }
+
+  .app-shell .content-grid.two-col .stat-value,
+  .app-shell .content-grid.two-col .stat-badge .value { font-size: 18px; }
+
+  .app-shell .content-grid.two-col .pending-approval-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+}
+
+@media (min-width: 1280px) {
+  .app-shell {
+    --cal-cell: 72px;
+    --side-col: 340px;
+  }
 }
 
