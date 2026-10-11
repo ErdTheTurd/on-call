@@ -3515,6 +3515,7 @@ body:has(.app-shell) {
 .app-shell {
   --tab-bar-height: 64px;
   --content-max: 1120px;
+  --cal-max: 96px;
   --cal-cell: min(46px, calc((100vw - 64px) / 7));
   --side-col: 340px;
   flex: 1 1 auto;
@@ -3690,10 +3691,11 @@ body:has(.app-shell) {
 
 .app-shell .cal-weekdays {
   gap: 0;
-  margin: 0 auto;
-  width: max-content;
+  justify-self: center;
+  width: min(100%, calc(var(--cal-max) * 7));
   max-width: 100%;
-  grid-template-columns: repeat(7, var(--cal-cell));
+  margin: 0 auto;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .app-shell .cal-weekdays span {
@@ -3710,21 +3712,23 @@ body:has(.app-shell) {
 
 .app-shell .cal-grid {
   gap: 0;
-  width: max-content;
+  justify-self: center;
+  align-items: start;
+  width: min(100%, calc(var(--cal-max) * 7));
   max-width: 100%;
   margin-inline: auto;
-  grid-template-columns: repeat(7, var(--cal-cell));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   border-top: 1px solid var(--line);
   border-left: 1px solid var(--line);
   background: var(--surface);
 }
 
 .app-shell .cal-day {
-  width: var(--cal-cell);
-  height: var(--cal-cell);
+  width: 100%;
+  height: auto;
   min-width: 0;
   min-height: 0;
-  max-height: var(--cal-cell);
+  max-height: none;
   aspect-ratio: 1;
   align-items: center;
   justify-content: center;
@@ -3820,17 +3824,19 @@ body:has(.app-shell) {
 
 .app-shell .cal-grid.compact {
   gap: 6px;
-  width: calc(var(--cal-cell) * 7);
+  justify-self: center;
+  width: min(100%, calc(var(--cal-max) * 7));
   max-width: 100%;
-  grid-template-columns: repeat(auto-fill, var(--cal-cell));
-  justify-content: start;
+  grid-template-columns: repeat(auto-fill, var(--cal-max));
+  justify-content: center;
   border: 0;
   background: transparent;
 }
 
 .app-shell .cal-grid.compact .cal-day {
-  width: var(--cal-cell);
-  height: var(--cal-cell);
+  width: var(--cal-max);
+  height: var(--cal-max);
+  max-width: 100%;
   min-height: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -4425,8 +4431,7 @@ body:has(.app-shell) .demo-ribbon button { color: var(--accent); }
    Cells stay a set size; the grid does not grow with the viewport. */
 @media (min-width: 900px) {
   .app-shell {
-    --cal-cell: 60px;
-    --side-col: 320px;
+    --side-col: 340px;
     --tab-bar-height: 0px;
     padding-bottom: 0;
   }
@@ -4499,8 +4504,8 @@ body:has(.app-shell) .demo-ribbon button { color: var(--accent); }
 
   .app-shell .content-grid.two-col {
     width: 100%;
-    grid-template-columns: calc(var(--cal-cell) * 7 + 34px) var(--side-col);
-    justify-content: space-between;
+    grid-template-columns: minmax(0, 1fr) var(--side-col);
+    justify-content: stretch;
     align-items: start;
     gap: 24px;
   }
@@ -4508,8 +4513,18 @@ body:has(.app-shell) .demo-ribbon button { color: var(--accent); }
   .app-shell .content-grid.two-col > .stack {
     align-self: start;
     align-content: start;
+    justify-items: stretch;
+    width: 100%;
     height: auto;
     min-width: 0;
+  }
+
+  .app-shell .content-grid.two-col > .stack > .card,
+  .app-shell .content-grid.two-col > .stack > .token-row,
+  .app-shell .content-grid.two-col > .stack > .ad-banner {
+    width: 100%;
+    max-width: 100%;
+    justify-self: stretch;
   }
 
   .app-shell .content-grid.two-col .stat-badge { padding: 8px 6px; }
@@ -4523,10 +4538,4 @@ body:has(.app-shell) .demo-ribbon button { color: var(--accent); }
   }
 }
 
-@media (min-width: 1280px) {
-  .app-shell {
-    --cal-cell: 72px;
-    --side-col: 340px;
-  }
-}
 
