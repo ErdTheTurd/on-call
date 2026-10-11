@@ -3928,25 +3928,31 @@ body:has(.app-shell) {
 }
 
 .app-shell .shift-row h3 {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.011em;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .app-shell .shift-topline {
   display: flex;
-  align-items: baseline;
+  align-items: start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .app-shell .shift-rate {
   flex: none;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.011em;
   color: var(--text);
+  white-space: nowrap;
 }
 
 .app-shell .shift-unit {
@@ -4440,13 +4446,9 @@ body:has(.app-shell) .demo-ribbon button { color: var(--accent); }
     order: 2;
     position: relative;
     inset: auto;
-    width: max-content;
-    max-width: min(var(--content-max), calc(100% - 48px));
+    width: min(var(--content-max), calc(100% - 48px));
     height: 40px;
-    margin-top: 0;
-    margin-bottom: 0;
-    margin-left: calc((100% - min(var(--content-max), 100% - 48px)) / 2);
-    margin-right: auto;
+    margin: 0 auto;
     padding: 0;
     display: flex;
     justify-content: flex-start;
@@ -4496,8 +4498,9 @@ body:has(.app-shell) .demo-ribbon button { color: var(--accent); }
   }
 
   .app-shell .content-grid.two-col {
+    width: 100%;
     grid-template-columns: calc(var(--cal-cell) * 7 + 34px) var(--side-col);
-    justify-content: center;
+    justify-content: space-between;
     align-items: start;
     gap: 24px;
   }
