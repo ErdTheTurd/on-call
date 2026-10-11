@@ -81,28 +81,36 @@ function compactRate(value) {
   return `$${n}`;
 }
 
-function doctorFill(day) {
-  if (day.isBlocked) return "rgba(255,255,255,0.06)";
-  if (day.isPast) return "rgba(255,255,255,0.04)";
-  if (!day.shiftCount) return "rgba(255,255,255,0.04)";
-
+/** Status is a class, not a painted cell. The grid stays neutral. */
+function dayTone(day, mode) {
+  if (day.isBlocked) return "blocked";
+  if (day.isPast) return "past";
+  if (mode === "hospital") {
+    if (day.level === "all") return "filled";
+    if (day.level === "partial") return "partial";
+    if (day.level === "none") return "gap";
+    return "empty";
+  }
+  if (!day.shiftCount) return "empty";
   const hours = day.urgencyHours ?? 72;
-  if (hours < 12) return "rgba(239,68,68,0.60)";
-  if (hours < 24) return "rgba(249,115,22,0.55)";
-  if (hours < 48) return "rgba(234,179,8,0.45)";
-  return "rgba(34,197,94,0.40)";
+  if (hours < 12) return "urgent";
+  if (hours < 48) return "soon";
+  return "open";
 }
 
-function hospitalFill(day) {
-  if (day.isBlocked) return "rgba(255,255,255,0.06)";
-  if (day.isPast) return "rgba(255,255,255,0.04)";
-
-  switch (day.level) {
-    case "all": return "rgba(34,197,94,0.55)";
-    case "partial": return "rgba(234,179,8,0.55)";
-    case "none": return "rgba(239,68,68,0.55)";
-    default: return "rgba(255,255,255,0.04)";
-  }
+function dayStatus(day, mode) {
+  const tone = dayTone(day, mode);
+  return {
+    blocked: "Closed",
+    filled: "Filled",
+    partial: "Partial",
+    gap: "Unfilled",
+    urgent: "Urgent",
+    soon: "Soon",
+    open: "Open",
+    past: "",
+    empty: ""
+  }[tone] || "";
 }
 
 /** A day survives focus mode only if the reader could still act on it. */
@@ -113,39 +121,50 @@ function isOpenDay(day, mode) {
 
 function dayCell(day, { mode, selectedDate, compact }) {
   const selected = selectedDate && sameDay(day.date, selectedDate);
-  const fill = mode === "hospital" ? hospitalFill(day) : doctorFill(day);
-  const rate = mode === "doctor" && !day.isPast ? compactRate(day.goingRate) : null;
+  const today = sameDay(day.date, new Date());
+  const tone = dayTone(day, mode);
+  const status = dayStatus(day, mode);
+  const rate = mode === "doctor" && !day.isPast && !day.isBlocked ? compactRate(day.goingRate) : null;
+  const count = day.shiftCount
+    ? `${day.shiftCount} ${mode === "hospital" ? "open" : "shift"}${day.shiftCount === 1 ? "" : "s"}`
+    : "";
+  const label = [
+    day.date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }),
+    status,
+    count,
+    rate ? `top rate ${rate}` : ""
+  ].filter(Boolean).join(", ");
 
   return `
     <button type="button"
-      class="cal-day${day.isPast ? " past" : ""}${selected ? " selected" : ""}${compact ? " compact" : ""}"
+      class="cal-day tone-${tone}${day.isPast ? " past" : ""}${today ? " is-today" : ""}${selected ? " selected" : ""}${compact ? " compact" : ""}"
       data-cal-date="${day.date.toISOString()}"
-      style="background:${fill}">
+      aria-label="${label}"
+      aria-pressed="${selected ? "true" : "false"}"
+      ${today ? 'aria-current="date"' : ""}>
       <span class="cal-num">${day.date.getDate()}</span>
       ${rate ? `<span class="cal-rate">${rate}</span>` : ""}
-      ${day.isBlocked ? `<span class="cal-blocked">${icon("close", { size: 9 })}</span>` : ""}
+      ${status ? `<span class="cal-mark" title="${status}"></span>` : ""}
     </button>`;
 }
 
 function legend(mode) {
   const items = mode === "hospital"
     ? [
-        ["rgba(34,197,94,0.55)", "All filled"],
-        ["rgba(234,179,8,0.55)", "Partial"],
-        ["rgba(239,68,68,0.55)", "None filled"],
-        [null, "Blocked"]
+        ["filled", "All filled"],
+        ["partial", "Partial"],
+        ["gap", "None filled"],
+        ["blocked", "Blocked"]
       ]
     : [
-        ["rgba(34,197,94,0.40)", "Open"],
-        ["rgba(234,179,8,0.45)", "Soon"],
-        ["rgba(239,68,68,0.60)", "Urgent"],
-        [null, "Closed"]
+        ["open", "Open"],
+        ["soon", "Soon"],
+        ["urgent", "Urgent"],
+        ["blocked", "Closed"]
       ];
 
-  return `<div class="cal-legend">${items.map(([color, label]) => `
-    <span>${color
-      ? `<span class="legend-swatch" style="background:${color}"></span>`
-      : `<span class="legend-swatch blocked">${icon("close", { size: 9 })}</span>`}${label}</span>`).join("")}</div>`;
+  return `<div class="cal-legend">${items.map(([tone, label]) => `
+    <span><span class="legend-swatch tone-${tone}"></span>${label}</span>`).join("")}</div>`;
 }
 
 /**
@@ -158,14 +177,14 @@ function legend(mode) {
 export function renderCalendar({ month, days, selectedDate, mode, focusOpen = false, title, subtitle, hint }) {
   const start = monthStart(month);
   const monthLabel = start.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  const weekdays = ["S", "M", "T", "W", "T", "F", "S"];
+  const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const openDays = days.filter((d) => isOpenDay(d, mode));
 
   let grid;
   if (focusOpen) {
     grid = openDays.length
       ? `<div class="cal-grid compact">${openDays.map((d) => dayCell(d, { mode, selectedDate, compact: true })).join("")}</div>`
-      : `<p class="cal-empty">No open days this month — coverage looks complete.</p>`;
+      : `<p class="cal-empty">No open days this month. Coverage looks complete.</p>`;
   } else {
     const blanks = Array.from({ length: start.getDay() }, () => `<span class="cal-day empty"></span>`);
     grid = `<div class="cal-grid">${blanks.join("")}${days.map((d) => dayCell(d, { mode, selectedDate, compact: false })).join("")}</div>`;
@@ -182,7 +201,7 @@ export function renderCalendar({ month, days, selectedDate, mode, focusOpen = fa
         <div class="month-label">${monthLabel}${hint ? `<span class="cal-hint">${hint}</span>` : ""}</div>
         <button type="button" class="cal-nav" data-cal-nav="1" aria-label="Next month">${icon("chevron", { size: 16 })}</button>
       </div>
-      ${focusOpen ? "" : `<div class="cal-weekdays">${weekdays.map((d) => `<span>${d}</span>`).join("")}</div>`}
+      ${focusOpen ? "" : `<div class="cal-weekdays">${weekdays.map((d) => `<span><abbr title="${d}">${d.slice(0, 1)}</abbr><span class="wd-long">${d.slice(0, 3)}</span></span>`).join("")}</div>`}
       ${grid}
       <label class="focus-toggle">
         <input type="checkbox" data-focus-toggle ${focusOpen ? "checked" : ""} />
@@ -191,7 +210,7 @@ export function renderCalendar({ month, days, selectedDate, mode, focusOpen = fa
           <span class="focus-title">Show open days only</span>
           <span class="focus-sub">${focusOpen
             ? (mode === "hospital" ? "Filled days pop away · gaps stay in view" : "Your booked days pop away · only free days remain")
-            : (mode === "hospital" ? "Turn on to hunt unfilled coverage" : "Hide days you're already scheduled for")}</span>
+            : (mode === "hospital" ? "Show only days that still need coverage" : "Hide days you are already scheduled")}</span>
         </span>
       </label>
       ${focusOpen ? "" : legend(mode)}

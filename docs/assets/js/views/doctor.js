@@ -130,14 +130,17 @@ function renderMyShifts(state, profile) {
                 || altDays[0]?.shiftID
                 || null;
               return `
-              <div class="trade-card">
-                <div class="trade-from">${escapeHtml(from)} wants to swap</div>
+              <article class="trade-card">
+                <header class="trade-head">
+                  <h3 class="trade-from">${escapeHtml(from)}</h3>
+                  <p class="trade-kicker">Wants to swap</p>
+                </header>
                 ${theirs && yours ? `
-                  <div class="trade-swap">
-                    <span>They cover <strong>${escapeHtml(yours)}</strong></span>
-                    <span>You cover <strong>${escapeHtml(theirs)}</strong></span>
-                  </div>` : `<div class="subtitle">Shift trade request</div>`}
-                ${pay > 0 ? `<div class="trade-pay">They offer you $${pay.toLocaleString()}</div>` : ""}
+                  <dl class="trade-swap">
+                    <div><dt>They cover</dt><dd>${escapeHtml(yours)}</dd></div>
+                    <div><dt>You cover</dt><dd>${escapeHtml(theirs)}</dd></div>
+                  </dl>` : `<p class="subtitle">Shift trade request</p>`}
+                ${pay > 0 ? `<p class="trade-pay"><span>Offer</span><strong>$${pay.toLocaleString()}</strong></p>` : ""}
                 <div class="trade-actions">
                   <button type="button" class="approve" data-respond-trade="${t.id}" data-accept="1">Accept</button>
                   <button type="button" class="counter" data-open-counter="${t.id}">Counter</button>
@@ -173,7 +176,7 @@ function renderMyShifts(state, profile) {
                       <button type="button" class="deny" data-close-counter="${t.id}">Cancel</button>
                     </div>
                   </div>` : ""}
-              </div>`;
+              </article>`;
             }).join("")}
           </div>
         </section>` : ""}
@@ -426,9 +429,9 @@ function renderDaySheet(dateISO, profile) {
 
   const body = `
     <main class="main-scroll stack" style="padding-bottom:24px">
-      <section class="card" style="text-align:center">
+        <section class="card day-sheet-date">
         <div class="subtitle">${date.toLocaleDateString(undefined, { weekday: "long" })}</div>
-        <div class="page-title" style="font-size:1.4rem">${date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</div>
+        <div class="day-sheet-title">${date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</div>
         ${holiday ? `<div class="holiday-pill">${escapeHtml(holiday.name)} — +${Math.round(holiday.premium * 100)}% premium</div>` : ""}
       </section>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
@@ -437,7 +440,7 @@ function renderDaySheet(dateISO, profile) {
       </div>
       ${existing ? `
         <section class="card" style="display:flex;align-items:center;gap:12px">
-          <span style="font-size:1.4rem;color:var(--success)">✓</span>
+          <span class="request-check">${icon("check", { size: 18 })}</span>
           <div style="flex:1">
             <div style="font-weight:600">Request submitted</div>
             <div class="subtitle">${escapeHtml(statusLabel(existing.status))} · ${escapeHtml(existing.hospitalName || "")}</div>

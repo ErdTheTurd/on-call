@@ -1,5 +1,5 @@
-import { escapeHtml, VERIFICATION, formatShiftDate } from "./brand.js";
-import { currentRate, urgencyTier, urgencyColor, urgencyIcon, urgencyBadge } from "./shift-math.js";
+import { escapeHtml, VERIFICATION } from "./brand.js";
+import { currentRate, urgencyTier, urgencyBadge } from "./shift-math.js";
 import { icon } from "./lib/icons.js";
 
 export { icon };
@@ -30,23 +30,36 @@ export function verificationBadge(status, compact = false) {
  */
 export function shiftRow(shift, opts = {}) {
   const tier = urgencyTier(shift);
-  const color = urgencyColor(tier);
   const rate = currency(currentRate(shift));
   const unit = shift.rateUnit === "per hour" ? "/hr" : "/day";
-  const duration = shift.rateUnit === "per hour" ? `${shift.durationHours}h` : "Full day";
+  const duration = shift.rateUnit === "per hour" ? `${shift.durationHours}h` : "24h call";
   const badge = urgencyBadge(tier);
+  const start = new Date(shift.start);
+  const wd = start.toLocaleDateString(undefined, { weekday: "short" });
+  const month = start.toLocaleDateString(undefined, { month: "short" });
+  const time = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const flag = badge === "URGENT" ? "Urgent" : badge === "HIGH PAY" ? "High pay" : "";
 
   return `
-    <article class="shift-row">
-      <div class="shift-icon" style="background:${color}26;color:${color}">${icon(urgencyIcon(tier), { size: 20 })}</div>
+    <article class="shift-row" data-urgency="${escapeHtml(tier)}">
+      <div class="shift-dateblock" aria-hidden="true">
+        <span class="shift-wd">${escapeHtml(wd)}</span>
+        <span class="shift-dom">${start.getDate()}</span>
+        <span class="shift-mo">${escapeHtml(month)}</span>
+      </div>
       <div class="shift-body">
-        <h3>${escapeHtml(shift.hospital)}</h3>
-        <div class="shift-meta-line">${escapeHtml(shift.specialty)} · ${escapeHtml(duration)}</div>
-        <div class="shift-bottom">
-          <span class="rate-label" style="color:${color}">${icon("dollar", { size: 15 })}${rate}${unit}</span>
-          ${opts.showLock ? `<span class="pill pill-quiet">${icon("lock", { size: 11 })} Rate locked</span>` : ""}
-          ${badge ? `<span class="pill pill-solid" style="background:${color}">${badge}</span>` : ""}
-          <span class="date-label">${formatShiftDate(shift.start, shift.rateUnit !== "per hour")}</span>
+        <div class="shift-topline">
+          <h3>${escapeHtml(shift.hospital)}</h3>
+          <span class="shift-rate">${rate}<span class="shift-unit">${unit}</span></span>
+        </div>
+        <div class="shift-meta-line">
+          <span>${escapeHtml(shift.specialty)}</span>
+          <span class="meta-sep" aria-hidden="true"></span>
+          <span>${escapeHtml(duration)}</span>
+          <span class="meta-sep" aria-hidden="true"></span>
+          <time datetime="${escapeHtml(start.toISOString())}">${escapeHtml(time)}</time>
+          ${opts.showLock ? `<span class="shift-lock">${icon("lock", { size: 12 })}<span>Locked</span></span>` : ""}
+          ${flag ? `<span class="shift-flag">${escapeHtml(flag)}</span>` : ""}
         </div>
       </div>
     </article>`;
