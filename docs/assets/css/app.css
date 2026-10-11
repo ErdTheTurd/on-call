@@ -3451,3 +3451,1091 @@ a.ad-banner:hover {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Scheduling surfaces. Flat, one accent, light and dark.             */
+/* Landing and auth keep the existing marketing styles.               */
+/* ------------------------------------------------------------------ */
+
+body:has(.app-shell) {
+  color-scheme: dark;
+  --bg: #101114;
+  --surface: #181b20;
+  --surface-high: #22262d;
+  --border: #2c313a;
+  --border-high: #3c4350;
+  --line: #2c313a;
+  --text: #f4f5f7;
+  --text-secondary: #c5cad3;
+  --text-tertiary: #9aa3b0;
+  --accent: #b9d0ff;
+  --accent-fill: #1d4ed8;
+  --accent-soft: rgba(185, 208, 255, 0.12);
+  --accent-alt: #b9d0ff;
+  --danger: #f3b4b4;
+  --success: #8fd0b0;
+  --warning: #f0c36a;
+  --card-radius: 10px;
+  --button-radius: 8px;
+  --card-padding: 16px;
+  --section-spacing: 16px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: light) {
+  body:has(.app-shell) {
+    color-scheme: light;
+    --bg: #f3f4f6;
+    --surface: #ffffff;
+    --surface-high: #f7f8fa;
+    --border: #e1e4ea;
+    --border-high: #cfd4dc;
+    --line: #e1e4ea;
+    --text: #1a1d23;
+    --text-secondary: #3e4654;
+    --text-tertiary: #5c6573;
+    --accent: #1d4ed8;
+    --accent-fill: #1d4ed8;
+    --accent-soft: rgba(29, 78, 216, 0.08);
+    --accent-alt: #1d4ed8;
+    --danger: #b42318;
+    --success: #067647;
+    --warning: #b54708;
+  }
+}
+
+#app:has(.app-shell) {
+  height: 100dvh;
+  max-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-shell {
+  --tab-bar-height: 64px;
+  --content-max: 1120px;
+  --cal-max: 96px;
+  --cal-cell: min(46px, calc((100vw - 64px) / 7));
+  --side-col: 340px;
+  flex: 1 1 auto;
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-shell .bg-gradient { display: none; }
+
+.app-shell .nav-bar {
+  min-height: 56px;
+  backdrop-filter: none;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.app-shell .nav-bar h1 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.011em;
+}
+
+.app-shell .nav-bar .menu-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.app-shell .nav-bar .menu-btn:hover { background: var(--surface-high); }
+
+.app-shell .tab-bar {
+  height: calc(64px + var(--safe-bottom));
+  backdrop-filter: none;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.app-shell .tab-bar button {
+  color: var(--text-secondary);
+  border-radius: 0;
+  margin: 0;
+  background: transparent;
+}
+
+.app-shell .tab-bar button:hover {
+  color: var(--text);
+  background: transparent;
+}
+
+.app-shell .tab-bar button.active {
+  color: var(--accent);
+  background: transparent;
+  box-shadow: inset 0 2px 0 var(--accent-fill);
+}
+
+.app-shell .tab-bar button:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: -2px;
+}
+
+.app-shell .card {
+  padding: var(--card-padding);
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.app-shell .card:hover { border-color: var(--line); }
+
+.app-shell .card .calendar-card {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-shell .btn-primary {
+  min-height: 40px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--accent-fill);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.app-shell .btn-primary:hover { background: var(--accent-fill); filter: brightness(1.08); }
+.app-shell .btn-primary:active { transform: none; opacity: 0.92; }
+.app-shell .btn-primary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app-shell .btn-secondary {
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.app-shell .btn-ghost:hover { background: var(--accent-soft); }
+
+.app-shell .section-header {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.app-shell .section-header .icon-wrap {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.app-shell .divider { background: var(--line); }
+
+.app-shell .subtitle { color: var(--text-secondary); font-size: 13px; line-height: 1.45; }
+.app-shell .tertiary { color: var(--text-tertiary); }
+
+/* Calendar */
+.app-shell .calendar-card { gap: 12px; }
+
+.app-shell .calendar-card .cal-title h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.011em;
+}
+
+.app-shell .calendar-card .cal-title .subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.app-shell .calendar-card .cal-nav {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.app-shell .calendar-card .cal-nav:hover { background: var(--surface-high); }
+.app-shell .calendar-card .cal-nav:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: 2px;
+}
+
+.app-shell .calendar-card .month-label {
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.011em;
+}
+
+.app-shell .calendar-card .cal-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.app-shell .cal-weekdays {
+  gap: 0;
+  justify-self: center;
+  width: min(100%, calc(var(--cal-max) * 7));
+  max-width: 100%;
+  margin: 0 auto;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.app-shell .cal-weekdays span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding: 0 0 6px;
+}
+
+.app-shell .cal-weekdays abbr { text-decoration: none; }
+.app-shell .cal-weekdays .wd-long { display: none; }
+
+.app-shell .cal-grid {
+  gap: 0;
+  justify-self: center;
+  align-items: start;
+  width: min(100%, calc(var(--cal-max) * 7));
+  max-width: 100%;
+  margin-inline: auto;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.app-shell .cal-day {
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 3px 2px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: none;
+  transform: none;
+}
+
+.app-shell .cal-day:hover:not(.empty):not(.past) {
+  transform: none;
+  background: var(--surface-high);
+  border-color: var(--line);
+  z-index: 1;
+}
+
+.app-shell .cal-day:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: -2px;
+  z-index: 2;
+}
+
+.app-shell .cal-day.empty {
+  visibility: visible;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.app-shell .cal-day.past {
+  color: var(--text-tertiary);
+  background: var(--surface);
+  cursor: default;
+}
+
+.app-shell .cal-day.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent-fill);
+}
+
+.app-shell .cal-num {
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-shell .cal-day.is-today .cal-num {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.app-shell .cal-rate {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  opacity: 1;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.app-shell .cal-mark {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: transparent;
+  margin-top: 1px;
+}
+
+.app-shell .tone-open .cal-mark,
+.app-shell .legend-swatch.tone-open { background: var(--accent-fill); }
+.app-shell .tone-soon .cal-mark,
+.app-shell .tone-partial .cal-mark,
+.app-shell .legend-swatch.tone-soon,
+.app-shell .legend-swatch.tone-partial { background: var(--warning); }
+.app-shell .tone-urgent .cal-mark,
+.app-shell .tone-gap .cal-mark,
+.app-shell .legend-swatch.tone-urgent,
+.app-shell .legend-swatch.tone-gap { background: var(--danger); }
+.app-shell .tone-filled .cal-mark,
+.app-shell .legend-swatch.tone-filled { background: var(--success); }
+.app-shell .tone-blocked .cal-mark,
+.app-shell .legend-swatch.tone-blocked { background: var(--text-tertiary); }
+
+.app-shell .cal-grid.compact {
+  gap: 6px;
+  justify-self: center;
+  width: min(100%, calc(var(--cal-max) * 7));
+  max-width: 100%;
+  grid-template-columns: repeat(auto-fill, var(--cal-max));
+  justify-content: center;
+  border: 0;
+  background: transparent;
+}
+
+.app-shell .cal-grid.compact .cal-day {
+  width: var(--cal-max);
+  height: var(--cal-max);
+  max-width: 100%;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.app-shell .cal-empty {
+  padding: 28px 12px;
+  border: 1px dashed var(--border-high);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.app-shell .cal-legend {
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.app-shell .legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.app-shell .focus-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.app-shell .focus-toggle .switch {
+  width: 36px;
+  height: 22px;
+  background: var(--border-high);
+}
+
+.app-shell .focus-toggle .switch::after {
+  width: 16px;
+  height: 16px;
+  top: 3px;
+  left: 3px;
+  background: #fff;
+}
+
+.app-shell .focus-toggle input:checked + .switch { background: var(--accent-fill); }
+.app-shell .focus-toggle input:checked + .switch::after { transform: translateX(14px); }
+.app-shell .focus-title { font-size: 13px; font-weight: 600; }
+.app-shell .focus-sub { font-size: 12px; color: var(--text-secondary); }
+
+/* Shift rows */
+.app-shell .shift-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.app-shell .shift-dateblock {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 0;
+  min-height: 52px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-shell .shift-wd,
+.app-shell .shift-mo {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  line-height: 1.2;
+}
+
+.app-shell .shift-dom {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.app-shell .shift-row h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.011em;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
+.app-shell .shift-topline {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app-shell .shift-rate {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.011em;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.app-shell .shift-unit {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.app-shell .shift-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.app-shell .meta-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.app-shell .shift-lock,
+.app-shell .shift-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.app-shell .shift-lock { color: var(--text-secondary); }
+.app-shell .shift-row[data-urgency="critical"] .shift-flag { color: var(--danger); }
+.app-shell .shift-row[data-urgency="high"] .shift-flag { color: var(--warning); }
+.app-shell .shift-row[data-urgency="critical"] .shift-dateblock,
+.app-shell .schedule-card[data-urgency="urgent"] .schedule-date {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+.app-shell .shift-row[data-urgency="high"] .shift-dateblock,
+.app-shell .schedule-card[data-urgency="soon"] .schedule-date {
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+
+.app-shell .card:has(> .shift-row:only-child) { padding: 12px 14px; }
+
+/* Coverage, approvals, trades */
+.app-shell .stat-row { gap: 0; }
+
+.app-shell .stat-badge {
+  align-items: flex-start;
+  text-align: left;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--line);
+  box-shadow: none;
+  transform: none;
+}
+
+.app-shell .stat-badge:last-child { border-right: 0; }
+.app-shell .stat-badge:hover {
+  background: var(--surface-high);
+  border-color: var(--line);
+  transform: none;
+}
+.app-shell .stat-badge:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: -2px;
+}
+.app-shell .stat-badge.selected {
+  outline: none;
+  background: var(--accent-soft);
+  box-shadow: inset 0 -2px 0 var(--accent-fill);
+}
+
+.app-shell .stat-value,
+.app-shell .stat-badge .value {
+  font-family: var(--font);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-shell .stat-label,
+.app-shell .stat-badge .label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.app-shell .stat-hint,
+.app-shell .stat-badge .stat-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.app-shell .card.stat-row,
+.app-shell .card > .stat-row {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.app-shell .day-insight-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.app-shell .day-insight-date {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.011em;
+}
+
+.app-shell .coverage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-shell .coverage-chip .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.app-shell .specialty-day-list { gap: 0; max-height: 420px; }
+.app-shell .specialty-day-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.app-shell .specialty-day-row:first-child { border-top: 0; }
+.app-shell .spec-name { font-size: 14px; font-weight: 600; }
+.app-shell .spec-main { min-width: 0; }
+
+.app-shell .pending-approvals-card { border-color: var(--line); }
+.app-shell .pending-approval-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+.app-shell .pending-approval-row:last-child { border-bottom: 0; }
+
+.app-shell .row-actions .approve,
+.app-shell .row-actions .deny,
+.app-shell .token-mini .approve,
+.app-shell .token-mini .deny,
+.app-shell .trade-actions button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.app-shell .row-actions .approve,
+.app-shell .token-mini .approve,
+.app-shell .trade-actions .approve {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: #fff;
+}
+
+.app-shell .row-actions .deny,
+.app-shell .token-mini .deny,
+.app-shell .trade-actions .deny {
+  background: transparent;
+  color: var(--danger);
+}
+
+.app-shell .trade-actions .counter {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.app-shell .trade-actions button:focus-visible,
+.app-shell .row-actions button:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: 2px;
+}
+
+.app-shell .trade-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.app-shell .trade-head { display: grid; gap: 2px; }
+.app-shell .trade-from { font-size: 14px; font-weight: 600; margin: 0; }
+.app-shell .trade-kicker {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.app-shell .trade-swap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0;
+}
+.app-shell .trade-swap div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.app-shell .trade-swap dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.app-shell .trade-swap dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.app-shell .trade-pay {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.app-shell .trade-pay strong {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.app-shell .trade-counter-panel {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+.app-shell .schedule-card {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.app-shell .schedule-date {
+  width: auto;
+  min-height: 52px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-shell .schedule-date .day {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.app-shell .schedule-name { font-size: 14px; font-weight: 600; }
+.app-shell .schedule-requested { font-size: 12px; margin-top: 2px; }
+.app-shell .schedule-side {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+.app-shell .schedule-rate {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.app-shell .schedule-rate span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.app-shell .search-field {
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text-secondary);
+}
+.app-shell .search-field:focus-within {
+  border-color: var(--accent-fill);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.app-shell .search-field input:focus { outline: none; }
+
+.app-shell .empty-state {
+  justify-items: start;
+  text-align: left;
+  gap: 6px;
+  padding: 8px 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.app-shell .empty-state .empty-icon { display: none; }
+.app-shell .empty-state .empty-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.app-shell .empty-state.card {
+  padding: 20px;
+  border: 1px dashed var(--border-high);
+  background: var(--surface);
+}
+
+.app-shell .chip {
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-color: var(--line);
+}
+.app-shell .chip.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-fill);
+  color: var(--accent);
+}
+.app-shell .chip:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: 2px;
+}
+
+.app-shell .day-sheet-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.app-shell .money-lg {
+  font-family: var(--font);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-shell .request-check {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--success);
+}
+
+.app-shell .sheet-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.011em;
+}
+
+.app-shell .sheet-panel {
+  background: var(--bg);
+  border-radius: 12px 12px 0 0;
+  border-top: 1px solid var(--line);
+  box-shadow: none;
+}
+@media (min-width: 720px) {
+  .app-shell .sheet-panel {
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    box-shadow: none;
+  }
+}
+
+.app-shell .token-badge {
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+.app-shell .showcase-shell {
+  background: var(--bg);
+}
+.app-shell .shot-card,
+.app-shell .shot-metrics > div {
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+.app-shell .shot-pill {
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--line);
+}
+.app-shell .showcase-chip { border-radius: 8px; }
+.app-shell .showcase-chip.active {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: #fff;
+}
+
+body:has(.app-shell) .demo-ribbon {
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--line);
+  font-weight: 500;
+}
+body:has(.app-shell) .demo-ribbon button { color: var(--accent); }
+
+@media (min-width: 720px) {
+  .app-shell .cal-weekdays abbr { display: none; }
+  .app-shell .cal-weekdays .wd-long { display: inline; }
+  .app-shell .cal-num { font-size: 15px; }
+  .app-shell .cal-rate { font-size: 12px; }
+}
+
+@media (max-width: 640px) {
+  .app-shell .calendar-card { padding: 12px 8px; }
+  .app-shell .cal-num { font-size: 13px; }
+  .app-shell .cal-rate { font-size: 10px; }
+  .app-shell .schedule-card {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+  .app-shell .schedule-side {
+    grid-column: 1 / -1;
+    justify-items: start;
+  }
+  .app-shell .trade-swap { grid-template-columns: 1fr; }
+  .app-shell .stat-badge { padding: 10px 8px; }
+  .app-shell .stat-value,
+  .app-shell .stat-badge .value { font-size: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .cal-day,
+  .app-shell .btn-primary,
+  .app-shell .stat-badge { transition: none; }
+}
+
+/* Desktop column: fixed calendar + fixed side panels, centered in the page.
+   Cells stay a set size; the grid does not grow with the viewport. */
+@media (min-width: 900px) {
+  .app-shell {
+    --side-col: 340px;
+    --tab-bar-height: 0px;
+    padding-bottom: 0;
+  }
+
+  .app-shell .nav-bar {
+    order: 1;
+    position: relative;
+    width: min(var(--content-max), calc(100% - 48px));
+    margin: 0 auto;
+    padding-left: 0;
+    padding-right: 0;
+    background: transparent;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .app-shell .tab-bar {
+    order: 2;
+    position: relative;
+    inset: auto;
+    width: min(var(--content-max), calc(100% - 48px));
+    height: 40px;
+    margin: 0 auto;
+    padding: 0;
+    display: flex;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 2px;
+    background: transparent;
+    border-top: 0;
+    border-bottom: 1px solid var(--line);
+    box-shadow: none;
+  }
+
+  .app-shell .tab-bar button {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 6px;
+    min-height: 0;
+    height: 40px;
+    padding: 0 12px;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .app-shell .tab-bar button .tab-icon,
+  .app-shell .tab-bar button .tab-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-shell .tab-bar button .tab-label { font-size: 13px; }
+
+  .app-shell .tab-bar button.active {
+    box-shadow: inset 0 -2px 0 var(--accent-fill);
+  }
+
+  .app-shell .tab-badge {
+    position: static;
+    margin-left: 4px;
+  }
+
+  .app-shell .main-scroll {
+    order: 3;
+    width: min(var(--content-max), calc(100% - 48px));
+    max-width: var(--content-max);
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .app-shell .content-grid.two-col {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) var(--side-col);
+    justify-content: stretch;
+    align-items: start;
+    gap: 24px;
+  }
+
+  .app-shell .content-grid.two-col > .stack {
+    align-self: start;
+    align-content: start;
+    justify-items: stretch;
+    width: 100%;
+    height: auto;
+    min-width: 0;
+  }
+
+  .app-shell .content-grid.two-col > .stack > .card,
+  .app-shell .content-grid.two-col > .stack > .token-row,
+  .app-shell .content-grid.two-col > .stack > .ad-banner {
+    width: 100%;
+    max-width: 100%;
+    justify-self: stretch;
+  }
+
+  .app-shell .content-grid.two-col .stat-badge { padding: 8px 6px; }
+
+  .app-shell .content-grid.two-col .stat-value,
+  .app-shell .content-grid.two-col .stat-badge .value { font-size: 18px; }
+
+  .app-shell .content-grid.two-col .pending-approval-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+}
+
+

@@ -114,60 +114,60 @@ function renderHospitalDashboard(state, profile) {
     ${navBar(profile?.name || "Home")}
     <main class="main-scroll stack">
       ${profile && profile.verificationStatus !== "verified" ? pendingBanner(profile.verificationStatus, profile.verificationFlags) : ""}
-      ${allPending.length ? `
-        <section class="card stack pending-approvals-card">
-          ${sectionHeader(`Approve coverage requests (${allPending.length})`, "checkCircle")}
-          <p class="subtitle" style="margin:0">Doctors are waiting. Approve here, or open Schedule Admin from the menu.</p>
-          <div class="pending-approvals-list">
-            ${allPending.slice(0, 8).map((t) => `
-              <div class="token-mini pending-approval-row">
-                <div style="flex:1;min-width:0">
-                  <div style="font-weight:600">${escapeHtml(t.doctorName || "Doctor")}</div>
-                  <div class="subtitle">${escapeHtml(t.specialty || "")} · ${formatShiftDate(t.date)}${t.hospitalName ? ` · ${escapeHtml(t.hospitalName)}` : ""}</div>
-                </div>
-                <span class="row-actions">
-                  <button type="button" class="approve" data-approve-token="${t.id}">Approve</button>
-                  <button type="button" class="deny" data-deny-token="${t.id}">Deny</button>
-                </span>
-              </div>`).join("")}
-          </div>
-          ${allPending.length > 8 ? `<button type="button" class="btn-secondary" data-open-sheet="schedule">See all in Schedule Admin</button>` : ""}
-        </section>` : ""}
-      <section class="card stack">
-        ${sectionHeader("At a glance")}
-        <div class="stat-row">
-          ${statBadge({
-            value: `${profile ? fillRatePercent(profile.id) : 0}%`,
-            label: "Fill rate",
-            hint: "Last 30 days",
-            attrs: 'data-open-sheet="analytics"'
-          })}
-          ${statBadge({
-            value: allPending.length,
-            label: "Pending",
-            hint: "Need your OK",
-            attrs: 'data-open-sheet="schedule"'
-          })}
-          ${statBadge({
-            value: openDayCount,
-            label: "Open days",
-            hint: focusOpen ? "In focus" : "This month",
-            attrs: 'data-nav-tab="alter"'
-          })}
-        </div>
-      </section>
       <div class="content-grid two-col">
         <div class="stack">
           ${profile ? renderCalendar({
             month, days, selectedDate: selected, mode: "hospital", focusOpen,
             title: "Coverage calendar",
             subtitle: focusOpen
-              ? "Open days only — filled coverage pops away so gaps stay obvious."
-              : "See what's filled, then open a day to set rates or approve coverage.",
+              ? "Open days only. Filled days drop out so gaps stay in view."
+              : "Filled, partial, and open days. Select a day for who is on call.",
             hint: focusOpen ? "Open coverage gaps" : "Select a day for details"
           }) : ""}
         </div>
         <div class="stack">
+          <section class="card stack">
+            ${sectionHeader("At a glance")}
+            <div class="stat-row">
+              ${statBadge({
+                value: `${profile ? fillRatePercent(profile.id) : 0}%`,
+                label: "Fill rate",
+                hint: "Last 30 days",
+                attrs: 'data-open-sheet="analytics"'
+              })}
+              ${statBadge({
+                value: allPending.length,
+                label: "Pending",
+                hint: "Need your OK",
+                attrs: 'data-open-sheet="schedule"'
+              })}
+              ${statBadge({
+                value: openDayCount,
+                label: "Open days",
+                hint: focusOpen ? "In focus" : "This month",
+                attrs: 'data-nav-tab="alter"'
+              })}
+            </div>
+          </section>
+          ${allPending.length ? `
+            <section class="card stack pending-approvals-card">
+              ${sectionHeader(`Approve coverage requests (${allPending.length})`, "checkCircle")}
+              <p class="subtitle" style="margin:0">Doctors are waiting. Approve here, or open Schedule Admin from the menu.</p>
+              <div class="pending-approvals-list">
+                ${allPending.slice(0, 8).map((t) => `
+                  <div class="token-mini pending-approval-row">
+                    <div style="flex:1;min-width:0">
+                      <div style="font-weight:600">${escapeHtml(t.doctorName || "Doctor")}</div>
+                      <div class="subtitle">${escapeHtml(t.specialty || "")} · ${formatShiftDate(t.date)}${t.hospitalName ? ` · ${escapeHtml(t.hospitalName)}` : ""}</div>
+                    </div>
+                    <span class="row-actions">
+                      <button type="button" class="approve" data-approve-token="${t.id}">Approve</button>
+                      <button type="button" class="deny" data-deny-token="${t.id}">Deny</button>
+                    </span>
+                  </div>`).join("")}
+              </div>
+              ${allPending.length > 8 ? `<button type="button" class="btn-secondary" data-open-sheet="schedule">See all in Schedule Admin</button>` : ""}
+            </section>` : ""}
           ${insight ? renderDayInsight(insight, profile, insightDate) : ""}
           ${adBanner("dashboard", { show: !isPlusActive() })}
         </div>
@@ -186,10 +186,10 @@ function renderDayInsight(summary, profile, date) {
 
   return `
     <section class="card stack">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div class="day-insight-head">
         <div>
-          <div class="subtitle" style="font-weight:600">${date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
-          <div class="coverage-chip ${coverageClass(summary.coverageFillLevel)}">${summary.isBlocked ? "Unavailable" : summary.coverageFillLevel === "all" ? "Fully covered" : summary.coverageFillLevel === "partial" ? "Partial coverage" : "Open coverage"}</div>
+          <div class="day-insight-date">${date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
+          <div class="coverage-chip ${coverageClass(summary.coverageFillLevel)}"><span class="status-dot" aria-hidden="true"></span>${summary.isBlocked ? "Unavailable" : summary.coverageFillLevel === "all" ? "Fully covered" : summary.coverageFillLevel === "partial" ? "Partial coverage" : "Open coverage"}</div>
         </div>
         <button type="button" class="chip ${summary.isBlocked ? "active" : ""}" data-toggle-unavail="${date.toISOString()}">
           ${summary.isBlocked ? "Unavailable" : "Mark unavailable"}
@@ -199,8 +199,8 @@ function renderDayInsight(summary, profile, date) {
       <div class="specialty-day-list">
         ${rows.filter((r) => r.hasShiftPosted || r.tokenRequests.length || r.proposedRate != null).slice(0, 12).map((r) => `
           <div class="specialty-day-row">
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:600">${escapeHtml(r.specialty)}</div>
+            <div class="spec-main">
+              <div class="spec-name">${escapeHtml(r.specialty)}</div>
               <div class="subtitle">
                 ${r.isFilled
                   ? `On call: ${escapeHtml(r.onCallDoctorName || "Doctor")}${r.onCallCredential ? `, ${escapeHtml(r.onCallCredential)}` : ""} · ${currency(r.paymentAmount)}${escapeHtml(r.rateUnitLabel)}`
@@ -361,7 +361,7 @@ function renderAlterShifts(state, profile) {
           ` : ""}
 
           <button type="button" class="btn-primary" data-save-alter-shift>
-            ${savedFlash ? "✓ Saved!" : "Save Shift for This Day"}
+            ${savedFlash ? "Saved" : "Save Shift for This Day"}
           </button>
         </section>
       </div>
@@ -553,27 +553,26 @@ function renderScheduleAdminSheet(profile, state) {
         </button>
       </div>
       <div class="search-field">
-        <span>🔍</span>
-        <input type="search" placeholder="Search doctor or specialty…" data-admin-search value="${escapeHtml(state.adminSearch || "")}" />
+        <span class="search-icon" aria-hidden="true">${icon("search", { size: 16 })}</span>
+        <input type="search" placeholder="Search doctor or specialty" aria-label="Search doctor or specialty" data-admin-search value="${escapeHtml(state.adminSearch || "")}" />
       </div>
       ${filtered.length ? filtered.map((r) => {
         const daysOut = (new Date(r.date) - Date.now()) / 86400000;
-        const urgency = daysOut < 1 ? "var(--danger)" : daysOut < 4 ? "var(--warning)" : "var(--success)";
         const d = new Date(r.date);
         return `
-          <section class="card schedule-card">
-            <div class="schedule-date" style="color:${urgency};background:${urgency}18">
-              <div class="mo">${d.toLocaleDateString(undefined, { month: "short" })}</div>
-              <div class="day">${d.getDate()}</div>
+          <section class="card schedule-card" data-urgency="${daysOut < 1 ? "urgent" : daysOut < 4 ? "soon" : "ok"}">
+            <div class="schedule-date">
               <div class="wd">${d.toLocaleDateString(undefined, { weekday: "short" })}</div>
+              <div class="day">${d.getDate()}</div>
+              <div class="mo">${d.toLocaleDateString(undefined, { month: "short" })}</div>
             </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:600">${escapeHtml(r.doctorName || "Doctor")}, ${escapeHtml(r.credential || "MD")}</div>
+            <div class="schedule-main">
+              <div class="schedule-name">${escapeHtml(r.doctorName || "Doctor")}, ${escapeHtml(r.credential || "MD")}</div>
               <div class="subtitle">${escapeHtml(r.specialty)}</div>
-              <div class="tertiary" style="font-size:11px">Requested ${new Date(r.requestedAt).toLocaleString()}</div>
+              <div class="tertiary schedule-requested">Requested ${new Date(r.requestedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>
             </div>
-            <div style="text-align:right">
-              <div style="font-weight:700;color:var(--accent)">${currency(r.shiftRate || 0)}/day</div>
+            <div class="schedule-side">
+              <div class="schedule-rate">${currency(r.shiftRate || 0)}<span>/day</span></div>
               <span class="verify-badge ${escapeHtml(r.status)}">${escapeHtml(r.status.replace("_", " "))}</span>
               ${r.status === "pending" ? `
                 <div class="trade-actions" style="margin-top:8px">
