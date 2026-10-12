@@ -42,7 +42,6 @@ function header() {
 function hero() {
   return `
     <section class="hero">
-      <span class="pill reveal">Live now</span>
       <h1 class="hero-title reveal">
         <span class="hero-shift-hit" data-hero-shift-hit>
           <span class="hero-shift-stack" data-hero-shift>

@@ -2276,7 +2276,7 @@ a.ad-banner:hover {
 }
 
 .hero-title {
-  margin: 26px 0 0;
+  margin: 0;
   font-size: clamp(44px, 6.6vw, 74px);
   line-height: 1.05;
   letter-spacing: -0.04em;
