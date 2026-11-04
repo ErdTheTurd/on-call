@@ -153,9 +153,17 @@ Collect / linked to the user / purpose App Functionality. Not used for tracking:
 - User ID (Supabase auth id)
 - Other user content: NPI, DEA number, license number and state, specialties, and schedule data (shifts, trades, roster)
 
+Also declare advertising data from the Google Mobile Ads SDK. Used for third-party advertising. Device ID (IDFA) is used for tracking when the user allows App Tracking Transparency:
+
+- Device ID
+- Advertising Data
+- Product Interaction (ad views and taps)
+- Coarse Location (inferred by the ads SDK; the app does not ask for location permission)
+- Performance Data, Crash Data, and Other Diagnostic Data
+
 Do **not** declare credential document uploads. The app does not upload license, DEA, or malpractice files.
 
-Do **not** claim tracking. There is no ad SDK and no analytics SDK. Face ID is used to unlock the app and stays on the device (`NSFaceIDUsageDescription` stays). `PrivacyInfo.xcprivacy` declares UserDefaults (CA92.1) only.
+The app does use the Google Mobile Ads SDK and shows the tracking prompt (`NSUserTrackingUsageDescription`). Face ID is still only used to unlock the app (`NSFaceIDUsageDescription`). `PrivacyInfo.xcprivacy` declares the rows above, plus UserDefaults (CA92.1). The checked-in AdMob app ID is Google’s test ID until the real app under publisher `ca-app-pub-8874506793712009` is created.
 
 ## Age rating
 

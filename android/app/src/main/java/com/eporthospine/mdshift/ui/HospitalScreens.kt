@@ -156,6 +156,7 @@ private fun HospitalHome(
         TextButton(onClick = { onOpen("billing") }) { Text("Billing") }
         TextButton(onClick = { onOpen("policy") }) { Text("Policy") }
     }
+    AdBanner()
 }
 
 @Composable
@@ -257,6 +258,7 @@ private fun DoctorsTab(account: AccountState, onAutoApprove: (RosterDoctor, Bool
             }
         }
     }
+    AdBanner()
 }
 
 @Composable

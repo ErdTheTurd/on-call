@@ -14,6 +14,12 @@ val internalTesting: Boolean =
     (findProperty("mdshift.internal") as String?) == "true" ||
         System.getenv("MDSHIFT_INTERNAL") == "true"
 
+// TODO: Replace these Google test IDs with the AdMob app and banner unit
+// created under publisher ca-app-pub-8874506793712009 before a store build.
+val admobAppId = "ca-app-pub-3940256099942544~3347511713"
+val admobBannerAdUnitId = "ca-app-pub-3940256099942544/9214589741"
+val admobPublisherId = "ca-app-pub-8874506793712009"
+
 fun secret(name: String): String? =
     System.getenv(name)?.takeIf { it.isNotBlank() }
         ?: (findProperty(name) as String?)?.takeIf { it.isNotBlank() }
@@ -31,6 +37,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${googleWebClientId.replace("\"", "")}\"")
         buildConfigField("boolean", "INTERNAL_TESTING", internalTesting.toString())
+        buildConfigField("String", "ADMOB_APP_ID", "\"$admobAppId\"")
+        buildConfigField("String", "ADMOB_BANNER_AD_UNIT_ID", "\"$admobBannerAdUnitId\"")
+        buildConfigField("String", "ADMOB_PUBLISHER_ID", "\"$admobPublisherId\"")
+        manifestPlaceholders["admobAppId"] = admobAppId
     }
 
     signingConfigs {
@@ -112,6 +122,7 @@ dependencies {
     implementation(libs.androidx.credentials.play)
     implementation(libs.google.id)
     implementation(libs.androidx.browser)
+    implementation(libs.play.services.ads)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.content.negotiation)
