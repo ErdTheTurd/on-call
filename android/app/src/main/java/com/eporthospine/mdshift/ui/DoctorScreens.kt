@@ -175,6 +175,7 @@ private fun DoctorHome(
             Text("${utcDate(shift.startEpochMillis)} · ${shift.hospitalName} · ${money(EscalationCurve.currentRate(shift, now))}")
         }
     }
+    AdBanner()
 }
 
 @Composable

@@ -10,6 +10,8 @@ import com.eporthospine.mdshift.data.AppJson
 import com.eporthospine.mdshift.data.AuthCoordinator
 import com.eporthospine.mdshift.data.KtorSupabaseApi
 import com.eporthospine.mdshift.data.ShiftBoard
+import com.eporthospine.mdshift.ui.AdsConfig
+import com.google.android.gms.ads.MobileAds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +23,9 @@ class MdShiftApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (!AdsConfig.disabledInThisProcess()) {
+            MobileAds.initialize(this)
+        }
         val persistence = PrefsAccountPersistence(this)
         val book = AccountBook(persistence.read())
         val api = KtorSupabaseApi.create(AppConfig.SUPABASE_URL, AppConfig.SUPABASE_ANON_KEY)

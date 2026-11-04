@@ -9,7 +9,8 @@ final class PlusMembershipStore: ObservableObject {
     static let priceLabel = "$9.99/mo"
     static let tokenBonus = 2
 
-    /// Flip when ready to charge (~1 year after launch). Until then: no Plus CTAs, ad-free.
+    /// Flip when ready to charge. Until then Plus checkout stays hidden.
+    /// Banners still run; a paid Plus membership removes them once this is on.
     static let isMonetizationLive = false
 
     @Published private(set) var isActive = false
@@ -23,7 +24,11 @@ final class PlusMembershipStore: ObservableObject {
         if !Self.isMonetizationLive { isActive = true }
     }
 
-    var showsAds: Bool { Self.isMonetizationLive && !isActive }
+    /// Ads stay up for everyone until Plus billing is live and this account is subscribed.
+    var showsAds: Bool {
+        guard Self.isMonetizationLive else { return true }
+        return !isActive
+    }
 
     func clearLocal() {
         UserDefaults.standard.removeObject(forKey: defaultsKey)

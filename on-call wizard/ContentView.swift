@@ -817,8 +817,6 @@ struct DoctorHomeView: View {
                         }
                         .padding(.horizontal, 2)
 
-                        AdBannerView(placement: "doctor-home")
-
                         // Calendar
                         VStack(alignment: .leading, spacing: 0) {
                             HStack {
@@ -894,6 +892,7 @@ struct DoctorHomeView: View {
 
                         UpcomingShiftHighlights()
                         CredentialStatusCard(profile: profile)
+                        AdBannerView(placement: "doctor-home")
                     }
                     .padding()
                 }
@@ -4008,8 +4007,6 @@ struct CandidatesView: View {
                 BackgroundGradient()
                 ScrollView {
                     VStack(spacing: 14) {
-                        AdBannerView(placement: "doctors")
-
                         VStack(alignment: .leading, spacing: 10) {
                             Toggle("Auto-approved only", isOn: $showAutoOnly.animation()).font(Brand.brandFont)
                             Divider()
@@ -4038,6 +4035,7 @@ struct CandidatesView: View {
                             }
                             .cardStyle()
                         }
+                        AdBannerView(placement: "doctors")
                     }
                     .padding()
                 }

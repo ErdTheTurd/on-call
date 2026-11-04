@@ -132,7 +132,7 @@ Sign in with email and password. Do not use Explore on a release build. A finish
 
 ## Google Play Data safety
 
-Match the iOS privacy label. No analytics or advertising SDK is linked.
+Match the iOS privacy label. The app links the Google Mobile Ads SDK and shows a banner on the doctor home, hospital home, and doctors list. The manifest app ID is Google’s test ID until the real AdMob app under publisher `ca-app-pub-8874506793712009` exists.
 
 | Data | Collected | Shared | Purpose | Linked to user |
 |--|--|--|--|--|
@@ -140,5 +140,9 @@ Match the iOS privacy label. No analytics or advertising SDK is linked.
 | Email address | Yes | No | App functionality | Yes |
 | User ID | Yes | No | App functionality | Yes |
 | Other info: NPI, license, DEA, shifts, rates, trade notes the user enters | Yes | No | App functionality | Yes |
+| Advertising ID | Yes | Yes, with Google | Advertising | Yes |
+| App interactions with ads | Yes | Yes, with Google | Advertising | Yes |
+| Approximate location (inferred from IP by the ads SDK) | Yes | Yes, with Google | Advertising | Yes |
+| Crash and performance diagnostics from the ads SDK | Yes | Yes, with Google | Advertising / analytics | No |
 
-Not collected: location, contacts, photos, financial info beyond rates the user types, health info, crash logs, advertising ID. Data is not used for tracking. Account deletion is requested by email, as on iOS; see https://mdshift.net/privacypolicy/.
+Not collected by MD Shift itself: precise GPS, contacts, photos, financial info beyond rates the user types, health info. The ads SDK can use the advertising ID for tracking. Account deletion is requested by email, as on iOS; see https://mdshift.net/privacypolicy/.
