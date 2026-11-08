@@ -38,11 +38,10 @@ Entry points: **Dashboard → Get MD Shift+** (doctor + hospital, web + iOS).
 
 ### 2. Real ads (non-Plus)
 
-- **Web:** clickable sponsor units (LocumTenens, MedMal Direct, Doximity, CME List). When `adsenseClient` + `adsenseBannerSlot` are set, Google AdSense loads instead.
-- **iOS:** `WKWebView` loads `https://mdshift.net/ads/banner.html` (same AdSense / sponsor page).
-- Hidden automatically when MD Shift+ is active.
-
-Paste AdSense IDs into `docs/assets/js/config.js` when the publisher account is approved.
+- **iOS and Android:** a short Google Mobile Ads banner at the bottom of the doctor home, hospital home, and doctors list. Sign-in, onboarding, and shift-trade / confirm screens do not carry a banner. The checked-in IDs are Google’s test app and banner units. Replace them with the AdMob app and banner unit for publisher `ca-app-pub-8874506793712009` before a store build (see the TODO next to `GADApplicationIdentifier` and in `android/app/build.gradle.kts`).
+- **iOS** asks for App Tracking Transparency before the first ad request, and `Config/PrivacyInfo.xcprivacy` declares advertising data.
+- **Web:** no visible ad slots yet. `docs/ads.txt` authorizes `pub-8874506793712009`. The in-app sponsor / AdSense markup stays in the website code and stays hidden while `monetizationLive` is false.
+- Banners hide for an active MD Shift+ membership once `isMonetizationLive` is turned on. Until then, native banners still show.
 
 ### 3. Hospital department SaaS (primary ARR)
 

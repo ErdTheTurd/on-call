@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070B17" />
   <title>Privacy Policy — MD Shift</title>
-  <meta name="description" content="Privacy Policy for MD Shift — how we collect, use, and protect account and scheduling data for doctors and hospitals." />
+  <meta name="description" content="Privacy Policy for MD Shift — how we collect, use, and protect account, scheduling, and advertising data for doctors and hospitals." />
   <link rel="canonical" href="https://mdshift.net/privacypolicy/" />
   <meta property="og:title" content="Privacy Policy — MD Shift" />
   <meta property="og:url" content="https://mdshift.net/privacypolicy/" />
@@ -35,12 +35,12 @@
     <main class="legal-main">
       <p class="legal-eyebrow">Legal</p>
       <h1>Privacy Policy</h1>
-      <p class="legal-meta">Effective date: September 29, 2026 · Last updated: September 29, 2026</p>
+      <p class="legal-meta">Effective date: September 29, 2026 · Last updated: November 4, 2026</p>
 
       <p>
         MD Shift (“<strong>MD Shift</strong>,” “<strong>we</strong>,” “<strong>us</strong>,” or “<strong>our</strong>”)
         provides shift trading and on-call coverage tools for doctors and hospitals through our website
-        at <a href="https://mdshift.net">mdshift.net</a> and our iOS app (together, the “<strong>Service</strong>”).
+        at <a href="https://mdshift.net">mdshift.net</a> and our iOS and Android apps (together, the “<strong>Service</strong>”).
         This Privacy Policy explains what information we collect, how we use it, and the choices you have.
       </p>
       <p>
@@ -96,11 +96,32 @@
         <li>Basic device and browser information typical of secure web and app access (for example IP address in server logs)</li>
       </ul>
 
+      <h3>Advertising</h3>
+      <p>
+        The iOS and Android apps show a small banner advertisement from Google (AdMob / Google Mobile Ads) on main list screens such as the doctor home, the hospital home, and the doctor roster.
+        We do not place ads on the sign-in screen or on shift-trading and confirmation screens.
+        The website at mdshift.net does not currently show ad units. We publish an <a href="/ads.txt">ads.txt</a> file so advertising systems can confirm that Google is allowed to sell ads for publisher <code>ca-app-pub-8874506793712009</code>.
+      </p>
+      <p>When an ad loads, Google may collect and use:</p>
+      <ul>
+        <li>Advertising identifiers — the iOS Identifier for Advertisers (IDFA), if you allow tracking, and the Android advertising ID</li>
+        <li>Advertising data, such as which ad was shown and whether it was viewed or tapped</li>
+        <li>Product interaction with the ad itself</li>
+        <li>Device and diagnostic information, including IP address, coarse location inferred from that address, crash data, and performance data</li>
+      </ul>
+      <p>
+        On iOS, the app asks for App Tracking Transparency permission before the first ad loads. If you decline, the app still works and ads can be less personalized.
+        Google uses this information to deliver, measure, and limit ads, including across other apps and sites that use Google advertising, which is a form of tracking when an advertising identifier is allowed.
+        See <a href="https://policies.google.com/privacy">Google’s Privacy Policy</a> and <a href="https://policies.google.com/technologies/ads">How Google uses information from sites or apps that use its services</a>.
+      </p>
+      <p>
+        A paid MD Shift+ membership, when that plan is offered, removes these banners. We do not sell your account or scheduling information.
+      </p>
+
       <p>We do <strong>not</strong> collect, for App Privacy purposes:</p>
       <ul>
-        <li>Precise or coarse location</li>
+        <li>Precise GPS location (the apps do not ask for location permission; ad serving may still infer a coarse location from IP address)</li>
         <li>Phone contacts / address book</li>
-        <li>Advertising identifiers (IDFA) or advertising tracking profiles</li>
         <li>HealthKit or clinical health-record data</li>
         <li>Payment card numbers in the app (paid features, if enabled later, would use a payment provider)</li>
       </ul>
@@ -116,11 +137,12 @@
         <li>Send transactional email such as sign-up and email-change verification codes</li>
         <li>Respond to support requests you send us</li>
         <li>Improve reliability and fix issues</li>
+        <li>Show and measure advertisements in the iOS and Android apps</li>
         <li>Comply with law and protect against abuse or fraud</li>
       </ul>
       <p>
         We do <strong>not</strong> sell your personal information.
-        We do not use advertising or analytics SDKs today, and we do not use your data for cross-app tracking.
+        Account and scheduling data are used to run the Service. Advertising identifiers and ad interactions are used for advertising, as described above, and can be used for tracking when you allow the advertising identifier.
       </p>
 
       <h2>4. How we share information</h2>
@@ -131,7 +153,7 @@
           <ul>
             <li><strong>Supabase</strong> — account hosting, authentication, and the database</li>
             <li><strong>Resend</strong> — sign-in and email-change messages (6-digit codes)</li>
-            <li><strong>Apple and Google</strong> — only if you choose those sign-in options</li>
+            <li><strong>Apple and Google</strong> — if you choose those sign-in options. Google also receives the advertising data described above when the iOS or Android app requests an ad, through the Google Mobile Ads SDK.</li>
             <li><strong>Stripe</strong> — only if paid plans are turned on later. We would not store card numbers in the app. Paid plans are not on today.</li>
             <li><strong>esm.sh</strong> — the website loads its database library from this content network. That request can include your IP address and browser type. Your account data is sent to Supabase, not stored in that library file.</li>
             <li><strong>CMS NPI Registry</strong> — the NPI number you ask us to look up, as described above</li>
@@ -163,6 +185,9 @@
         <li>Enable or disable optional MFA where available</li>
         <li>Request account deletion or a copy of your data by contacting us</li>
         <li>Leave Explore at any time (sample data remains local)</li>
+        <li>On iPhone, turn off tracking for MD Shift in Settings → Privacy &amp; Security → Tracking</li>
+        <li>On Android, reset or delete your advertising ID in Settings → Privacy → Ads (wording varies by device)</li>
+        <li>Limit Google’s ad personalization at <a href="https://adssettings.google.com/">adssettings.google.com</a></li>
       </ul>
       <p>
         Depending on where you live, you may have additional rights under applicable privacy laws
@@ -173,6 +198,7 @@
       <p>
         MD Shift is designed for licensed clinicians and healthcare organizations. It is not directed to children under 13
         (or the age required by local law), and we do not knowingly collect personal information from children.
+        Ads in the apps are not child-directed.
       </p>
 
       <h2>9. International users</h2>
